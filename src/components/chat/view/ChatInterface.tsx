@@ -44,6 +44,12 @@ function ChatInterface({
   const sessionStore = useSessionStore();
   const streamTimerRef = useRef<number | null>(null);
   const accumulatedStreamRef = useRef('');
+  // Mirrors streamTimerRef/accumulatedStreamRef for the live thinking block —
+  // a separate accumulator because thinking and reply text are independent
+  // live rows within one turn (see useChatRealtimeHandlers' flushThinking).
+  const thinkingStreamTimerRef = useRef<number | null>(null);
+  const accumulatedThinkingRef = useRef('');
+  const thinkingStartedAtRef = useRef<number | null>(null);
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
@@ -58,6 +64,12 @@ function ChatInterface({
       streamTimerRef.current = null;
     }
     accumulatedStreamRef.current = '';
+    if (thinkingStreamTimerRef.current) {
+      clearTimeout(thinkingStreamTimerRef.current);
+      thinkingStreamTimerRef.current = null;
+    }
+    accumulatedThinkingRef.current = '';
+    thinkingStartedAtRef.current = null;
   }, []);
 
   const {
@@ -250,6 +262,9 @@ function ChatInterface({
     setPendingPermissionRequests,
     streamTimerRef,
     accumulatedStreamRef,
+    thinkingStreamTimerRef,
+    accumulatedThinkingRef,
+    thinkingStartedAtRef,
     lastSeqRef,
     statusCheckSentAtRef,
     onSessionProcessing,

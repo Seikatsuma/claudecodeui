@@ -313,8 +313,18 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 </div>
               </div>
             ) : message.isThinking ? (
-              /* Thinking messages — Reasoning component (ai-elements pattern) */
-              <Reasoning defaultOpen={false}>
+              /*
+               * Thinking messages — Reasoning component (ai-elements pattern).
+               * No explicit `defaultOpen`: Reasoning derives it from
+               * `isStreaming` at mount, so a live block (isStreaming=true from
+               * its first delta) opens immediately and a historical block
+               * loaded from disk (isStreaming never true) stays collapsed —
+               * same as before this prop existed here.
+               */
+              <Reasoning
+                isStreaming={Boolean(message.isStreaming)}
+                duration={typeof message.thinkingDurationSeconds === 'number' ? message.thinkingDurationSeconds : undefined}
+              >
                 <ReasoningTrigger />
                 <ReasoningContent>
                   <Markdown className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert">

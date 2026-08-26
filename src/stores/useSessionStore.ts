@@ -31,6 +31,7 @@ export type MessageKind =
   | 'tool_use'
   | 'tool_result'
   | 'thinking'
+  | 'thinking_delta'
   | 'stream_delta'
   | 'stream_end'
   | 'error'
@@ -94,6 +95,14 @@ export interface NormalizedMessage {
   parentToolUseId?: string;
   subagentTools?: unknown[];
   isFinal?: boolean;
+  /**
+   * Measured seconds a live thinking block streamed for, set once by
+   * `finalizeThinkingStreaming` when the block closes. Lets the Reasoning
+   * header show an accurate "Thought for Ns" without relying on the
+   * component's own mount lifetime (the streaming row's id changes at
+   * finalize time, so an internally-tracked timer would reset).
+   */
+  thinkingDurationSeconds?: number;
   // Cursor-specific ordering
   sequence?: number;
   rowid?: number;
@@ -274,13 +283,20 @@ function findServerTurnRangeByOrdinal(
   return { start, end };
 }
 
-function isAssistantTextEchoedInSameTurnOnServer(
+/**
+ * Shared body for `isAssistantTextEchoedInSameTurnOnServer` and
+ * `isThinkingEchoedInSameTurnOnServer`: locate the same conversational turn
+ * on the persisted server transcript and check whether it already carries a
+ * row the given `matches` predicate accepts with identical trimmed content.
+ */
+function isContentEchoedInSameTurnOnServer(
   message: NormalizedMessage,
   serverMessages: NormalizedMessage[],
   realtimeMessages: NormalizedMessage[],
+  matches: (serverMessage: NormalizedMessage) => boolean,
 ): boolean {
-  const assistantText = (message.content || '').trim();
-  if (!assistantText) {
+  const content = (message.content || '').trim();
+  if (!content) {
     return false;
   }
 
@@ -292,11 +308,37 @@ function isAssistantTextEchoedInSameTurnOnServer(
 
   return serverMessages
     .slice(turnRange.start + 1, turnRange.end)
-    .some((serverMessage) =>
-      serverMessage.kind === 'text'
-      && serverMessage.role === 'assistant'
-      && (serverMessage.content || '').trim() === assistantText,
-    );
+    .some((serverMessage) => matches(serverMessage) && (serverMessage.content || '').trim() === content);
+}
+
+function isAssistantTextEchoedInSameTurnOnServer(
+  message: NormalizedMessage,
+  serverMessages: NormalizedMessage[],
+  realtimeMessages: NormalizedMessage[],
+): boolean {
+  return isContentEchoedInSameTurnOnServer(
+    message,
+    serverMessages,
+    realtimeMessages,
+    (serverMessage) => serverMessage.kind === 'text' && serverMessage.role === 'assistant',
+  );
+}
+
+/**
+ * Same idea as `isAssistantTextEchoedInSameTurnOnServer`, for a live thinking
+ * block instead of the reply text. Persisted `thinking` rows carry no `role`.
+ */
+function isThinkingEchoedInSameTurnOnServer(
+  message: NormalizedMessage,
+  serverMessages: NormalizedMessage[],
+  realtimeMessages: NormalizedMessage[],
+): boolean {
+  return isContentEchoedInSameTurnOnServer(
+    message,
+    serverMessages,
+    realtimeMessages,
+    (serverMessage) => serverMessage.kind === 'thinking',
+  );
 }
 
 /**
@@ -319,12 +361,26 @@ function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedM
           continue;
         }
       }
+      if (prev.kind === 'thinking_delta' && m.kind === 'thinking') {
+        const ps = (prev.content || '').trim();
+        const ms = (m.content || '').trim();
+        if (ps.length > 0 && ps === ms) {
+          out[out.length - 1] = m;
+          continue;
+        }
+      }
       if (
         prev.kind === 'text'
         && m.kind === 'text'
         && prev.role === 'assistant'
         && m.role === 'assistant'
       ) {
+        const ms = (m.content || '').trim();
+        if (ms.length > 0 && ms === (prev.content || '').trim()) {
+          continue;
+        }
+      }
+      if (prev.kind === 'thinking' && m.kind === 'thinking') {
         const ms = (m.content || '').trim();
         if (ms.length > 0 && ms === (prev.content || '').trim()) {
           continue;
@@ -365,8 +421,22 @@ function pruneRealtimeSupersededByServer(
       return true;
     }
 
+    if (message.kind === 'thinking_delta' || message.id === `__thinking_${message.sessionId}`) {
+      if (isThinkingEchoedInSameTurnOnServer(message, serverMessages, realtimeMessages)) {
+        return false;
+      }
+      return true;
+    }
+
     if (message.kind === 'text' && message.role === 'assistant') {
       if (isAssistantTextEchoedInSameTurnOnServer(message, serverMessages, realtimeMessages)) {
+        return false;
+      }
+      return true;
+    }
+
+    if (message.kind === 'thinking') {
+      if (isThinkingEchoedInSameTurnOnServer(message, serverMessages, realtimeMessages)) {
         return false;
       }
       return true;
@@ -884,6 +954,60 @@ export function useSessionStore() {
   }, [notify]);
 
   /**
+   * Update or create a live thinking message (accumulated text so far).
+   * Mirrors `updateStreaming`, kept separate because a turn's thinking block
+   * and its reply text are independent live rows (thinking closes before the
+   * reply starts), each needing its own well-known id to update in place.
+   */
+  const updateThinkingStreaming = useCallback((sessionId: string, accumulatedText: string, msgProvider: LLMProvider) => {
+    const slot = getSlot(sessionId);
+    const streamId = `__thinking_${sessionId}`;
+    const msg: NormalizedMessage = {
+      id: streamId,
+      sessionId,
+      timestamp: new Date().toISOString(),
+      provider: msgProvider,
+      kind: 'thinking_delta',
+      content: accumulatedText,
+    };
+    const idx = slot.realtimeMessages.findIndex(m => m.id === streamId);
+    if (idx >= 0) {
+      slot.realtimeMessages = [...slot.realtimeMessages];
+      slot.realtimeMessages[idx] = msg;
+    } else {
+      slot.realtimeMessages = [...slot.realtimeMessages, msg];
+    }
+    recomputeMergedIfNeeded(slot);
+    notify(sessionId);
+  }, [getSlot, notify]);
+
+  /**
+   * Finalize a live thinking block: convert it to a regular `thinking`
+   * message with a unique id, same as `finalizeStreaming` does for text.
+   * `durationSeconds`, when known, is stamped on so the Reasoning header can
+   * show "Thought for Ns" without depending on the component's own mount
+   * lifetime (the id — and so the component instance — changes right here).
+   */
+  const finalizeThinkingStreaming = useCallback((sessionId: string, durationSeconds?: number) => {
+    const slot = storeRef.current.get(sessionId);
+    if (!slot) return;
+    const streamId = `__thinking_${sessionId}`;
+    const idx = slot.realtimeMessages.findIndex(m => m.id === streamId);
+    if (idx >= 0) {
+      const stream = slot.realtimeMessages[idx];
+      slot.realtimeMessages = [...slot.realtimeMessages];
+      slot.realtimeMessages[idx] = {
+        ...stream,
+        id: `thinking_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        kind: 'thinking',
+        ...(typeof durationSeconds === 'number' ? { thinkingDurationSeconds: durationSeconds } : {}),
+      };
+      recomputeMergedIfNeeded(slot);
+      notify(sessionId);
+    }
+  }, [notify]);
+
+  /**
    * Clear realtime messages for a session (e.g., after stream completes and server fetch catches up).
    */
   const clearRealtime = useCallback((sessionId: string) => {
@@ -922,6 +1046,8 @@ export function useSessionStore() {
     isStale,
     updateStreaming,
     finalizeStreaming,
+    updateThinkingStreaming,
+    finalizeThinkingStreaming,
     clearRealtime,
     getMessages,
     getSessionSlot,
@@ -929,6 +1055,7 @@ export function useSessionStore() {
     getSlot, has, fetchFromServer, fetchMore,
     appendRealtime, appendRealtimeBatch, refreshLatestFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming,
+    updateThinkingStreaming, finalizeThinkingStreaming,
     clearRealtime, getMessages, getSessionSlot,
   ]);
 }

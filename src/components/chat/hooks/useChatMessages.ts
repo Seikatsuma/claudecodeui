@@ -196,6 +196,30 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             content: msg.content,
             timestamp: msg.timestamp,
             isThinking: true,
+            id: msg.id,
+            thinkingDurationSeconds: typeof msg.thinkingDurationSeconds === 'number'
+              ? msg.thinkingDurationSeconds
+              : undefined,
+            ...sharedMetadata,
+          });
+        }
+        break;
+
+      // Live thinking block, still accumulating — same shape as 'thinking'
+      // plus isStreaming, so MessageComponent renders it with a live
+      // Reasoning header ("Thinking...") instead of a finished one. `id`
+      // stays the well-known `__thinking_<sessionId>` row for as long as this
+      // case applies, so the row keeps a stable list key while it updates in
+      // place chunk by chunk.
+      case 'thinking_delta':
+        if (msg.content) {
+          converted.push({
+            type: 'assistant',
+            content: msg.content,
+            timestamp: msg.timestamp,
+            isThinking: true,
+            isStreaming: true,
+            id: msg.id,
             ...sharedMetadata,
           });
         }
