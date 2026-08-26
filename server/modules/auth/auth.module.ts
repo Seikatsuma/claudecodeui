@@ -5,6 +5,7 @@ import { getConnection, userDb } from '@/modules/database/index.js';
 import { authenticateToken, generateToken } from './auth.middleware.js';
 import { createAuthRouter } from './auth.routes.js';
 import { createAuthService } from './auth.service.js';
+import { createLoginRateLimiter } from './login-rate-limiter.js';
 
 type BcryptAdapter = {
   hash(password: string, saltRounds: number): Promise<string>;
@@ -29,6 +30,7 @@ const authService = createAuthService({
     commit: () => databaseConnection.prepare('COMMIT').run(),
     rollback: () => databaseConnection.prepare('ROLLBACK').run(),
   },
+  rateLimiter: createLoginRateLimiter(),
   hashPassword: (password) => bcrypt.hash(password, 12),
   comparePassword: (password, passwordHash) => bcrypt.compare(password, passwordHash),
   generateToken,

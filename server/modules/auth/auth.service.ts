@@ -19,6 +19,13 @@ type AuthDependencies = {
     commit(): void;
     rollback(): void;
   };
+  // Brute-force guard for `login`, keyed by caller IP + username. Injected
+  // so the service stays unit-testable without a real clock/timer.
+  rateLimiter: {
+    getRetryAfterSeconds(ip: string, username: string): number;
+    recordFailure(ip: string, username: string): void;
+    reset(ip: string, username: string): void;
+  };
   hashPassword(password: string): Promise<string>;
   comparePassword(password: string, passwordHash: string): Promise<boolean>;
   generateToken(user: AuthUser): string;
@@ -97,7 +104,7 @@ export function createAuthService(dependencies: AuthDependencies) {
       }
     },
 
-    async login(usernameInput: unknown, passwordInput: unknown) {
+    async login(usernameInput: unknown, passwordInput: unknown, ip: string) {
       const username = typeof usernameInput === 'string' ? usernameInput : '';
       const password = typeof passwordInput === 'string' ? passwordInput : '';
       if (!username || !password) {
@@ -107,17 +114,30 @@ export function createAuthService(dependencies: AuthDependencies) {
         });
       }
 
+      // Checked before touching the DB/bcrypt so a locked-out caller cannot
+      // use the login endpoint to keep burning CPU on hash comparisons.
+      const retryAfterSeconds = dependencies.rateLimiter.getRetryAfterSeconds(ip, username);
+      if (retryAfterSeconds > 0) {
+        throw new AppError('Too many failed login attempts. Please try again later.', {
+          code: 'AUTH_RATE_LIMITED',
+          statusCode: 429,
+          details: { retryAfterSeconds },
+        });
+      }
+
       const user = dependencies.users.getUserByUsername(username);
       const validPassword = user
         ? await dependencies.comparePassword(password, user.password_hash)
         : false;
       if (!user || !validPassword) {
+        dependencies.rateLimiter.recordFailure(ip, username);
         throw new AppError('Invalid username or password', {
           code: 'AUTH_INVALID_CREDENTIALS',
           statusCode: 401,
         });
       }
 
+      dependencies.rateLimiter.reset(ip, username);
       dependencies.users.updateLastLogin(numericUserId(user.id));
       return {
         success: true,

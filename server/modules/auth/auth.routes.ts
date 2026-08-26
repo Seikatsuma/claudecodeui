@@ -1,6 +1,8 @@
 import express from 'express';
 import type { RequestHandler } from 'express';
 
+import { AppError } from '@/shared/utils.js';
+
 import type { createAuthService } from './auth.service.js';
 
 type AuthenticatedRequest = express.Request & { user?: unknown };
@@ -35,8 +37,17 @@ export function createAuthRouter(
   router.post('/login', async (req, res, next) => {
     try {
       const body = req.body as { username?: unknown; password?: unknown };
-      res.json(await service.login(body.username, body.password));
+      // req.ip falls back to the socket address when no trust proxy is
+      // configured, which matches this deployment (no reverse proxy yet).
+      const ip = req.ip ?? 'unknown';
+      res.json(await service.login(body.username, body.password, ip));
     } catch (error) {
+      if (error instanceof AppError && error.code === 'AUTH_RATE_LIMITED') {
+        const details = error.details as { retryAfterSeconds?: number } | undefined;
+        if (details?.retryAfterSeconds) {
+          res.setHeader('Retry-After', String(details.retryAfterSeconds));
+        }
+      }
       next(error);
     }
   });
