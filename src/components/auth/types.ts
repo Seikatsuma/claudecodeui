@@ -8,10 +8,21 @@ export type AuthUser = {
 
 export type AuthActionResult = { success: true } | { success: false; error: string };
 
+/**
+ * The server's global error middleware (`server/index.ts`) always responds
+ * with `{ success: false, error: { code, message, details } }` for every
+ * failure - including a wrong password, a rate-limited login, or a plain
+ * 500. `error` is never a bare string on the wire.
+ */
+export type ApiErrorDetail = {
+  code?: string;
+  message?: string;
+};
+
 export type AuthSessionPayload = {
   token?: string;
   user?: AuthUser;
-  error?: string;
+  error?: string | ApiErrorDetail;
   message?: string;
 };
 
@@ -28,7 +39,7 @@ export type OnboardingStatusPayload = {
 };
 
 export type ApiErrorPayload = {
-  error?: string;
+  error?: string | ApiErrorDetail;
   message?: string;
 };
 
