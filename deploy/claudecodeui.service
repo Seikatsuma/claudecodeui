@@ -1,0 +1,84 @@
+# systemd unit template for CloudCLI (claudecodeui) - self-hosted web UI for Claude Code.
+#
+# This is a TEMPLATE checked into the repo. It is not installed automatically.
+# To install it on this host (do this deliberately, not as part of a code deploy):
+#   sudo cp deploy/claudecodeui.service /etc/systemd/system/claudecodeui.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now claudecodeui
+#
+# Prerequisites before the first start (and after every code update, since this
+# unit runs the pre-built server rather than rebuilding on every restart -
+# rebuilding on every restart would repeat a ~1.5-2 minute CPU-heavy vite/tsc
+# build on every crash-loop restart, which is exactly the kind of load this
+# shared VPS cannot absorb):
+#   cd /home/claude/claudecodeui && npm ci && npm run build
+#
+# The app listens on 127.0.0.1 only (HOST below). Nothing outside this host can
+# reach it until a reverse proxy is deliberately put in front of it later.
+
+[Unit]
+Description=CloudCLI (claudecodeui) - self-hosted web UI for Claude Code
+After=network.target
+# Crash-loop protection lives here, not in [Service]: modern systemd reads
+# StartLimitIntervalSec/StartLimitBurst from [Unit] (older examples that put
+# them under [Service] are silently ignored - verified with
+# `systemd-analyze verify` against this exact file).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=claude
+Group=claude
+WorkingDirectory=/home/claude/claudecodeui
+
+# Runs the production build directly (node dist-server/server/index.js, i.e.
+# what `npm run server` runs) rather than through the npm wrapper: npm does not
+# forward SIGTERM to the child process it spawns, which would make
+# `systemctl stop`/`restart` hang until the graceful-shutdown timeout instead
+# of stopping immediately.
+ExecStart=/home/claude/.nvm/versions/node/v22.23.2/bin/node dist-server/server/index.js
+
+# NVM installs are versioned by directory; if the Node version managed by nvm
+# for this user changes, update the path above (and PATH below) to match.
+Environment=PATH=/home/claude/.nvm/versions/node/v22.23.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
+# Loopback-only: no reverse proxy is in front of this yet. HOST=127.0.0.1 binds
+# the literal IPv4 loopback address (see shared/networkHosts.js resolveBindHost
+# for why a literal IP matters here over the hostname 'localhost').
+Environment=HOST=127.0.0.1
+Environment=SERVER_PORT=3001
+# Any other configuration (VITE_CONTEXT_WINDOW, CONTEXT_WINDOW, a non-default
+# DATABASE_PATH, etc.) is picked up automatically from .env in
+# WorkingDirectory if present - the app loads it itself at startup
+# (server/load-env.ts), so it does not need to be duplicated here via
+# EnvironmentFile=. JWT_SECRET in particular should stay unset here: the app
+# generates and persists a random per-installation secret in the database on
+# first run when JWT_SECRET is not set (see appConfigDb.getOrCreateJwtSecret),
+# which is what we want in production - never hardcode a shared/example
+# secret from .env.example.
+
+# --- Crash-loop protection (this VPS runs several other unrelated bots on
+# 3.8GB RAM / 2 CPUs sharing this host; a runaway or crash-looping service
+# must not be able to take the others down). StartLimitBurst/IntervalSec are
+# declared in [Unit] above.
+Restart=on-failure
+RestartSec=10
+
+# --- Resource limits ---
+# Measured on this host: idle RSS ~130MB, ~140MB after light request traffic
+# (plain Express + better-sqlite3 + WebSocket server, no bundler/watcher at
+# runtime - that only happens at build time, not under this unit). MemoryMax
+# is set well above that baseline to leave headroom for an active chat
+# session (the Claude Agent SDK spawning its own subprocess, CodeMirror/file
+# operations, concurrent WebSocket connections), while still being a small
+# enough slice of the 3.8GB host (~12%) that this service cannot starve the
+# other bots even if it leaks or a session goes heavy. CPUQuota=70% (of one
+# core) is enough for Node's mostly-single-threaded workload (JSON parsing,
+# bcrypt hashing on login) without letting a busy session monopolize both
+# CPUs on a 2-CPU box.
+MemoryMax=450M
+CPUQuota=70%
+
+[Install]
+WantedBy=multi-user.target
