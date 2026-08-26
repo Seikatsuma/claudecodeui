@@ -111,12 +111,39 @@ export function useChatRealtimeHandlers({
       const activeViewSessionId = activeViewSessionIdRef.current;
       const sid = (typeof msg.sessionId === 'string' && msg.sessionId) || activeViewSessionId;
 
-      // Record replay progress for every sequenced live event.
+      // Every sequenced live event carries a monotonic per-run `seq`. Track
+      // the highest one seen per session so a reconnect's `chat.subscribe`
+      // replays only what this client actually missed — and, just as
+      // importantly, DROP a message whose `seq` this client has already
+      // applied instead of only recording progress and falling through.
+      //
+      // Two independent effects can each send `chat.subscribe` around one
+      // reconnect (ChatInterface's `handleWebSocketReconnect`, gated behind
+      // an awaited REST call, and useChatSessionState's `ws`-keyed subscribe
+      // effect, which fires synchronously as soon as the context's `ws`
+      // reference updates). If the second one reads `lastSeqRef` before the
+      // first has caught the client up, the server's `chat.subscribe` reply
+      // (chat-websocket.service.ts `handleChatSubscribe`) replays a block
+      // that is already in flight to the same socket via the run's normal
+      // live broadcast — the same `stream_delta`/`thinking_delta` run then
+      // arrives twice. Without this guard each duplicate re-runs
+      // `accumulatedStreamRef.current += text` / `accumulatedThinkingRef.
+      // current += text`, splicing a repeated fragment into the middle of
+      // the live buffer (observed live: "I'll look at the file first."
+      // replayed from partway through corrupted the buffer into "I'll
+      // look'll look at the file first."), which then gets persisted as-is
+      // by `finalizeStreaming`/`finalizeThinkingStreaming` — a bug no
+      // content-based dedup in useSessionStore can catch, because the
+      // corruption happens before the row is ever finalized. Rejecting an
+      // already-seen `seq` up front makes every sequenced kind (not just
+      // deltas) idempotent under duplicate delivery, matching the server's
+      // own "unique monotonic seq" contract.
       if (sid && typeof msg.seq === 'number') {
         const known = lastSeqRef.current.get(sid) ?? 0;
-        if (msg.seq > known) {
-          lastSeqRef.current.set(sid, msg.seq);
+        if (msg.seq <= known) {
+          return;
         }
+        lastSeqRef.current.set(sid, msg.seq);
       }
 
       switch (msg.kind) {
