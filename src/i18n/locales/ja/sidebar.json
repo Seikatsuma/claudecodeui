@@ -61,6 +61,7 @@
   "actions": {
     "refresh": "更新",
     "settings": "設定",
+    "logout": "ログアウト",
     "collapseAll": "すべて折りたたむ",
     "expandAll": "すべて展開",
     "cancel": "キャンセル",

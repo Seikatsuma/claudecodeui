@@ -62,6 +62,7 @@
   "actions": {
     "refresh": "Yenile",
     "settings": "Ayarlar",
+    "logout": "Çıkış Yap",
     "collapseAll": "Tümünü Daralt",
     "expandAll": "Tümünü Genişlet",
     "cancel": "İptal",

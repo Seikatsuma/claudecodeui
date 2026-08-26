@@ -62,6 +62,7 @@
   "actions": {
     "refresh": "Aggiorna",
     "settings": "Impostazioni",
+    "logout": "Disconnetti",
     "collapseAll": "Comprimi tutto",
     "expandAll": "Espandi tutto",
     "cancel": "Annulla",

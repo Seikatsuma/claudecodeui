@@ -62,6 +62,7 @@
   "actions": {
     "refresh": "Обновить",
     "settings": "Настройки",
+    "logout": "Выйти",
     "collapseAll": "Свернуть все",
     "expandAll": "Развернуть все",
     "cancel": "Отмена",
