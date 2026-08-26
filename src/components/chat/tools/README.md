@@ -16,8 +16,9 @@ tools/
 │   ├── OneLineDisplay.tsx          # Compact one-line tool display
 │   ├── CollapsibleDisplay.tsx      # Expandable tool display (uses children pattern)
 │   ├── CollapsibleSection.tsx      # <details>/<summary> wrapper
+│   ├── ToolDiffViewer.tsx          # Split (old|new) diff viewer, collapses large diffs
+│   ├── CodeMirrorMergeView.tsx     # @codemirror/merge MergeView wrapper used by ToolDiffViewer
 │   ├── ContentRenderers/
-│   │   ├── ToolDiffViewer.tsx          # File diff viewer (memoized)
 │   │   ├── MarkdownContent.tsx     # Markdown renderer
 │   │   ├── FileListContent.tsx     # Comma-separated clickable file list
 │   │   ├── TodoListContent.tsx     # Todo items with status badges
@@ -105,7 +106,7 @@ Specialized components for different content types, rendered as children of `Col
 
 | contentType | Component | Used by |
 |---|---|---|
-| `diff` | `DiffViewer` | Edit, Write, ApplyPatch |
+| `diff` | `ToolDiffViewer` | Edit, Write, ApplyPatch |
 | `markdown` | `MarkdownContent` | ExitPlanMode |
 | `file-list` | `FileListContent` | Grep/Glob results |
 | `todo-list` | `TodoListContent` | TodoWrite, TodoRead |
@@ -217,7 +218,7 @@ interface ToolDisplayConfig {
 
 - **ToolRenderer** is wrapped with `React.memo` — skips re-render when props haven't changed
 - **parsedData** is memoized with `useMemo` — JSON parsing only runs when input changes
-- **ToolDiffViewer** memoizes `createDiff()` — expensive diff computation cached
+- **ToolDiffViewer** renders via a single `@codemirror/merge` `MergeView` (split old|new, VS Code style) instead of a hand-rolled line diff — CodeMirror does its own incremental diffing, and the component only recreates the view when `oldContent`/`newContent`/`filePath`/theme actually change
 - **MessageComponent** caches `localStorage` reads and timestamp formatting via `useMemo`
 - Tool results route through `ToolRenderer` (no duplicate rendering paths)
 - `CollapsibleDisplay` uses children pattern (no wasteful contentProps indirection)
