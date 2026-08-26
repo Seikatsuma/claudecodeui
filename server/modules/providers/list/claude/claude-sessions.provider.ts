@@ -309,11 +309,46 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       return [];
     }
 
-    if (raw.type === 'content_block_delta' && raw.delta?.text) {
-      return [createNormalizedMessage({ kind: 'stream_delta', content: raw.delta.text, sessionId, provider: PROVIDER })];
-    }
-    if (raw.type === 'content_block_stop') {
-      return [createNormalizedMessage({ kind: 'stream_end', sessionId, provider: PROVIDER })];
+    /**
+     * Live partial-message frames (`options.includePartialMessages: true` on
+     * the SDK query) arrive as `SDKPartialAssistantMessage`:
+     * `{ type: 'stream_event', event: <raw Anthropic Messages stream event> }`.
+     * Unwrap that envelope here so the block below only ever deals with the
+     * bare event shape. A bare event is also accepted directly so any future
+     * caller that already unwrapped it upstream keeps working.
+     */
+    const streamEvent = raw.type === 'stream_event' && raw.event && typeof raw.event === 'object'
+      ? (raw.event as AnyRecord)
+      : (raw.type === 'content_block_delta' || raw.type === 'content_block_stop' ? raw : null);
+
+    if (streamEvent) {
+      if (streamEvent.type === 'content_block_delta') {
+        const delta = streamEvent.delta as AnyRecord | undefined;
+        // Extended-thinking text streams in on its own delta type, separate
+        // from the assistant's answer text, so the UI can render a live
+        // thinking accordion independently of the reply.
+        if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+          return [createNormalizedMessage({ kind: 'thinking_delta', content: delta.thinking, sessionId, provider: PROVIDER })];
+        }
+        if (typeof delta?.text === 'string') {
+          return [createNormalizedMessage({ kind: 'stream_delta', content: delta.text, sessionId, provider: PROVIDER })];
+        }
+        // input_json_delta (tool input), signature_delta, citations_delta:
+        // nothing the chat UI streams live today.
+        return [];
+      }
+      if (streamEvent.type === 'content_block_stop') {
+        // One generic terminal signal, regardless of which kind of block just
+        // closed. Anthropic streams content blocks strictly sequentially
+        // within a turn (thinking, then text, then a tool call, ...), so at
+        // most one of the frontend's text/thinking accumulators holds
+        // unflushed content whenever this fires — it flushes both and only
+        // the one that was actually live does anything.
+        return [createNormalizedMessage({ kind: 'stream_end', sessionId, provider: PROVIDER })];
+      }
+      // message_start / message_delta / message_stop / content_block_start:
+      // nothing the chat UI needs live today.
+      return [];
     }
 
     const messages: NormalizedMessage[] = [];

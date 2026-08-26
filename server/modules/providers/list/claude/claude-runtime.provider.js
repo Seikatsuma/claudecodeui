@@ -251,6 +251,13 @@ function mapCliOptionsToSDK(options = {}) {
 
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
+  // Emit SDKPartialAssistantMessage (`stream_event`) frames as the model
+  // writes, instead of only the finished per-block message. This is what
+  // lets the frontend show thinking (and assistant text) live, chunk by
+  // chunk, rather than as one block dropped in after the fact. Without it
+  // the SDK/CLI only reports whole content blocks once they close.
+  sdkOptions.includePartialMessages = true;
+
   // The SDK resumes with the provider-native session id, never the app id.
   if (providerSessionId) {
     sdkOptions.resume = providerSessionId;
