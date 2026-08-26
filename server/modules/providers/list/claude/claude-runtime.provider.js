@@ -251,6 +251,28 @@ function mapCliOptionsToSDK(options = {}) {
 
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
+  // Turn on extended thinking. Without this the CLI subprocess is never told
+  // to think at all: `thinking_delta` stream events still fire on schedule
+  // (the partial-message plumbing is unconditional), but `delta.thinking` is
+  // always empty because the model was never asked to produce any reasoning.
+  // 'adaptive' lets Claude itself decide when/how much to think (the `effort`
+  // option above then guides depth); the CLI falls back appropriately for
+  // models that don't support adaptive thinking.
+  //
+  // `display: 'summarized'` is not cosmetic — it is load-bearing. Verified by
+  // spawning the CLI with `spawnClaudeCodeProcess` and inspecting the actual
+  // argv plus the raw `content_block_delta`/`thinking_delta` events for both
+  // settings: with `thinking: { type: 'adaptive' }` alone, the CLI receives
+  // `--thinking adaptive` (no `--thinking-display`), the model visibly spends
+  // thinking tokens (`usage.output_tokens_details.thinking_tokens` > 0,
+  // `content_block_start` for a `thinking` block fires), but every
+  // `thinking_delta.thinking` frame is `""` — only an opaque `signature` blob
+  // streams (the SDK/CLI default is redacted/omitted thinking output, not
+  // "no thinking"). Only adding `display: 'summarized'` (-> CLI flag
+  // `--thinking-display summarized`) makes the model stream actual readable
+  // thinking text through `thinking_delta.thinking`.
+  sdkOptions.thinking = { type: 'adaptive', display: 'summarized' };
+
   // Emit SDKPartialAssistantMessage (`stream_event`) frames as the model
   // writes, instead of only the finished per-block message. This is what
   // lets the frontend show thinking (and assistant text) live, chunk by
