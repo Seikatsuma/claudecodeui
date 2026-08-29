@@ -68,7 +68,7 @@ Environment=SERVER_PORT=3001
 # invisible.
 #   Environment=CLAUDE_CONFIG_DIR=/home/claude/.claude-account2
 #   Environment=DATABASE_PATH=/home/claude/.cloudcli-account2/auth.db
-#   Environment=ACCOUNT_LABEL=Account 2
+#   Environment=ACCOUNT_LABEL="Account 2"
 #   Environment=SWITCH_ACCOUNT_URL=/sun-cc/
 
 # --- Crash-loop protection (this VPS runs several other unrelated bots on
