@@ -265,8 +265,17 @@ export default function ChatComposer({
       ? t('input.stop')
       : t('input.send');
 
+  // Bottom padding adds the device's safe-area inset to each breakpoint's
+  // base value (0.5rem/1rem/1.5rem, same scale as the old pb-2/sm:pb-4/
+  // md:pb-6) rather than replacing it: on an iPhone with a home indicator
+  // this sits inside a `fixed inset-0` container (see AppContent.tsx) that
+  // already extends under that gesture bar (index.html sets
+  // viewport-fit=cover), so the flat Tailwind padding alone left the send
+  // button/toolbar overlapping or flush against the screen edge instead of
+  // clear of it - the same pattern already used for the sidebar footer and
+  // settings panel (pb-safe-area-inset-bottom) was missing here.
   return (
-    <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-2 pt-0 sm:px-4 sm:pb-4 md:px-4 md:pb-6">
+    <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] pt-0 sm:px-4 sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px))] md:px-4 md:pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
       {!hasPendingPermissions && (
         <div className="pointer-events-none absolute bottom-full left-1/2 z-10 w-[calc(100%-1rem)] max-w-[54.25rem] -translate-x-1/2 translate-y-px bg-transparent sm:w-[calc(100%-2rem)]">
           <ActivityIndicator activity={activity} onAbort={onAbortSession} isInputFocused={isInputFocused} />
