@@ -18,6 +18,37 @@ type ParsedSession = {
   sessionName?: string;
 };
 
+// The `claude` CLI's own terminal readline collapses a large paste into a
+// placeholder - "[Pasted text #1 +11 lines]", or "[Image #1]" for a pasted
+// image - before it ever reaches the model. That placeholder (not the real
+// pasted content) is what lands in history.jsonl's `display` field, which is
+// exactly what `nameMap` below is built from. Verified against the CLI's own
+// on-disk history.jsonl: a message that is *only* a paste has `display`
+// equal to the placeholder alone, while the actual session transcript's
+// first user message holds the real, full text - the placeholder never
+// reaches the transcript, only this history sidecar file. Using it verbatim
+// as a session title produced sidebar rows literally titled "[Pasted text
+// #1]", meaningless to anyone reading the list.
+const PASTE_PLACEHOLDER_PATTERN = /\[(?:Pasted (?:text|image)|Image) #\d+(?: \+\d+ lines)?\]/g;
+
+/**
+ * Strips CLI paste/image placeholders out of a candidate session title.
+ *
+ * When the user typed something alongside the paste ("summarize this:
+ * [Pasted text #1]"), the surrounding text is still a fine title and is
+ * returned trimmed. When the message was nothing but placeholder(s) - a bare
+ * paste, or several concatenated back to back - nothing meaningful is left,
+ * so this returns `undefined` and callers should fall back the same way they
+ * do for a missing/empty title (AI-generated title, then the default name).
+ */
+function stripPastePlaceholders(candidate: string): string | undefined {
+  const stripped = candidate
+    .replace(PASTE_PLACEHOLDER_PATTERN, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped || undefined;
+}
+
 /**
  * Session indexer for Claude transcript artifacts.
  */
@@ -143,16 +174,32 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
       ?? sessionsDb.getSessionById(parsed.sessionId);
     const existingSessionName = existingSession?.custom_name;
-    if (existingSessionName && existingSessionName !== 'Untitled Claude Session') {
+    // A previously-synced row can itself hold a stale paste-placeholder title
+    // from before this fix. Only treat an existing name as "already good"
+    // (and thus frozen against re-derivation, so a real user rename is never
+    // clobbered) once it survives the same placeholder stripping applied
+    // below - otherwise fall through and re-derive it like a fresh session.
+    const sanitizedExistingName = existingSessionName
+      ? stripPastePlaceholders(existingSessionName)
+      : undefined;
+    if (sanitizedExistingName && existingSessionName !== 'Untitled Claude Session') {
       return {
         ...parsed,
-        sessionName: normalizeSessionName(existingSessionName, 'Untitled Claude Session'),
+        sessionName: normalizeSessionName(sanitizedExistingName, 'Untitled Claude Session'),
       };
     }
 
     let sessionName = nameMap.get(parsed.sessionId);
+    if (sessionName) {
+      sessionName = stripPastePlaceholders(sessionName);
+    }
     if (!sessionName) {
-      sessionName = await this.extractSessionAiTitleFromEnd(filePath, parsed.sessionId);
+      // `lastPrompt` events carry the same kind of CLI-inserted noise, e.g.
+      // a hook appending "[Image #1]🖼 Фото сохранено:" - confirmed on disk
+      // alongside the history.jsonl case above, so the AI-derived fallback
+      // needs the same stripping rather than being assumed already clean.
+      const aiDerivedName = await this.extractSessionAiTitleFromEnd(filePath, parsed.sessionId);
+      sessionName = aiDerivedName ? stripPastePlaceholders(aiDerivedName) : undefined;
     }
 
     return {
