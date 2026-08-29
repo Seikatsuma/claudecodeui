@@ -64,10 +64,24 @@ type SessionDetails = {
 };
 
 const MAX_CLOUDCLI_SESSION_NAME_WORDS = 4;
+// Independent of the word cap above: `split(/\s+/)` on a message with no
+// whitespace at all (a bare URL, a base64/JSON blob, one long unbroken
+// token, ...) yields a single-element array, so `.slice(0, 4)` is a no-op
+// and the *entire* raw message became the session title — e.g. a full
+// pasted link rendering as the session name instead of something readable.
+// This caps the result by characters too, regardless of word count.
+const MAX_CLOUDCLI_SESSION_NAME_CHARS = 50;
 
 function buildCloudCliSessionName(initialMessage: string): string {
   const words = initialMessage.trim().split(/\s+/).filter(Boolean);
-  return words.slice(0, MAX_CLOUDCLI_SESSION_NAME_WORDS).join(' ') || 'Untitled Session';
+  const name = words.slice(0, MAX_CLOUDCLI_SESSION_NAME_WORDS).join(' ');
+  if (!name) {
+    return 'Untitled Session';
+  }
+  if (name.length <= MAX_CLOUDCLI_SESSION_NAME_CHARS) {
+    return name;
+  }
+  return `${name.slice(0, MAX_CLOUDCLI_SESSION_NAME_CHARS).trimEnd()}…`;
 }
 
 /**
