@@ -57,6 +57,19 @@ Environment=SERVER_PORT=3001
 # first run when JWT_SECRET is not set (see appConfigDb.getOrCreateJwtSecret),
 # which is what we want in production - never hardcode a shared/example
 # secret from .env.example.
+#
+# Running a second instance for a second Claude account on the same host:
+# copy this whole unit file under a new name, then override at least
+# SERVER_PORT, CLAUDE_CONFIG_DIR, and DATABASE_PATH so the two instances never
+# share a port, a Claude account's session data, or a user database. Set
+# ACCOUNT_LABEL (and optionally SWITCH_ACCOUNT_URL, pointing at the other
+# instance) on BOTH units so each shows a small badge + link back to the
+# other one in the sidebar - unset on a single-account install, this stays
+# invisible.
+#   Environment=CLAUDE_CONFIG_DIR=/home/claude/.claude-account2
+#   Environment=DATABASE_PATH=/home/claude/.cloudcli-account2/auth.db
+#   Environment=ACCOUNT_LABEL=Account 2
+#   Environment=SWITCH_ACCOUNT_URL=/sun-cc/
 
 # --- Crash-loop protection (this VPS runs several other unrelated bots on
 # 3.8GB RAM / 2 CPUs sharing this host; a runaway or crash-looping service
