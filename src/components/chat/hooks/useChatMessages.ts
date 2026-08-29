@@ -56,6 +56,39 @@ function parseTaskNotification(content: string): ParsedTaskNotification | null {
 }
 
 /**
+ * Per-source-message conversion cache, keyed by NormalizedMessage object
+ * identity. `MessageComponent` is wrapped in `memo()`, which only helps if
+ * unchanged messages keep the same `ChatMessage` object reference across
+ * renders — but this function used to rebuild every entry from scratch on
+ * every call. During streaming, `updateStreaming`/`updateThinkingStreaming`
+ * give the *whole* realtime array a new reference on every ~100ms batch (see
+ * useSessionStore.ts), so `normalizedToChatMessages` re-ran on every tick and
+ * handed every message — not just the one actually growing — a brand-new
+ * object, defeating `memo()` for the entire visible list and forcing every
+ * message's Markdown to re-parse in lockstep with the live one. That's O(N)
+ * wasted work per tick in a long conversation, which reads as jank/"freezing"
+ * exactly while a response is streaming in.
+ *
+ * Caching by the source message's own identity fixes this without touching
+ * list-reconciliation (the intrinsic-key logic in ChatMessagesPane.tsx stays
+ * as-is): a message whose NormalizedMessage reference didn't change gets the
+ * exact same ChatMessage object(s) back, so `memo()` skips it. `tool_use` and
+ * `tool_result` rows are the only kinds whose output depends on a *second*
+ * message (the paired tool result / a set-membership check across the whole
+ * list), so their cache entries also track that extra dependency and recompute
+ * when it changes — everything else is a pure function of the source message
+ * alone. A WeakMap means an entry disappears on its own once the source
+ * message is no longer held anywhere (e.g. pruned after a session switch).
+ */
+type ChatMessageConversionCacheEntry = {
+  trRef: NormalizedMessage['toolResult'] | NormalizedMessage | null | undefined;
+  toolUseExists: boolean;
+  output: ChatMessage[];
+};
+
+const conversionCache = new WeakMap<NormalizedMessage, ChatMessageConversionCacheEntry>();
+
+/**
  * Convert NormalizedMessage[] from the session store into ChatMessage[]
  * that the existing UI components expect.
  *
@@ -80,6 +113,24 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
   }
 
   for (const msg of messages) {
+    // The only two kinds whose output depends on a *second* message: a
+    // tool_use's attached result, and a tool_result's set-membership check
+    // against every tool_use in the list. Hoisted so both the cache-hit
+    // check below and the case bodies further down use the same value.
+    const trRef = msg.kind === 'tool_use'
+      ? (msg.toolResult || (msg.toolId ? toolResultMap.get(msg.toolId) : null))
+      : undefined;
+    const toolUseExists = msg.kind === 'tool_result' && msg.toolId
+      ? toolUseIds.has(msg.toolId)
+      : false;
+
+    const cached = conversionCache.get(msg);
+    if (cached && cached.trRef === trRef && cached.toolUseExists === toolUseExists) {
+      converted.push(...cached.output);
+      continue;
+    }
+
+    const entries: ChatMessage[] = [];
     const sharedMetadata = {
       displayText: msg.displayText,
       commandName: msg.commandName,
@@ -95,13 +146,13 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         const content = msg.content || '';
         const images = Array.isArray(msg.images) && msg.images.length > 0 ? msg.images : undefined;
         const files = Array.isArray(msg.files) && msg.files.length > 0 ? msg.files : undefined;
-        if (!content.trim() && !images && !files) continue;
+        if (!content.trim() && !images && !files) break;
 
         if (msg.role === 'user') {
           // Parse task notifications
           const taskNotif = parseTaskNotification(content);
           if (taskNotif) {
-            converted.push({
+            entries.push({
               type: 'assistant',
               content: taskNotif.summary,
               timestamp: msg.timestamp,
@@ -112,7 +163,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             // Render the agent's result as a normal assistant message so its
             // markdown displays correctly instead of leaking raw XML.
             if (taskNotif.result) {
-              converted.push({
+              entries.push({
                 type: 'assistant',
                 content: formatUsageLimitText(taskNotif.result),
                 timestamp: msg.timestamp,
@@ -120,7 +171,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
               });
             }
           } else {
-            converted.push({
+            entries.push({
               type: 'user',
               content,
               timestamp: msg.timestamp,
@@ -131,7 +182,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           }
         } else {
           const text = formatUsageLimitText(content);
-          converted.push({
+          entries.push({
             type: 'assistant',
             content: text,
             timestamp: msg.timestamp,
@@ -142,7 +193,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       }
 
       case 'tool_use': {
-        const tr = msg.toolResult || (msg.toolId ? toolResultMap.get(msg.toolId) : null);
+        const tr = trRef;
         const isSubagentContainer = msg.toolName === 'Task';
 
         // Build child tools from subagentTools
@@ -167,7 +218,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             }
           : null;
 
-        converted.push({
+        entries.push({
           type: 'assistant',
           content: '',
           timestamp: msg.timestamp,
@@ -191,7 +242,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
 
       case 'thinking':
         if (msg.content?.trim()) {
-          converted.push({
+          entries.push({
             type: 'assistant',
             content: msg.content,
             timestamp: msg.timestamp,
@@ -213,7 +264,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       // place chunk by chunk.
       case 'thinking_delta':
         if (msg.content) {
-          converted.push({
+          entries.push({
             type: 'assistant',
             content: msg.content,
             timestamp: msg.timestamp,
@@ -226,7 +277,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         break;
 
       case 'error':
-        converted.push({
+        entries.push({
           type: 'error',
           content: msg.content || 'Unknown error',
           timestamp: msg.timestamp,
@@ -235,7 +286,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         break;
 
       case 'interactive_prompt':
-        converted.push({
+        entries.push({
           type: 'assistant',
           content: msg.content || '',
           timestamp: msg.timestamp,
@@ -245,7 +296,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         break;
 
       case 'task_notification':
-        converted.push({
+        entries.push({
           type: 'assistant',
           content: msg.summary || 'Background task update',
           timestamp: msg.timestamp,
@@ -257,7 +308,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
 
       case 'stream_delta':
         if (msg.content) {
-          converted.push({
+          entries.push({
             type: 'assistant',
             content: msg.content,
             timestamp: msg.timestamp,
@@ -280,7 +331,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
 
       // tool_result is handled via attachment to tool_use above
       case 'tool_result': {
-        if (msg.toolId && toolUseIds.has(msg.toolId)) {
+        if (msg.toolId && toolUseExists) {
           break;
         }
 
@@ -298,7 +349,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           break;
         }
 
-        converted.push({
+        entries.push({
           type: msg.isError ? 'error' : 'assistant',
           content,
           timestamp: msg.timestamp,
@@ -311,6 +362,9 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       default:
         break;
     }
+
+    conversionCache.set(msg, { trRef, toolUseExists, output: entries });
+    converted.push(...entries);
   }
 
   return converted;
