@@ -432,7 +432,7 @@ export default function ChatComposer({
         </PromptInputBody>
 
         <PromptInputFooter>
-          <PromptInputTools className="min-w-0 overflow-x-auto scrollbar-hide">
+          <PromptInputTools className="scrollbar-hide min-w-0 overflow-x-auto">
             <PromptInputButton
               tooltip={{ content: t('input.attachFiles') }}
               onClick={openAttachmentPicker}
