@@ -88,6 +88,7 @@
     "label": "Настройки",
     "agents": "Агенты",
     "appearance": "Внешний вид",
+    "chatInput": "Чат и ввод",
     "git": "Git",
     "apiTokens": "API и токены",
     "tasks": "Задачи",

@@ -105,6 +105,7 @@
     "label": "Settings",
     "agents": "Agents",
     "appearance": "Appearance",
+    "chatInput": "Chat & Input",
     "git": "Git",
     "apiTokens": "API & Tokens",
     "voice": "Voice",
