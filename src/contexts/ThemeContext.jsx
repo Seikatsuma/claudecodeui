@@ -11,20 +11,19 @@ export const useTheme = () => {
 };
 
 export const ThemeProvider = ({ children }) => {
-  // Check for saved theme preference or default to system preference
+  // Check for a saved, explicit theme preference; otherwise default to dark.
   const [isDarkMode, setIsDarkMode] = useState(() => {
-    // Check localStorage first
+    // Check localStorage first — an explicit prior choice always wins.
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
       return savedTheme === 'dark';
     }
-    
-    // Check system preference
-    if (window.matchMedia) {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    
-    return false;
+
+    // No explicit choice yet: default to dark, matching the official
+    // Claude Code app's look, instead of following the OS/browser
+    // color-scheme (which defaults to light on most fresh installs and
+    // would otherwise mask this default for first-time visitors).
+    return true;
   });
 
   // Update document class and localStorage when theme changes
