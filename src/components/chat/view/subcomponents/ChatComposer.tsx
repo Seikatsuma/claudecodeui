@@ -14,6 +14,7 @@ import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon } from 'l
 
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { useVoiceAvailable } from '../../hooks/useVoiceAvailable';
+import { useWeeklyUsage } from '../../hooks/useWeeklyUsage';
 import type { QueuedDraft } from '../../hooks/useChatComposerState';
 import type { SessionActivity } from '../../../../hooks/useSessionProtection';
 import type { PendingPermissionRequest, PermissionMode } from '../../types/types';
@@ -35,6 +36,7 @@ import ComposerAttachment from './ComposerAttachment';
 import VoiceInputButton from './VoiceInputButton';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import TokenUsageSummary from './TokenUsageSummary';
+import WeeklyUsageIndicator from './WeeklyUsageIndicator';
 import QueuedMessageCard from './QueuedMessageCard';
 import ComposerModelMenu from './ComposerModelMenu';
 import ComposerPermissionMenu from './ComposerPermissionMenu';
@@ -239,6 +241,11 @@ export default function ChatComposer({
   const isRecording = voiceState === 'recording';
   const isTranscribing = voiceState === 'transcribing';
 
+  // Always-visible weekly usage indicator (see task brief): self-fetching,
+  // account-wide rather than tied to this session, so it lives entirely
+  // inside the composer instead of threading through ChatComposer's props.
+  const { snapshot: weeklyUsageSnapshot, isLoading: isWeeklyUsageLoading } = useWeeklyUsage();
+
   // Detect if the AskUserQuestion interactive panel is active
   const hasQuestionPanel = pendingPermissionRequests.some(
     (r) => r.toolName === 'AskUserQuestion'
@@ -265,17 +272,28 @@ export default function ChatComposer({
       ? t('input.stop')
       : t('input.send');
 
-  // Bottom padding adds the device's safe-area inset to each breakpoint's
-  // base value (0.5rem/1rem/1.5rem, same scale as the old pb-2/sm:pb-4/
-  // md:pb-6) rather than replacing it: on an iPhone with a home indicator
-  // this sits inside a `fixed inset-0` container (see AppContent.tsx) that
-  // already extends under that gesture bar (index.html sets
-  // viewport-fit=cover), so the flat Tailwind padding alone left the send
-  // button/toolbar overlapping or flush against the screen edge instead of
-  // clear of it - the same pattern already used for the sidebar footer and
-  // settings panel (pb-safe-area-inset-bottom) was missing here.
+  // Bottom padding takes the LARGER of each breakpoint's small base value
+  // and the device's safe-area inset, rather than summing them: on an
+  // iPhone with a home indicator this sits inside a `fixed inset-0`
+  // container (see AppContent.tsx) that already extends under that gesture
+  // bar (index.html sets viewport-fit=cover), so padding still needs to
+  // clear it instead of sitting flush against the screen edge - but the
+  // inset itself (~34px on Face ID iPhones) is already enough clearance on
+  // its own. This max() is the same convention already used everywhere else
+  // in this app that reserves gesture-bar space (SidebarFooter's inline
+  // `env(safe-area-inset-bottom, 0)`, the `pb-safe-area-inset-bottom`
+  // utility on the project list and session sheet): the inset stands alone,
+  // it is not stacked on top of a base margin.
+  //
+  // A plain `calc(base + env(...))` (this composer's first version, tried
+  // during this task) double-counts that clearance: in a real mobile PWA
+  // install the flat base then ADDS to the already-generous inset, leaving
+  // a visibly oversized gap under the composer - reported as the panel
+  // sitting "too high" with wasted space below it. max() fixes that while
+  // still guaranteeing the small base (0.25rem/0.5rem/0.75rem, half the old
+  // flat pb-2/sm:pb-4/md:pb-6) as a floor on devices with no safe area.
   return (
-    <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] pt-0 sm:px-4 sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px))] md:px-4 md:pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
+    <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-[max(0.25rem,env(safe-area-inset-bottom,0px))] pt-0 sm:px-4 sm:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] md:px-4 md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
       {!hasPendingPermissions && (
         <div className="pointer-events-none absolute bottom-full left-1/2 z-10 w-[calc(100%-1rem)] max-w-[54.25rem] -translate-x-1/2 translate-y-px bg-transparent sm:w-[calc(100%-2rem)]">
           <ActivityIndicator activity={activity} onAbort={onAbortSession} isInputFocused={isInputFocused} />
@@ -414,7 +432,7 @@ export default function ChatComposer({
         </PromptInputBody>
 
         <PromptInputFooter>
-          <PromptInputTools className="min-w-0">
+          <PromptInputTools className="min-w-0 overflow-x-auto scrollbar-hide">
             <PromptInputButton
               tooltip={{ content: t('input.attachFiles') }}
               onClick={openAttachmentPicker}
@@ -428,6 +446,8 @@ export default function ChatComposer({
             )}
 
             <TokenUsageSummary usage={tokenBudget} onClick={onShowTokenUsage} />
+
+            <WeeklyUsageIndicator snapshot={weeklyUsageSnapshot} isLoading={isWeeklyUsageLoading} />
 
             <PromptInputButton
               tooltip={{ content: t('input.showAllCommands') }}
@@ -456,15 +476,23 @@ export default function ChatComposer({
 
           </PromptInputTools>
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+            {/* min-w-0 + truncate lets this shrink (and ellipsize) under
+                space pressure instead of forcing PromptInputTools on the
+                left to overflow past its box and visually collide with it -
+                that collision was a real, measured bug once the weekly
+                usage indicator's extra width was added to the tools row at
+                common laptop widths (1280-1440px). The controls to its
+                right stay full-size (own shrink-0 group below). */}
             <div
-              className={`hidden text-xs text-muted-foreground/50 transition-opacity duration-200 lg:block ${
+              className={`hidden min-w-0 flex-1 truncate text-xs text-muted-foreground/50 transition-opacity duration-200 lg:block ${
                 input.trim() && !canQueueDraft ? 'opacity-0' : 'opacity-100'
               }`}
             >
               {submitHint}
             </div>
 
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <ComposerModelMenu
               effort={effort}
               effortOptions={availableEffortOptions}
@@ -517,6 +545,7 @@ export default function ChatComposer({
                 <ArrowUpIcon className="h-4 w-4" />
               ) : undefined}
             </PromptInputSubmit>
+            </div>
           </div>
         </PromptInputFooter>
       </PromptInput>

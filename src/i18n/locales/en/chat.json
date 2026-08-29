@@ -85,6 +85,17 @@
   "usageLimit": {
     "resetAt": "Claude usage limit reached. Your limit will reset at **{{time}} {{timezone}}** - {{date}}"
   },
+  "weeklyUsage": {
+    "ariaLabel": "Weekly Claude usage: {{percent}}%",
+    "official": "{{percent}}% of your weekly Claude limit used",
+    "resetsAt": "Resets {{date}}",
+    "updatedAt": "From your Claude account, updated {{date}}",
+    "estimateHeading": "Local activity, last 7 days",
+    "estimateTokens": "~{{tokens}} tokens read/written across all sessions",
+    "estimateNote": "Rough activity count, not the percent above - cached reads are counted here but cost much less against the real limit.",
+    "unavailable": "No weekly-limit data from Claude yet. Showing local activity for the last 7 days instead.",
+    "loading": "Loading weekly usage…"
+  },
   "codex": {
     "permissionMode": "Permission Mode",
     "modes": {
