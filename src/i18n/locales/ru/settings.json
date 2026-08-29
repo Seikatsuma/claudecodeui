@@ -95,6 +95,11 @@
     "plugins": "Плагины",
     "about": "О программе"
   },
+  "about": {
+    "sessionTitle": "Сеанс",
+    "loggedInAs": "Вы вошли как {{username}}",
+    "logout": "Выйти"
+  },
   "notifications": {
     "title": "Уведомления",
     "description": "Управляйте тем, какие события уведомлений вы получаете.",

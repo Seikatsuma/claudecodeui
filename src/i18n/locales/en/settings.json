@@ -114,6 +114,11 @@
     "plugins": "Plugins",
     "about": "About"
   },
+  "about": {
+    "sessionTitle": "Session",
+    "loggedInAs": "Signed in as {{username}}",
+    "logout": "Log Out"
+  },
   "notifications": {
     "title": "Notifications",
     "description": "Control which notification events you receive.",

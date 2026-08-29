@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { Check, ChevronDown, ChevronRight, Edit3, Star, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Edit3, MoreHorizontal, Star, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
-import { Button } from '../../../../shared/view/ui';
+import { ActionMenu, buttonVariants } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
@@ -252,25 +252,40 @@ export default function SidebarProjectItem({
                   </>
                 ) : (
                   <>
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-500/10 active:scale-90 dark:border-red-800 dark:bg-red-900/30"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDeleteProject(project);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
-                    </button>
-
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 active:scale-90 dark:border-primary/30 dark:bg-primary/20"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onStartEditingProject(project);
-                      }}
-                    >
-                      <Edit3 className="h-4 w-4 text-primary" />
-                    </button>
+                    {/* Group delete lives one level deeper than a single tap: it used
+                        to be an always-visible red button right next to rename, easy
+                        to hit by mistake on a small screen. It now sits inside this
+                        "more options" menu, which itself only opens the confirmation
+                        dialog rather than deleting anything directly. */}
+                    <div onClick={(event) => event.stopPropagation()}>
+                      <ActionMenu
+                        label={t('tooltips.projectOptions', 'Project options')}
+                        ariaLabel={`${t('tooltips.projectOptions', 'Project options')}: ${project.displayName}`}
+                        icon={MoreHorizontal}
+                        iconOnly
+                        portal
+                        variant="ghost"
+                        size="icon"
+                        triggerClassName="h-8 w-8 rounded-lg border border-border bg-muted/30 text-muted-foreground"
+                        menuClassName="w-[240px] rounded-xl p-1.5 shadow-xl"
+                        items={[
+                          {
+                            key: 'rename',
+                            label: t('tooltips.renameProject'),
+                            icon: Edit3,
+                            onSelect: () => onStartEditingProject(project),
+                          },
+                          {
+                            key: 'delete',
+                            label: t('tooltips.deleteProject'),
+                            icon: Trash2,
+                            isDanger: true,
+                            showDividerBefore: true,
+                            onSelect: () => onDeleteProject(project),
+                          },
+                        ]}
+                      />
+                    </div>
 
                     <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/30">
                       {isExpanded ? (
@@ -286,16 +301,30 @@ export default function SidebarProjectItem({
           </div>
         </div>
 
-        <Button
-          variant="ghost"
+        {/* A plain div standing in for the shared Button component here, not the
+            component itself: this row now contains the project-options
+            ActionMenu, which renders its own real <button> trigger. A <button>
+            cannot correctly contain another interactive <button> (broken focus
+            order/semantics), so the row's own click/keyboard handling is
+            reproduced manually instead of nesting one inside the other. */}
+        <div
+          role="button"
+          tabIndex={0}
           className={cn(
-            'hidden md:flex w-full justify-between p-2 h-auto font-normal hover:bg-accent/50',
+            buttonVariants({ variant: 'ghost' }),
+            'hidden md:flex w-full justify-between p-2 h-auto font-normal hover:bg-accent/50 cursor-pointer',
             isSelected && 'bg-accent text-accent-foreground',
             isStarred &&
               !isSelected &&
               'bg-yellow-50/50 dark:bg-yellow-900/10 hover:bg-yellow-100/50 dark:hover:bg-yellow-900/20',
           )}
           onClick={selectAndToggleProject}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              selectAndToggleProject();
+            }
+          }}
         >
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <div
@@ -386,25 +415,38 @@ export default function SidebarProjectItem({
               </>
             ) : (
               <>
-                <div
-                  className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-accent group-hover:opacity-100"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStartEditingProject(project);
-                  }}
-                  title={t('tooltips.renameProject')}
-                >
-                  <Edit3 className="h-3 w-3" />
-                </div>
-                <div
-                  className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-red-50 group-hover:opacity-100 dark:hover:bg-red-900/20"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDeleteProject(project);
-                  }}
-                  title={t('tooltips.deleteProject')}
-                >
-                  <Trash2 className="h-3 w-3 text-red-600 dark:text-red-400" />
+                {/* Group delete used to sit here as its own always-hover-visible red
+                    icon, one accidental click away from the confirmation dialog. It
+                    now lives inside this options menu instead, so a stray hover/tap
+                    only reveals the menu trigger, never triggers delete directly. */}
+                <div onClick={(event) => event.stopPropagation()}>
+                  <ActionMenu
+                    label={t('tooltips.projectOptions', 'Project options')}
+                    ariaLabel={`${t('tooltips.projectOptions', 'Project options')}: ${project.displayName}`}
+                    icon={MoreHorizontal}
+                    iconOnly
+                    portal
+                    variant="ghost"
+                    size="icon"
+                    triggerClassName="h-6 w-6 text-muted-foreground opacity-70 hover:bg-muted hover:opacity-100"
+                    menuClassName="w-[240px] rounded-xl p-1.5 shadow-xl"
+                    items={[
+                      {
+                        key: 'rename',
+                        label: t('tooltips.renameProject'),
+                        icon: Edit3,
+                        onSelect: () => onStartEditingProject(project),
+                      },
+                      {
+                        key: 'delete',
+                        label: t('tooltips.deleteProject'),
+                        icon: Trash2,
+                        isDanger: true,
+                        showDividerBefore: true,
+                        onSelect: () => onDeleteProject(project),
+                      },
+                    ]}
+                  />
                 </div>
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
@@ -414,7 +456,7 @@ export default function SidebarProjectItem({
               </>
             )}
           </div>
-        </Button>
+        </div>
       </div>
 
       <SidebarProjectSessions
