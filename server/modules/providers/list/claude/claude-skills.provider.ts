@@ -1,5 +1,4 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import { SkillsProvider } from '@/modules/providers/shared/skills/skills.provider.js';
@@ -11,13 +10,17 @@ import type {
 } from '@/shared/types.js';
 import {
   findProviderSkillMarkdownFiles,
+  getClaudeConfigDir,
   readJsonConfig,
   readObjectRecord,
   readOptionalString,
   readProviderSkillMarkdownDefinition,
 } from '@/shared/utils.js';
 
-const getClaudeHomePath = (): string => path.join(os.homedir(), '.claude');
+// getClaudeConfigDir() honors CLAUDE_CONFIG_DIR - see its doc comment in
+// shared/utils.ts. A hardcoded ~/.claude here previously made every
+// CLAUDE_CONFIG_DIR-scoped instance list the default account's skills.
+const getClaudeHomePath = (): string => getClaudeConfigDir();
 
 const getClaudePluginName = (pluginId: string): string | null => {
   const normalizedPluginId = pluginId.trim();

@@ -33,6 +33,11 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
   const fs = dependencies.fileSystem;
   const crypto = dependencies.crypto;
   const os = { homedir: dependencies.homeDirectory };
+  // Mirrors getClaudeConfigDir() (shared/utils.ts) using this router's
+  // injected homeDirectory() dependency instead of a direct os import - keeps
+  // temp GitHub clones and their cleanup scoped to the account this instance
+  // (CLAUDE_CONFIG_DIR) actually represents, not always the default account.
+  const claudeConfigDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const spawn = dependencies.spawnProcess;
   const IS_PLATFORM = dependencies.platformMode;
   const userDb = dependencies.users;
@@ -439,7 +444,7 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
   async function cleanupProject(projectPath, sessionId = null) {
     try {
       const externalProjectsRoot = await fs.realpath(
-        path.join(os.homedir(), '.claude', 'external-projects')
+        path.join(claudeConfigDir(), 'external-projects')
       );
       const canonicalProjectPath = await fs.realpath(projectPath);
       const relativeProjectPath = path.relative(externalProjectsRoot, canonicalProjectPath);
@@ -460,7 +465,7 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
       // Also clean up the Claude session directory if sessionId provided
       if (sessionId) {
         try {
-          const sessionPath = path.join(os.homedir(), '.claude', 'sessions', sessionId);
+          const sessionPath = path.join(claudeConfigDir(), 'sessions', sessionId);
           console.log('🧹 Cleaning up session directory:', sessionPath);
           await fs.rm(sessionPath, { recursive: true, force: true });
           console.log('✅ Session directory cleaned up');
@@ -922,7 +927,7 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
         } else {
           // Generate a unique path for cloning
           const repoHash = crypto.createHash('md5').update(githubUrl + Date.now()).digest('hex');
-          targetPath = path.join(os.homedir(), '.claude', 'external-projects', repoHash);
+          targetPath = path.join(claudeConfigDir(), 'external-projects', repoHash);
         }
 
         const clonedProject = await cloneGitHubRepo(githubUrl.trim(), tokenToUse, targetPath);

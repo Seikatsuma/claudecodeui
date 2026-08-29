@@ -39,6 +39,45 @@ import type {
  */
 export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
 
+/**
+ * Resolves this process's Claude Code CLI config directory - the directory
+ * that normally holds settings.json, .credentials.json, projects/, commands/,
+ * skills/. Honors CLAUDE_CONFIG_DIR exactly like the `claude` CLI itself does
+ * (its official override for relocating ~/.claude, used to run a second
+ * instance of this app for a second account - see deploy/claudecodeui.service):
+ * when set, that directory IS the CLI's config home and its files sit
+ * directly inside it, with no extra ".claude" nesting (verified on disk
+ * against a live CLAUDE_CONFIG_DIR=~/.claude-account2 instance - settings.json
+ * lives at exactly $CLAUDE_CONFIG_DIR/settings.json, not one level deeper).
+ * Falls back to the CLI's own default, ~/.claude, when unset.
+ *
+ * Every path in this codebase that reaches into the Claude CLI's own config
+ * (sessions, credentials, mcp servers, skills, commands) must resolve its
+ * base directory through this helper instead of hardcoding
+ * `path.join(os.homedir(), '.claude')` - a hardcoded call reads the CLI's
+ * default account's data even when this process is meant to represent a
+ * different account (this was a real bug: a second CLAUDE_CONFIG_DIR-scoped
+ * instance showed the first account's session history).
+ */
+export function getClaudeConfigDir(): string {
+  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+}
+
+/**
+ * Resolves the path to the Claude CLI's top-level `.claude.json` (project
+ * registry / oauthAccount / mcpServers config). This file is a special case
+ * relative to getClaudeConfigDir() above: by default it lives one level
+ * OUTSIDE ~/.claude, at plain ~/.claude.json - NOT ~/.claude/.claude.json,
+ * which can also exist on disk as a stale, no-longer-updated copy (verified:
+ * ~/.claude.json is the one the CLI keeps current). When CLAUDE_CONFIG_DIR is
+ * set, though, the CLI puts this file directly inside that directory,
+ * alongside settings.json etc - the same directory getClaudeConfigDir()
+ * returns in that case.
+ */
+export function getClaudeJsonPath(): string {
+  return path.join(process.env.CLAUDE_CONFIG_DIR || os.homedir(), '.claude.json');
+}
+
 // ---------------------------
 //----------------- NORMALIZED MESSAGE HELPER INPUT TYPES ------------
 /**

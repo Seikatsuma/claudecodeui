@@ -9,7 +9,7 @@ import http from 'http';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 
-import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
+import { AppError, findApplicationRoot, getClaudeJsonPath, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
 import {
     closeSessionsWatcher,
     initializeSessionsWatcher,
@@ -81,19 +81,17 @@ const systemRoutes = createSystemModule({
 const ACCOUNT_LABEL = process.env.ACCOUNT_LABEL || null;
 const SWITCH_ACCOUNT_URL = process.env.SWITCH_ACCOUNT_URL || null;
 // Real account email for the badge above: read once at startup from the same
-// ~/.claude.json the Claude CLI itself maintains after `claude /login`, under
-// whichever directory CLAUDE_CONFIG_DIR points at for this instance (falling
-// back to the CLI's own default, ~/.claude, when unset - matching how the CLI
-// resolves it, since nothing else in this codebase reads that env var). This
-// is what actually differentiates "Account 1" from "Account 2" in the UI: the
-// labels above are operator-chosen strings and can accidentally end up
-// identical, but the email can't. Never throws: a missing/unreadable file or
-// a config without oauthAccount just means no email badge, not a crash.
+// ~/.claude.json the Claude CLI itself maintains after `claude /login`,
+// resolved via getClaudeJsonPath() so it honors CLAUDE_CONFIG_DIR exactly
+// like the CLI does (see that helper's doc comment in shared/utils.ts for the
+// exact on-disk layout this was verified against). This is what actually
+// differentiates "Account 1" from "Account 2" in the UI: the labels above are
+// operator-chosen strings and can accidentally end up identical, but the
+// email can't. Never throws: a missing/unreadable file or a config without
+// oauthAccount just means no email badge, not a crash.
 const CLAUDE_ACCOUNT_EMAIL = (() => {
     try {
-        const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-        const claudeJsonPath = path.join(claudeConfigDir, '.claude.json');
-        const parsed = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8'));
+        const parsed = JSON.parse(fs.readFileSync(getClaudeJsonPath(), 'utf8'));
         const email = parsed?.oauthAccount?.emailAddress;
         return typeof email === 'string' && email.trim() ? email.trim() : null;
     } catch {

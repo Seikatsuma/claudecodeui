@@ -15,9 +15,13 @@ export function createTaskmasterService(dependencies: TaskmasterServiceDependenc
         /** Detects TaskMaster in the user's Claude MCP configuration without exposing secret values. */
         async detectMcpServer() {
             const homeDirectory = dependencies.getHomeDirectory();
+            // Mirrors getClaudeJsonPath()/getClaudeConfigDir() (shared/utils.ts):
+            // honor CLAUDE_CONFIG_DIR (multi-account setups) instead of always
+            // reading the default account's config, so TaskMaster detection
+            // reflects the account this instance actually represents.
             const configurationPaths = [
-                path.join(homeDirectory, '.claude.json'),
-                path.join(homeDirectory, '.claude', 'settings.json'),
+                path.join(process.env.CLAUDE_CONFIG_DIR || homeDirectory, '.claude.json'),
+                path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homeDirectory, '.claude'), 'settings.json'),
             ];
             let configuration: Record<string, unknown> | null = null;
             let configurationPath: string | null = null;

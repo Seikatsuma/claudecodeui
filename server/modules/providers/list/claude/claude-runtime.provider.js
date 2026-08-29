@@ -14,8 +14,6 @@
 
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
@@ -33,7 +31,7 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
-import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
+import { createCompleteMessage, createNormalizedMessage, getClaudeJsonPath } from '@/shared/utils.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -536,7 +534,9 @@ function createHeldPromptStream(messages) {
  */
 async function loadMcpConfig(cwd) {
   try {
-    const claudeConfigPath = path.join(os.homedir(), '.claude.json');
+    // getClaudeJsonPath() honors CLAUDE_CONFIG_DIR (multi-account setups) -
+    // see its doc comment in shared/utils.ts.
+    const claudeConfigPath = getClaudeJsonPath();
 
     // Check if config file exists
     try {

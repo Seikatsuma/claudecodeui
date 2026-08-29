@@ -1,4 +1,3 @@
-import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
@@ -7,6 +6,7 @@ import {
   buildLookupMap,
   extractFirstValidJsonlData,
   findFilesRecursivelyCreatedAfter,
+  getClaudeConfigDir,
   normalizeSessionName,
   readFileTimestamps,
 } from '@/shared/utils.js';
@@ -23,7 +23,10 @@ type ParsedSession = {
  */
 export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'claude' as const;
-  private readonly claudeHome = path.join(os.homedir(), '.claude');
+  // getClaudeConfigDir() honors CLAUDE_CONFIG_DIR - see its doc comment in
+  // shared/utils.ts. A hardcoded ~/.claude here previously made every
+  // CLAUDE_CONFIG_DIR-scoped instance index the default account's sessions.
+  private readonly claudeHome = getClaudeConfigDir();
 
   /**
    * Returns true when a JSONL file is a subagent transcript or tool result

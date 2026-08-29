@@ -81,7 +81,14 @@ function showStatus(dependencies: CliServiceDependencies): void {
   const { environment, fileSystem, output } = dependencies;
   const databasePath = environment.DATABASE_PATH || dependencies.defaultDatabasePath;
   const databaseExists = fileSystem.pathExists(databasePath);
-  const claudeProjectsPath = path.join(dependencies.homeDirectory, '.claude', 'projects');
+  // Mirrors getClaudeConfigDir() (shared/utils.ts) without importing it: this
+  // module receives its home directory / environment through the injected
+  // CliServiceDependencies for testability rather than reading os.homedir()
+  // and process.env directly, so it re-derives the same CLAUDE_CONFIG_DIR
+  // override here instead.
+  const claudeConfigDir = environment.CLAUDE_CONFIG_DIR
+    || path.join(dependencies.homeDirectory, '.claude');
+  const claudeProjectsPath = path.join(claudeConfigDir, 'projects');
   const environmentFilePath = path.join(dependencies.applicationRoot, '.env');
 
   output.log(`\n${terminalTextStyles.bright('CloudCLI UI - Status')}\n`);

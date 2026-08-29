@@ -25,6 +25,12 @@ const fs = dependencies.fileSystem;
 const os = { homedir: dependencies.homeDirectory };
 const APP_ROOT = dependencies.appRoot;
 const providerModelsService = dependencies.models;
+// Mirrors getClaudeConfigDir() (shared/utils.ts) using this router's injected
+// homeDirectory() dependency. Reads globalThis.process explicitly because
+// `process` is shadowed below by dependencies.runtime (a narrow
+// uptime/memoryUsage/pid facade with no .env).
+const claudeConfigDir = () =>
+  globalThis.process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
 const process = dependencies.runtime;
 const router = express.Router();
 
@@ -460,8 +466,7 @@ router.post("/list", async (req, res) => {
     }
 
     // Scan user-level commands (~/.claude/commands/)
-    const homeDir = os.homedir();
-    const userCommandsDir = path.join(homeDir, ".claude", "commands");
+    const userCommandsDir = path.join(claudeConfigDir(), "commands");
     const userCommands = await scanCommandsDirectory(
       userCommandsDir,
       userCommandsDir,
@@ -541,7 +546,7 @@ router.post("/execute", async (req, res) => {
     {
       const resolvedPath = path.resolve(commandPath);
       const userBase = path.resolve(
-        path.join(os.homedir(), ".claude", "commands"),
+        path.join(claudeConfigDir(), "commands"),
       );
       const projectBase = context?.projectPath
         ? path.resolve(path.join(context.projectPath, ".claude", "commands"))
