@@ -130,6 +130,7 @@ type SidebarContentProps = {
   currentVersion: string;
   accountLabel: string | null;
   switchAccountUrl: string | null;
+  accountEmail: string | null;
   onShowVersionModal: () => void;
   onShowSettings: () => void;
   projectListProps: SidebarProjectListProps;
@@ -178,6 +179,7 @@ export default function SidebarContent({
   currentVersion,
   accountLabel,
   switchAccountUrl,
+  accountEmail,
   onShowVersionModal,
   onShowSettings,
   projectListProps,
@@ -703,6 +705,7 @@ export default function SidebarContent({
           currentVersion={currentVersion}
           accountLabel={accountLabel}
           switchAccountUrl={switchAccountUrl}
+          accountEmail={accountEmail}
           onShowVersionModal={onShowVersionModal}
           onShowSettings={onShowSettings}
           t={t}

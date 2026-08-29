@@ -29,6 +29,11 @@ type SidebarFooterProps = {
   // switchAccountUrl null means the badge renders without the "Switch account" link.
   accountLabel: string | null;
   switchAccountUrl: string | null;
+  // Real Claude account email for this instance (server-read from
+  // CLAUDE_CONFIG_DIR/.claude.json). This is what actually tells two
+  // same-labeled instances apart, since accountLabel is just an operator
+  // string; null hides it and leaves accountLabel standing alone.
+  accountEmail: string | null;
   onShowVersionModal: () => void;
   onShowSettings: () => void;
   t: TFunction;
@@ -42,6 +47,7 @@ export default function SidebarFooter({
   currentVersion,
   accountLabel,
   switchAccountUrl,
+  accountEmail,
   onShowVersionModal,
   onShowSettings,
   t,
@@ -166,9 +172,19 @@ export default function SidebarFooter({
         <div className="hidden px-2 pb-1.5 md:block">
           <div className="flex items-center gap-2.5 rounded-lg border border-violet-300/60 bg-violet-50/80 px-2.5 py-2 dark:border-violet-700/40 dark:bg-violet-900/15">
             <Users className="h-4 w-4 flex-shrink-0 text-violet-500 dark:text-violet-400" />
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-violet-700 dark:text-violet-300">
-              {accountLabel}
-            </span>
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium text-violet-700 dark:text-violet-300">
+                {accountLabel}
+              </span>
+              {/* The real account email - unlike accountLabel (an operator-chosen
+                  string), this can't accidentally be identical across instances,
+                  which is exactly what makes two accounts look "the same". */}
+              {accountEmail && (
+                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70">
+                  {accountEmail}
+                </span>
+              )}
+            </div>
             {switchAccountUrl && (
               <a
                 href={switchAccountUrl}
@@ -258,9 +274,16 @@ export default function SidebarFooter({
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-background/80">
               <Users className="h-4 w-4 text-violet-500 dark:text-violet-400" />
             </div>
-            <span className="min-w-0 flex-1 truncate text-sm font-normal text-violet-700 dark:text-violet-300">
-              {accountLabel}
-            </span>
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-normal text-violet-700 dark:text-violet-300">
+                {accountLabel}
+              </span>
+              {accountEmail && (
+                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70">
+                  {accountEmail}
+                </span>
+              )}
+            </div>
             {switchAccountUrl && (
               <a
                 href={switchAccountUrl}

@@ -80,6 +80,26 @@ const systemRoutes = createSystemModule({
 // instance. Both are unset by default so unrelated deployments see no change.
 const ACCOUNT_LABEL = process.env.ACCOUNT_LABEL || null;
 const SWITCH_ACCOUNT_URL = process.env.SWITCH_ACCOUNT_URL || null;
+// Real account email for the badge above: read once at startup from the same
+// ~/.claude.json the Claude CLI itself maintains after `claude /login`, under
+// whichever directory CLAUDE_CONFIG_DIR points at for this instance (falling
+// back to the CLI's own default, ~/.claude, when unset - matching how the CLI
+// resolves it, since nothing else in this codebase reads that env var). This
+// is what actually differentiates "Account 1" from "Account 2" in the UI: the
+// labels above are operator-chosen strings and can accidentally end up
+// identical, but the email can't. Never throws: a missing/unreadable file or
+// a config without oauthAccount just means no email badge, not a crash.
+const CLAUDE_ACCOUNT_EMAIL = (() => {
+    try {
+        const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+        const claudeJsonPath = path.join(claudeConfigDir, '.claude.json');
+        const parsed = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8'));
+        const email = parsed?.oauthAccount?.emailAddress;
+        return typeof email === 'string' && email.trim() ? email.trim() : null;
+    } catch {
+        return null;
+    }
+})();
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
 const app = express();
@@ -146,7 +166,8 @@ app.get('/health', (req, res) => {
         installMode,
         version: RUNNING_VERSION,
         accountLabel: ACCOUNT_LABEL,
-        switchAccountUrl: SWITCH_ACCOUNT_URL
+        switchAccountUrl: SWITCH_ACCOUNT_URL,
+        accountEmail: CLAUDE_ACCOUNT_EMAIL
     });
 });
 

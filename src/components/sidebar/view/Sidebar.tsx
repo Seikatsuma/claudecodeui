@@ -53,6 +53,7 @@ function Sidebar({
     installMode,
     accountLabel,
     switchAccountUrl,
+    accountEmail,
   } = useVersionCheck(
     'siteboon',
     'claudecodeui',
@@ -330,6 +331,7 @@ function Sidebar({
             currentVersion={currentVersion}
             accountLabel={accountLabel}
             switchAccountUrl={switchAccountUrl}
+            accountEmail={accountEmail}
             onShowVersionModal={() => setShowVersionModal(true)}
             onShowSettings={onShowSettings}
             projectListProps={projectListProps}

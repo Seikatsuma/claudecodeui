@@ -36,6 +36,10 @@ export const useVersionCheck = (owner: string, repo: string) => {
   // sidebar renders nothing for either in that case.
   const [accountLabel, setAccountLabel] = useState<string | null>(null);
   const [switchAccountUrl, setSwitchAccountUrl] = useState<string | null>(null);
+  // Real Claude account email for this instance (read server-side from
+  // CLAUDE_CONFIG_DIR/.claude.json's oauthAccount.emailAddress - see
+  // server/index.ts). null when unreadable/unset, same as the two above.
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchHealth = async () => {
@@ -59,6 +63,9 @@ export const useVersionCheck = (owner: string, repo: string) => {
         }
         if (typeof data.switchAccountUrl === 'string' && data.switchAccountUrl.length > 0) {
           setSwitchAccountUrl(data.switchAccountUrl);
+        }
+        if (typeof data.accountEmail === 'string' && data.accountEmail.length > 0) {
+          setAccountEmail(data.accountEmail);
         }
       } catch {
         // Default to git / no restart hint on error
@@ -117,5 +124,6 @@ export const useVersionCheck = (owner: string, repo: string) => {
     restartRequired,
     accountLabel,
     switchAccountUrl,
+    accountEmail,
   };
 };
