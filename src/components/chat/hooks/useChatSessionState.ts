@@ -144,6 +144,30 @@ export function useChatSessionState({
   const [viewHiddenCount, setViewHiddenCount] = useState(0);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Setting `container.scrollTop` — from `scrollToBottom`, the initial-load
+  // RAF loop, pagination scroll-restore, or the tab-reactivation restore —
+  // fires a native 'scroll' event asynchronously, same as a real user
+  // gesture. `handleScroll` used to treat every 'scroll' event as evidence
+  // of the user's own intent, so a *programmatic* scroll-to-bottom would
+  // land near the bottom, `handleScroll` would read that and confirm
+  // `isUserScrolledUp = false` — which then satisfied the very check that
+  // gates the *next* auto-scroll-on-new-content effect. In a long streaming
+  // reply, new blocks (thinking → text, tool calls, …) arrive every couple
+  // of seconds; each one re-armed that feedback loop, so a user who
+  // scrolled up to read earlier content kept getting pulled back to the
+  // bottom every time the next chunk landed — reported as the chat
+  // "постоянно скидывает вниз" while a response is streaming in.
+  //
+  // Fixed by recording the exact value a programmatic write just set, so
+  // `handleScroll` can recognize *that specific* resulting 'scroll' event
+  // and skip updating `isUserScrolledUp` for it. A plain before/after
+  // boolean isn't enough here: under the main-thread load a long streaming
+  // reply itself creates (markdown re-parsing, syntax highlighting), the
+  // native 'scroll' event for one programmatic write can arrive late enough
+  // to swallow a *real* scroll the user made in between — matching against
+  // the value tells the two apart regardless of timing. `null` means no
+  // programmatic write is outstanding.
+  const programmaticScrollTargetRef = useRef<number | null>(null);
   const wasNearTopRef = useRef(false);
   const [searchTarget, setSearchTarget] = useState<{ timestamp?: string; uuid?: string; snippet?: string } | null>(null);
   const searchScrollActiveRef = useRef(false);
@@ -367,11 +391,29 @@ export function useChatSessionState({
 
   const rewindMessages = useCallback((count: number) => setViewHiddenCount(count), []);
 
+  // Every programmatic `container.scrollTop = …` in this file should call
+  // this with the exact value it's about to write, so `handleScroll` can
+  // recognize the resulting 'scroll' event and skip updating
+  // `isUserScrolledUp` for it — see the comment on
+  // `programmaticScrollTargetRef` above.
+  const markProgrammaticScroll = useCallback((targetScrollTop: number) => {
+    programmaticScrollTargetRef.current = targetScrollTop;
+    // Safety net: if the write doesn't actually change scrollTop (already
+    // at the target), the browser never fires 'scroll' to consume this.
+    requestAnimationFrame(() => {
+      if (programmaticScrollTargetRef.current === targetScrollTop) {
+        programmaticScrollTargetRef.current = null;
+      }
+    });
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    container.scrollTop = container.scrollHeight;
-  }, []);
+    const target = container.scrollHeight;
+    markProgrammaticScroll(target);
+    container.scrollTop = target;
+  }, [markProgrammaticScroll]);
 
   const scrollToBottomAndReset = useCallback(() => {
     scrollToBottom();
@@ -447,13 +489,70 @@ export function useChatSessionState({
     [hasMoreMessages, isActive, isLoadingMoreMessages, selectedProject, selectedSession, sessionStore],
   );
 
+  // Recomputes `isUserScrolledUp` from the live DOM position. Called ONLY
+  // from a genuine user input gesture (wheel/touchmove — see
+  // `handleUserScrollGesture` below), never from the generic native
+  // 'scroll' event. That event fires for every scrollTop change regardless
+  // of cause, including two that have nothing to do with user intent: our
+  // own programmatic writes (see `programmaticScrollTargetRef`), and —
+  // this was the actual root cause of "chat keeps dragging me back down
+  // while a response streams in" — a live `Reasoning` block (the
+  // "Thinking…" accordion) collapsing once it finalizes (it renders
+  // expanded while streaming and collapses on finalize; MessageComponent/
+  // Reasoning derive `defaultOpen` from `isStreaming` at mount, and
+  // finalizing swaps in a new id — see useChatMessages.ts /
+  // MessageComponent.tsx). That collapse can shrink the conversation to
+  // (or nearly to) fit inside the viewport, even momentarily. With little
+  // or no overflow, `scrollHeight - scrollTop - clientHeight` reads as
+  // "near bottom" no matter where scrollTop actually is, so treating that
+  // passive reflow as a scroll-to-bottom reset `isUserScrolledUp` to false
+  // even though the user had deliberately scrolled up to read something.
+  // The next block (e.g. the reply text) then grows the conversation past
+  // the viewport again, and the auto-scroll-on-new-content effect — now
+  // honestly believing the user never left the bottom — pulled them back
+  // down. Repeated on every thinking→text / tool-call transition in a long
+  // reply, which is exactly "постоянно скидывает вниз". Deriving this only
+  // from wheel/touchmove sidesteps the whole category: those never fire for
+  // a programmatic write or a passive reflow, only for the user's own hand
+  // on the wheel or the glass.
+  const handleUserScrollGesture = useCallback(() => {
+    if (!isActive) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    // Defense in depth: a genuine wheel/touch gesture landing at the exact
+    // instant a Reasoning block collapses could still momentarily read a
+    // near-zero scrollable range. Skip the update rather than trust it —
+    // see the comment above.
+    if (container.scrollHeight <= container.clientHeight) return;
+    setIsUserScrolledUp(!isNearBottom());
+  }, [isActive, isNearBottom]);
+
   const handleScroll = useCallback(async () => {
     if (!isActive) return;
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const nearBottom = isNearBottom();
-    setIsUserScrolledUp(!nearBottom);
+    // A scroll event caused by our own `container.scrollTop = …` isn't
+    // evidence of user intent. Only treat *this* event as self-inflicted if
+    // scrollTop actually landed on the value we just set; otherwise a real
+    // user scroll interleaved before the native event fired, and the
+    // pagination logic below still needs to see it.
+    if (programmaticScrollTargetRef.current !== null) {
+      const expected = programmaticScrollTargetRef.current;
+      programmaticScrollTargetRef.current = null;
+      if (container.scrollTop === expected) {
+        scrollPositionRef.current = {
+          height: container.scrollHeight,
+          top: container.scrollTop,
+        };
+        return;
+      }
+    }
+
+    // `isUserScrolledUp` is intentionally NOT updated here — see
+    // `updateIsUserScrolledUpFromGesture` above. This still runs for every
+    // native 'scroll' (scrollbar drag included) for position bookkeeping
+    // and the "load older messages near the top" pagination behavior.
     scrollPositionRef.current = {
       height: container.scrollHeight,
       top: container.scrollTop,
@@ -486,7 +585,7 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [hasMoreMessages, isActive, isNearBottom, loadOlderMessages]);
+  }, [hasMoreMessages, isActive, loadOlderMessages]);
 
   const wasChatActiveRef = useRef(isActive);
   useLayoutEffect(() => {
@@ -502,20 +601,24 @@ export function useChatSessionState({
           anchor.getBoundingClientRect().top
           - container.getBoundingClientRect().top
         );
-        container.scrollTop += nextAnchorOffset - anchorOffset;
+        const target = container.scrollTop + (nextAnchorOffset - anchorOffset);
+        markProgrammaticScroll(target);
+        container.scrollTop = target;
       } else {
-        container.scrollTop = top + Math.max(container.scrollHeight - height, 0);
+        const target = top + Math.max(container.scrollHeight - height, 0);
+        markProgrammaticScroll(target);
+        container.scrollTop = target;
       }
       pendingScrollRestoreRef.current = null;
       return;
     }
 
     if (becameActive) {
-      container.scrollTop = isUserScrolledUp
-        ? scrollPositionRef.current.top
-        : container.scrollHeight;
+      const target = isUserScrolledUp ? scrollPositionRef.current.top : container.scrollHeight;
+      markProgrammaticScroll(target);
+      container.scrollTop = target;
     }
-  }, [chatMessages.length, isActive, isUserScrolledUp]);
+  }, [chatMessages.length, isActive, isUserScrolledUp, markProgrammaticScroll]);
 
   // Reset scroll/pagination state on session change
   useEffect(() => {
@@ -553,7 +656,9 @@ export function useChatSessionState({
 
     const tick = () => {
       if (!pendingInitialScrollRef.current || !scrollContainerRef.current) return;
-      container.scrollTop = container.scrollHeight;
+      const target = container.scrollHeight;
+      markProgrammaticScroll(target);
+      container.scrollTop = target;
       if (container.scrollHeight === lastHeight) {
         stableCount++;
       } else {
@@ -571,7 +676,7 @@ export function useChatSessionState({
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [chatMessages.length, isActive, isLoadingSessionMessages, scrollToBottom]);
+  }, [chatMessages.length, isActive, isLoadingSessionMessages, scrollToBottom, markProgrammaticScroll]);
 
   // Session replay/subscription remains active regardless of which main tab is
   // visible. Only persisted-history HTTP traffic is visibility-gated below.
@@ -989,6 +1094,7 @@ export function useChatSessionState({
     scrollToBottomAndReset,
     isNearBottom,
     handleScroll,
+    handleUserScrollGesture,
     requestLatestMessages,
   };
 }

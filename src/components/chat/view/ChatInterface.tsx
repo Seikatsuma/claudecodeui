@@ -132,7 +132,7 @@ function ChatInterface({
     scrollContainerRef,
     scrollToBottom,
     scrollToBottomAndReset,
-    handleScroll,
+    handleUserScrollGesture,
     requestLatestMessages,
   } = useChatSessionState({
     isActive,
@@ -357,8 +357,8 @@ function ChatInterface({
       <div className="flex h-full min-h-0 flex-col">
         <ChatMessagesPane
           scrollContainerRef={scrollContainerRef}
-          onWheel={handleScroll}
-          onTouchMove={handleScroll}
+          onWheel={handleUserScrollGesture}
+          onTouchMove={handleUserScrollGesture}
           isLoadingSessionMessages={isLoadingSessionMessages}
           isProcessing={isProcessing}
           hasActivityIndicator={hasActivityIndicator}
