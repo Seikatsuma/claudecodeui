@@ -74,6 +74,12 @@ const systemRoutes = createSystemModule({
     installMode,
     isPlatform: IS_PLATFORM,
 });
+// Optional multi-account labeling: lets an operator run several instances of this
+// same app (each with its own CLAUDE_CONFIG_DIR/DATABASE_PATH) and give the UI a
+// visible hint of which account is active, plus a link to jump to the other
+// instance. Both are unset by default so unrelated deployments see no change.
+const ACCOUNT_LABEL = process.env.ACCOUNT_LABEL || null;
+const SWITCH_ACCOUNT_URL = process.env.SWITCH_ACCOUNT_URL || null;
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
 const app = express();
@@ -138,7 +144,9 @@ app.get('/health', (req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         installMode,
-        version: RUNNING_VERSION
+        version: RUNNING_VERSION,
+        accountLabel: ACCOUNT_LABEL,
+        switchAccountUrl: SWITCH_ACCOUNT_URL
     });
 });
 

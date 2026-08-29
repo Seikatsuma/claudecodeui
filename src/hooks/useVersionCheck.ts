@@ -30,6 +30,12 @@ export const useVersionCheck = (owner: string, repo: string) => {
   const [installMode, setInstallMode] = useState<InstallMode>('git');
   const [runningVersion, setRunningVersion] = useState<string | null>(null);
   const [restartRequired, setRestartRequired] = useState(false);
+  // Multi-account labeling (optional, off by default): set on the server via the
+  // ACCOUNT_LABEL / SWITCH_ACCOUNT_URL env vars when running several instances of
+  // this app side by side, one per account. null means "not configured" - the
+  // sidebar renders nothing for either in that case.
+  const [accountLabel, setAccountLabel] = useState<string | null>(null);
+  const [switchAccountUrl, setSwitchAccountUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchHealth = async () => {
@@ -47,6 +53,12 @@ export const useVersionCheck = (owner: string, repo: string) => {
         if (typeof data.version === 'string' && data.version.length > 0) {
           setRunningVersion(data.version);
           setRestartRequired(data.version !== version);
+        }
+        if (typeof data.accountLabel === 'string' && data.accountLabel.length > 0) {
+          setAccountLabel(data.accountLabel);
+        }
+        if (typeof data.switchAccountUrl === 'string' && data.switchAccountUrl.length > 0) {
+          setSwitchAccountUrl(data.switchAccountUrl);
         }
       } catch {
         // Default to git / no restart hint on error
@@ -95,5 +107,15 @@ export const useVersionCheck = (owner: string, repo: string) => {
     return () => clearInterval(interval);
   }, [owner, repo]);
 
-  return { updateAvailable, latestVersion, currentVersion: version, releaseInfo, installMode, runningVersion, restartRequired };
+  return {
+    updateAvailable,
+    latestVersion,
+    currentVersion: version,
+    releaseInfo,
+    installMode,
+    runningVersion,
+    restartRequired,
+    accountLabel,
+    switchAccountUrl,
+  };
 };

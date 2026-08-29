@@ -1,4 +1,4 @@
-import { Settings, ArrowUpCircle, Bug, AlertTriangle, LogOut } from 'lucide-react';
+import { Settings, ArrowUpCircle, Bug, AlertTriangle, LogOut, Users, ArrowLeftRight } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { IS_PLATFORM } from '../../../../shared/utils';
@@ -24,6 +24,11 @@ type SidebarFooterProps = {
   releaseInfo: ReleaseInfo | null;
   latestVersion: string | null;
   currentVersion: string;
+  // Multi-account labeling (both optional, off by default - see server ACCOUNT_LABEL /
+  // SWITCH_ACCOUNT_URL env vars). accountLabel null means the badge is hidden entirely;
+  // switchAccountUrl null means the badge renders without the "Switch account" link.
+  accountLabel: string | null;
+  switchAccountUrl: string | null;
   onShowVersionModal: () => void;
   onShowSettings: () => void;
   t: TFunction;
@@ -35,6 +40,8 @@ export default function SidebarFooter({
   releaseInfo,
   latestVersion,
   currentVersion,
+  accountLabel,
+  switchAccountUrl,
   onShowVersionModal,
   onShowSettings,
   t,
@@ -153,6 +160,28 @@ export default function SidebarFooter({
         </button>
       </div>
 
+      {/* Desktop account indicator: only rendered when the server was started with
+          ACCOUNT_LABEL set (multi-instance setup, one instance per account). */}
+      {accountLabel && (
+        <div className="hidden px-2 pb-1.5 md:block">
+          <div className="flex items-center gap-2.5 rounded-lg border border-violet-300/60 bg-violet-50/80 px-2.5 py-2 dark:border-violet-700/40 dark:bg-violet-900/15">
+            <Users className="h-4 w-4 flex-shrink-0 text-violet-500 dark:text-violet-400" />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-violet-700 dark:text-violet-300">
+              {accountLabel}
+            </span>
+            {switchAccountUrl && (
+              <a
+                href={switchAccountUrl}
+                className="flex flex-shrink-0 items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-100"
+              >
+                <ArrowLeftRight className="h-3 w-3" />
+                {t('actions.switchAccount')}
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Desktop log out */}
       <div className="hidden px-2 pb-1.5 md:block">
         <button
@@ -220,6 +249,30 @@ export default function SidebarFooter({
           <span className="text-sm font-normal text-foreground">{t('actions.settings')}</span>
         </button>
       </div>
+
+      {/* Mobile account indicator: only rendered when the server was started with
+          ACCOUNT_LABEL set (multi-instance setup, one instance per account). */}
+      {accountLabel && (
+        <div className="px-3 pb-3 md:hidden">
+          <div className="flex h-10 w-full items-center gap-3 rounded-xl border border-violet-300/60 bg-violet-50/80 px-3.5 dark:border-violet-700/40 dark:bg-violet-900/15">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-background/80">
+              <Users className="h-4 w-4 text-violet-500 dark:text-violet-400" />
+            </div>
+            <span className="min-w-0 flex-1 truncate text-sm font-normal text-violet-700 dark:text-violet-300">
+              {accountLabel}
+            </span>
+            {switchAccountUrl && (
+              <a
+                href={switchAccountUrl}
+                className="flex flex-shrink-0 items-center gap-1 text-xs font-medium text-violet-600 dark:text-violet-300"
+              >
+                <ArrowLeftRight className="h-3.5 w-3.5" />
+                {t('actions.switchAccount')}
+              </a>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Mobile log out */}
       <div className="px-3 pb-3 md:hidden">

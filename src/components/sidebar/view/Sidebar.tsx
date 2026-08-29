@@ -44,7 +44,16 @@ function Sidebar({
 }: SidebarProps) {
   const { t } = useTranslation(['sidebar', 'common']);
   const { isPWA } = useDeviceSettings({ trackMobile: false });
-  const { updateAvailable, restartRequired, latestVersion, currentVersion, releaseInfo, installMode } = useVersionCheck(
+  const {
+    updateAvailable,
+    restartRequired,
+    latestVersion,
+    currentVersion,
+    releaseInfo,
+    installMode,
+    accountLabel,
+    switchAccountUrl,
+  } = useVersionCheck(
     'siteboon',
     'claudecodeui',
   );
@@ -319,6 +328,8 @@ function Sidebar({
             releaseInfo={releaseInfo}
             latestVersion={latestVersion}
             currentVersion={currentVersion}
+            accountLabel={accountLabel}
+            switchAccountUrl={switchAccountUrl}
             onShowVersionModal={() => setShowVersionModal(true)}
             onShowSettings={onShowSettings}
             projectListProps={projectListProps}

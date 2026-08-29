@@ -128,6 +128,8 @@ type SidebarContentProps = {
   releaseInfo: ReleaseInfo | null;
   latestVersion: string | null;
   currentVersion: string;
+  accountLabel: string | null;
+  switchAccountUrl: string | null;
   onShowVersionModal: () => void;
   onShowSettings: () => void;
   projectListProps: SidebarProjectListProps;
@@ -174,6 +176,8 @@ export default function SidebarContent({
   releaseInfo,
   latestVersion,
   currentVersion,
+  accountLabel,
+  switchAccountUrl,
   onShowVersionModal,
   onShowSettings,
   projectListProps,
@@ -697,6 +701,8 @@ export default function SidebarContent({
           releaseInfo={releaseInfo}
           latestVersion={latestVersion}
           currentVersion={currentVersion}
+          accountLabel={accountLabel}
+          switchAccountUrl={switchAccountUrl}
           onShowVersionModal={onShowVersionModal}
           onShowSettings={onShowSettings}
           t={t}
