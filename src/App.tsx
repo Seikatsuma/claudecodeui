@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 import { I18nextProvider } from 'react-i18next';
 
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -116,6 +116,24 @@ export default function App() {
                     <Routes>
                       <Route path="/" element={<AppContent />} />
                       <Route path="/session/:sessionId" element={<AppContent />} />
+                      {/*
+                        Catch-all: redirect any unmatched path back to the app
+                        root instead of rendering nothing. <Routes> with no
+                        matching Route renders null, which - combined with the
+                        dark-by-default theme background - looks like a
+                        totally blank, unresponsive "gray screen" with no
+                        error anywhere. This is reachable in practice: the
+                        sidebar's cross-origin "switch account" link
+                        (SWITCH_ACCOUNT_URL) can be misconfigured as a path
+                        relative to the OTHER instance's deployment (e.g. a
+                        root-mounted instance given the other instance's
+                        subpath, "/sun-cc/") - the browser then resolves it
+                        against the CURRENT origin and lands on a path this
+                        router was never going to recognize. Fix the URL at
+                        the source when possible (see deploy/claudecodeui.service),
+                        but the app itself must never go blank for it.
+                      */}
+                      <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
                   </Router>
                 </ProtectedRoute>

@@ -69,7 +69,20 @@ Environment=SERVER_PORT=3001
 #   Environment=CLAUDE_CONFIG_DIR=/home/claude/.claude-account2
 #   Environment=DATABASE_PATH=/home/claude/.cloudcli-account2/auth.db
 #   Environment=ACCOUNT_LABEL="Account 2"
-#   Environment=SWITCH_ACCOUNT_URL=/sun-cc/
+#   Environment=SWITCH_ACCOUNT_URL=https://your-domain.example/sun-cc/
+#
+# SWITCH_ACCOUNT_URL MUST be a full absolute URL (scheme + host, and port if
+# not the default) to the OTHER instance's public entry point, never a bare
+# path like "/sun-cc/". The browser resolves a bare path against the
+# CURRENT page's own origin, not the other instance's - clicking it just
+# lands on that same path on the account you were already on. If that
+# instance has no route for it (e.g. a root-mounted instance given the other
+# instance's subpath), the app renders a blank screen with no error (fixed
+# in-app by a catch-all redirect-to-"/", but the link itself should still
+# point at the right place). This was a real production bug: a
+# CLAUDE_CONFIG_DIR-scoped second instance had this set to "/sun-cc/" -
+# the FIRST instance's own subpath - instead of that instance's full
+# external URL.
 
 # --- Crash-loop protection (this VPS runs several other unrelated bots on
 # 3.8GB RAM / 2 CPUs sharing this host; a runaway or crash-looping service
