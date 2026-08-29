@@ -180,7 +180,7 @@ export default function SidebarFooter({
                   string), this can't accidentally be identical across instances,
                   which is exactly what makes two accounts look "the same". */}
               {accountEmail && (
-                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70">
+                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70" title={accountEmail}>
                   {accountEmail}
                 </span>
               )}
@@ -279,7 +279,7 @@ export default function SidebarFooter({
                 {accountLabel}
               </span>
               {accountEmail && (
-                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70">
+                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70" title={accountEmail}>
                   {accountEmail}
                 </span>
               )}
