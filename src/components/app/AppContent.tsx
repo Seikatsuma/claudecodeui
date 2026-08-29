@@ -82,6 +82,7 @@ function AppContentInner() {
     sidebarSharedProps,
     handleNewSession,
     handleProjectSelect,
+    handleSessionSelect,
     handleSessionDelete,
   } = useProjectsState({
     sessionId,
@@ -270,6 +271,7 @@ function AppContentInner() {
           onClose={closeTab}
         />
         <MainContent
+          projects={projects}
           selectedProject={selectedProject}
           selectedSession={selectedSession}
           activeTab={activeTab}
@@ -293,6 +295,7 @@ function AppContentInner() {
           externalMessageUpdate={externalMessageUpdate}
           newSessionTrigger={newSessionTrigger}
           onProjectSelect={handleProjectSelect}
+          onSessionSelect={handleSessionSelect}
           onProjectsRefresh={() => void refreshProjectsSilently()}
         />
       </div>

@@ -39,6 +39,7 @@ export type PrdFile = {
 };
 
 export type MainContentProps = {
+  projects: Project[];
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
   activeTab: AppTab;
@@ -57,8 +58,10 @@ export type MainContentProps = {
   onShowSettings: (tab?: SettingsMainTab) => void;
   externalMessageUpdate: number;
   newSessionTrigger: number;
-  /** Switches the app to another project — used by the git panel's Worktrees view. */
+  /** Switches the app to another project — used by the git panel's Worktrees view and the empty-state recent projects list. */
   onProjectSelect: (project: Project) => void;
+  /** Jumps straight into a specific session — used by the empty-state "continue last chat" shortcut. */
+  onSessionSelect: (session: ProjectSession) => void;
   /** Silently re-syncs the sidebar project list after worktree projects change. */
   onProjectsRefresh: () => void;
 };
@@ -78,6 +81,10 @@ export type MainContentStateViewProps = {
   mode: 'loading' | 'empty';
   isMobile: boolean;
   onMenuClick: () => void;
+  /** Recently active projects offered as quick-launch cards on the empty state. */
+  projects: Project[];
+  onProjectSelect: (project: Project) => void;
+  onSessionSelect: (session: ProjectSession) => void;
 };
 
 export type MobileMenuButtonProps = {

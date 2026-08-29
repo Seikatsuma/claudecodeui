@@ -95,7 +95,15 @@
     "createProjectDesktop": "Создайте новый проект, нажав на значок папки на боковой панели",
     "newSession": "Новый сеанс",
     "untitledSession": "Безымянный сеанс",
-    "projectFiles": "Файлы проекта"
+    "projectFiles": "Файлы проекта",
+    "welcomeBackTitle": "С возвращением",
+    "welcomeBackDescription": "Продолжите недавний проект или вернитесь к последнему разговору.",
+    "continueLastChat": "Продолжить последний чат",
+    "recentProjects": "Недавние проекты",
+    "sessionCount_one": "{{count}} сеанс",
+    "sessionCount_few": "{{count}} сеанса",
+    "sessionCount_many": "{{count}} сеансов",
+    "sessionCount_other": "{{count}} сеанса"
   },
   "fileTree": {
     "loading": "Загрузка файлов...",
