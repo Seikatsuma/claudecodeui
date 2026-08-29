@@ -6,11 +6,13 @@ import Sidebar from '../sidebar/view/Sidebar';
 import MainContent from '../main-content/view/MainContent';
 import CommandPalette from '../command-palette/CommandPalette';
 import { QuickSettingsPanel } from '../quick-settings-panel';
+import SessionTabsBar from '../session-tabs/SessionTabsBar';
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { PaletteOpsProvider, usePaletteOpsRegister } from '../../contexts/PaletteOpsContext';
 import { useDeviceSettings } from '../../hooks/useDeviceSettings';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
+import { useOpenSessionTabs } from '../../hooks/useOpenSessionTabs';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
 import { api } from '../../utils/api';
 
@@ -63,6 +65,7 @@ function AppContentInner() {
   } = useSessionProtection();
 
   const {
+    projects,
     selectedProject,
     selectedSession,
     activeTab,
@@ -79,6 +82,7 @@ function AppContentInner() {
     sidebarSharedProps,
     handleNewSession,
     handleProjectSelect,
+    handleSessionDelete,
   } = useProjectsState({
     sessionId,
     navigate,
@@ -87,12 +91,31 @@ function AppContentInner() {
     activeSessions: processingSessions,
   });
 
+  // Open-session tabs (VS Code-style strip above the chat area): a session
+  // gets a tab the moment it's actually viewed — sidebar click, search
+  // result, notification, deep link — never eagerly for the whole sidebar.
+  const activeSessionId = selectedSession?.id ?? sessionId ?? null;
+  const { openTabs, switchToTab, closeTab, removeTabsForSessions } = useOpenSessionTabs({
+    projects,
+    activeSessionId,
+    activeSession: selectedSession,
+    navigate,
+  });
+
+  const handleSessionDeleteWithTabCleanup = useCallback(
+    (deletedSessionId: string) => {
+      handleSessionDelete(deletedSessionId);
+      removeTabsForSessions([deletedSessionId]);
+    },
+    [handleSessionDelete, removeTabsForSessions],
+  );
+
   // Queued messages for sessions that finish while another session (or none)
   // is being viewed are sent from here; the viewed session's composer handles
   // its own queue.
   useQueuedMessageAutoSend({
     processingSessions,
-    activeSessionId: selectedSession?.id ?? sessionId ?? null,
+    activeSessionId,
     ws,
     sendMessage,
     markSessionProcessing,
@@ -208,7 +231,7 @@ function AppContentInner() {
     <div className="fixed inset-0 flex bg-background" style={{ bottom: 'var(--keyboard-height, 0px)' }}>
       {!isMobile ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
-          <Sidebar {...sidebarSharedProps} />
+          <Sidebar {...sidebarSharedProps} onSessionDelete={handleSessionDeleteWithTabCleanup} />
         </div>
       ) : (
         <div
@@ -234,12 +257,18 @@ function AppContentInner() {
             onClick={(event) => event.stopPropagation()}
             onTouchStart={(event) => event.stopPropagation()}
           >
-            <Sidebar {...sidebarSharedProps} />
+            <Sidebar {...sidebarSharedProps} onSessionDelete={handleSessionDeleteWithTabCleanup} />
           </div>
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
+        <SessionTabsBar
+          tabs={openTabs}
+          activeSessionId={activeSessionId}
+          onSelect={switchToTab}
+          onClose={closeTab}
+        />
         <MainContent
           selectedProject={selectedProject}
           selectedSession={selectedSession}
