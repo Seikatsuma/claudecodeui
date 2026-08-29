@@ -1,9 +1,10 @@
-import { Cloud, ExternalLink, MessageSquare, Star, Users } from 'lucide-react';
+import { Cloud, ExternalLink, LogOut, MessageSquare, Star, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../shared/constants';
 import { IS_PLATFORM } from '../../../../shared/utils';
 import { useVersionCheck } from '../../../../hooks/useVersionCheck';
+import { useAuth } from '../../../auth/context/AuthContext';
 import PremiumFeatureCard from '../PremiumFeatureCard';
 
 const GITHUB_REPO_URL = 'https://github.com/siteboon/claudecodeui';
@@ -31,6 +32,7 @@ export default function AboutTab() {
   const { t } = useTranslation('settings');
   const { updateAvailable, latestVersion, currentVersion, releaseInfo } = useVersionCheck('siteboon', 'claudecodeui');
   const releasesUrl = releaseInfo?.htmlUrl || `${GITHUB_REPO_URL}/releases`;
+  const { user, logout } = useAuth();
 
   return (
     <div className="space-y-6">
@@ -71,6 +73,24 @@ export default function AboutTab() {
             Open-source AI coding assistant interface
           </p>
         </div>
+      </div>
+
+      {/* Session / account */}
+      <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+        <h4 className="text-sm font-medium text-foreground">{t('about.sessionTitle', 'Session')}</h4>
+        {user?.username && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t('about.loggedInAs', { username: user.username, defaultValue: 'Signed in as {{username}}' })}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={logout}
+          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-500/5 px-3.5 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/10 dark:border-red-900/40 dark:text-red-400 dark:hover:bg-red-900/20"
+        >
+          <LogOut className="h-4 w-4" />
+          {t('about.logout', 'Log Out')}
+        </button>
       </div>
 
       {/* Star on GitHub button */}

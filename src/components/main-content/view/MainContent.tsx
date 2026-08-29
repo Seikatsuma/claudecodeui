@@ -34,6 +34,7 @@ type TasksSettingsContextValue = {
 };
 
 function MainContent({
+  projects,
   selectedProject,
   selectedSession,
   activeTab,
@@ -53,6 +54,7 @@ function MainContent({
   externalMessageUpdate,
   newSessionTrigger,
   onProjectSelect,
+  onSessionSelect,
   onProjectsRefresh,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
@@ -135,11 +137,29 @@ function MainContent({
   });
 
   if (isLoading) {
-    return <MainContentStateView mode="loading" isMobile={isMobile} onMenuClick={onMenuClick} />;
+    return (
+      <MainContentStateView
+        mode="loading"
+        isMobile={isMobile}
+        onMenuClick={onMenuClick}
+        projects={projects}
+        onProjectSelect={onProjectSelect}
+        onSessionSelect={onSessionSelect}
+      />
+    );
   }
 
   if (!selectedProject) {
-    return <MainContentStateView mode="empty" isMobile={isMobile} onMenuClick={onMenuClick} />;
+    return (
+      <MainContentStateView
+        mode="empty"
+        isMobile={isMobile}
+        onMenuClick={onMenuClick}
+        projects={projects}
+        onProjectSelect={onProjectSelect}
+        onSessionSelect={onSessionSelect}
+      />
+    );
   }
 
   return (

@@ -95,7 +95,13 @@
     "createProjectDesktop": "Create a new project by clicking the folder icon in the sidebar",
     "newSession": "New Session",
     "untitledSession": "Untitled Session",
-    "projectFiles": "Project Files"
+    "projectFiles": "Project Files",
+    "welcomeBackTitle": "Welcome back",
+    "welcomeBackDescription": "Jump back into a recent project or pick up your last conversation.",
+    "continueLastChat": "Continue last chat",
+    "recentProjects": "Recent projects",
+    "sessionCount_one": "{{count}} session",
+    "sessionCount_other": "{{count}} sessions"
   },
   "fileTree": {
     "loading": "Loading files...",

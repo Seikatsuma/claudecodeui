@@ -210,6 +210,38 @@ export function useSidebarController({
     });
   }, [selectedProject?.projectId]);
 
+  // The user's primary working directory (`/home/claude`, run as `claude` from
+  // the home dir) accumulates the overwhelming majority of sessions and is the
+  // only project he actually re-enters day to day; everything else is a rare
+  // visit. Default it open on load so it's visible without a click, while
+  // every other project stays collapsed like before. Attempted once per mount
+  // (guarded by the ref) so it never fights a manual collapse afterwards, and
+  // `expandedProjects` state itself isn't persisted, so this naturally
+  // reapplies on every fresh page load rather than only "the first time ever".
+  const defaultExpansionAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (defaultExpansionAttemptedRef.current || projects.length === 0) {
+      return;
+    }
+    defaultExpansionAttemptedRef.current = true;
+
+    const homeProject = projects.find(
+      (project) => project.fullPath === '/home/claude' || project.path === '/home/claude',
+    );
+    if (!homeProject) {
+      return;
+    }
+
+    setExpandedProjects((prev) => {
+      if (prev.has(homeProject.projectId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(homeProject.projectId);
+      return next;
+    });
+  }, [projects]);
+
   useEffect(() => {
     if (projects.length > 0 && !isLoading) {
       const loadedProjects = new Set<string>();
