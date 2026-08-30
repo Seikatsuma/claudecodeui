@@ -36,7 +36,7 @@ const DEFAULTS: UiPreferences = {
   showThinking: true,
   sendByCtrlEnter: false,
   sidebarVisible: true,
-  voiceEnabled: false,
+  voiceEnabled: true,
 };
 
 const PREFERENCE_KEYS = Object.keys(DEFAULTS) as UiPreferenceKey[];
