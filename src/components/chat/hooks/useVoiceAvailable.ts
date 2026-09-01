@@ -24,14 +24,20 @@ function checkVoiceHealth(): Promise<boolean> {
   return request;
 }
 
+// Matches the `voiceEnabled: true` default in useUiPreferences.ts's DEFAULTS —
+// this reads the same localStorage key independently (to avoid a hook
+// dependency cycle), so an unset/missing value must fall back the same way,
+// not to `false`, or the mic button stays hidden for every user who has
+// never opened Settings.
 function readVoiceEnabled(): boolean {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
+    if (!raw) return true;
     const parsed = JSON.parse(raw);
-    return parsed?.voiceEnabled === true || parsed?.voiceEnabled === 'true';
+    if (parsed?.voiceEnabled === undefined) return true;
+    return parsed.voiceEnabled === true || parsed.voiceEnabled === 'true';
   } catch {
-    return false;
+    return true;
   }
 }
 
