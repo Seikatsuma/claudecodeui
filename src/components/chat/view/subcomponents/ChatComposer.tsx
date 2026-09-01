@@ -431,7 +431,7 @@ export default function ChatComposer({
             />
         </PromptInputBody>
 
-        <PromptInputFooter>
+        <PromptInputFooter className="gap-2">
           <PromptInputTools className="scrollbar-hide min-w-0 overflow-x-auto">
             <PromptInputButton
               tooltip={{ content: t('input.attachFiles') }}
@@ -483,9 +483,24 @@ export default function ChatComposer({
                 that collision was a real, measured bug once the weekly
                 usage indicator's extra width was added to the tools row at
                 common laptop widths (1280-1440px). The controls to its
-                right stay full-size (own shrink-0 group below). */}
+                right stay full-size (own shrink-0 group below).
+
+                Gated at xl (1280px), not lg (1024px): this component lives
+                in the chat pane next to the ~288px session sidebar, so its
+                available width is the *viewport* width minus the sidebar,
+                not the viewport width itself - a plain viewport media query
+                can't see that. Measured in a real browser with the sidebar
+                open: at 1024-1150px viewport width PromptInputTools (the
+                icon row to the left, itself scrollable/clipped rather than
+                shrinking) no longer fits its own content once this hint
+                claims space too, so its clipped trailing icon sat flush
+                against the hint text with zero gap - reading as a stray
+                glyph mangling the hint ("странный символ слева"), not as a
+                scrollable row. xl reuses the exact width the original
+                weekly-usage-indicator change already verified clean
+                (1280-1440px) instead of inventing a new cutoff. */}
             <div
-              className={`hidden min-w-0 flex-1 truncate text-xs text-muted-foreground/50 transition-opacity duration-200 lg:block ${
+              className={`hidden min-w-0 flex-1 truncate text-xs text-muted-foreground/50 transition-opacity duration-200 xl:block ${
                 input.trim() && !canQueueDraft ? 'opacity-0' : 'opacity-100'
               }`}
             >
