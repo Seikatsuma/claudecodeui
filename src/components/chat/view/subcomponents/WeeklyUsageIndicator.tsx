@@ -97,10 +97,20 @@ export default function WeeklyUsageIndicator({ snapshot, isLoading }: WeeklyUsag
   }
   const tooltip = tooltipLines.join('\n');
 
+  // The estimate fallback is a raw 7-day token sum, not a percent of anything
+  // (see the module docstring above and claude-weekly-usage.service.ts) - on
+  // a busy account it can land in the hundreds of millions or billions
+  // (cache-read tokens dominate and aren't discounted here the way the real
+  // weekly cap discounts them), formatted down to e.g. "2.2B" by
+  // formatTokenCount. Sitting alone in the same slot a "55%" would occupy,
+  // that read as a broken/garbled percent in practice - the leading "~" and
+  // the muted (vs. text-foreground) color below are the fix: they mark it as
+  // an approximate, secondary figure at a glance, without repeating the
+  // "tokens" word here (the tooltip already spells that out in full).
   const badgeLabel = percent !== null
     ? `${percent}%`
     : estimate
-      ? formatTokenCount(estimate.totalTokens)
+      ? `~${formatTokenCount(estimate.totalTokens)}`
       : null;
 
   return (
@@ -135,7 +145,11 @@ export default function WeeklyUsageIndicator({ snapshot, isLoading }: WeeklyUsag
           />
         </svg>
       </span>
-      {badgeLabel && <span className="font-medium text-foreground">{badgeLabel}</span>}
+      {badgeLabel && (
+        <span className={`font-medium ${percent !== null ? 'text-foreground' : 'text-muted-foreground'}`}>
+          {badgeLabel}
+        </span>
+      )}
     </button>
   );
 }
