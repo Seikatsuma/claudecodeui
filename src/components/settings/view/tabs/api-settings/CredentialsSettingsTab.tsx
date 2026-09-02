@@ -1,11 +1,17 @@
 import { useTranslation } from 'react-i18next';
+
+import { useAuth } from '../../../../auth';
 import { useCredentialsSettings } from '../../../hooks/useCredentialsSettings';
+
+import AnthropicApiKeySection from './sections/AnthropicApiKeySection';
 import ApiKeysSection from './sections/ApiKeysSection';
 import GithubCredentialsSection from './sections/GithubCredentialsSection';
+import LoginLinkSection from './sections/LoginLinkSection';
 import NewApiKeyAlert from './sections/NewApiKeyAlert';
 
 export default function CredentialsSettingsTab() {
   const { t } = useTranslation('settings');
+  const { openRegistration } = useAuth();
   const {
     apiKeys,
     githubCredentials,
@@ -86,6 +92,15 @@ export default function CredentialsSettingsTab() {
         onDeleteGithubCredential={deleteGithubCredential}
       />
 
+      {/* Only meaningful on a shared, self-service instance: Account 1/2
+          authenticate the Claude CLI itself (`claude login`) and never read
+          this field, so it stays hidden there rather than sitting unused. */}
+      {openRegistration && (
+        <>
+          <AnthropicApiKeySection />
+          <LoginLinkSection />
+        </>
+      )}
     </div>
   );
 }
