@@ -24,6 +24,7 @@ import {
     authenticateToken,
     authenticateWebSocket,
     authRoutes,
+    requestRuntimeContextMiddleware,
     validateApiKey,
 } from './modules/auth/index.js';
 import { taskmasterRoutes } from './modules/taskmaster/index.js';
@@ -175,53 +176,59 @@ app.use('/api', validateApiKey);
 // Authentication routes (public)
 app.use('/api/auth', authRoutes);
 
+// Resolves the authenticated user's own CLAUDE_CONFIG_DIR/workspace/API key
+// for the rest of the request (OPEN_REGISTRATION instances only - a no-op
+// pass-through everywhere else). Always mounted right after authenticateToken
+// so every protected module downstream sees a consistent per-user context.
+const withUserRuntimeContext = [authenticateToken, requestRuntimeContextMiddleware];
+
 // File Tree API Routes (protected)
-app.use('/api/file-tree', authenticateToken, fileTreeRoutes);
+app.use('/api/file-tree', withUserRuntimeContext, fileTreeRoutes);
 
 // Projects API Routes (protected)
-app.use('/api/projects', authenticateToken, projectModuleRoutes);
+app.use('/api/projects', withUserRuntimeContext, projectModuleRoutes);
 
 // Chat attachment upload/serving (global ~/.cloudcli/assets store, protected)
-app.use('/api/assets', authenticateToken, assetsRoutes);
+app.use('/api/assets', withUserRuntimeContext, assetsRoutes);
 
 // Git API Routes (protected)
-app.use('/api/git', authenticateToken, gitRoutes);
+app.use('/api/git', withUserRuntimeContext, gitRoutes);
 
 // Git worktree management (protected)
-app.use('/api/worktrees', authenticateToken, worktreesRoutes);
+app.use('/api/worktrees', withUserRuntimeContext, worktreesRoutes);
 
 // TaskMaster API Routes (protected)
-app.use('/api/taskmaster', authenticateToken, taskmasterRoutes);
+app.use('/api/taskmaster', withUserRuntimeContext, taskmasterRoutes);
 
 // Commands API Routes (protected)
-app.use('/api/commands', authenticateToken, commandsRoutes);
+app.use('/api/commands', withUserRuntimeContext, commandsRoutes);
 
 // Settings API Routes (protected)
-app.use('/api/settings', authenticateToken, settingsRoutes);
+app.use('/api/settings', withUserRuntimeContext, settingsRoutes);
 
-app.use('/api/system', authenticateToken, systemRoutes);
+app.use('/api/system', withUserRuntimeContext, systemRoutes);
 
-app.use('/api/notifications', authenticateToken, notificationRoutes);
+app.use('/api/notifications', withUserRuntimeContext, notificationRoutes);
 
 // User API Routes (protected)
-app.use('/api/user', authenticateToken, userRoutes);
+app.use('/api/user', withUserRuntimeContext, userRoutes);
 
 // Plugins API Routes (protected)
-app.use('/api/plugins', authenticateToken, pluginsRoutes);
+app.use('/api/plugins', withUserRuntimeContext, pluginsRoutes);
 
 // Browser MCP bridge API (local token protected)
 app.use('/api/browser-use-mcp', browserUseMcpRoutes);
 
 // Browser API Routes (protected)
-app.use('/api/browser-use', authenticateToken, browserUseRoutes);
+app.use('/api/browser-use', withUserRuntimeContext, browserUseRoutes);
 
 // Unified provider MCP routes (protected)
-app.use('/api/providers', authenticateToken, providerRoutes);
+app.use('/api/providers', withUserRuntimeContext, providerRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
 
-app.use('/api/voice', authenticateToken, voiceRoutes);
+app.use('/api/voice', withUserRuntimeContext, voiceRoutes);
 
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(APP_ROOT, 'public')));

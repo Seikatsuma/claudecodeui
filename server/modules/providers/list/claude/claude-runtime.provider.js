@@ -31,7 +31,8 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
-import { createCompleteMessage, createNormalizedMessage, getClaudeJsonPath } from '@/shared/utils.js';
+import { createCompleteMessage, createNormalizedMessage, getClaudeConfigDir, getClaudeJsonPath } from '@/shared/utils.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -243,6 +244,27 @@ function mapCliOptionsToSDK(options = {}) {
   // Forward all host env vars (e.g. ANTHROPIC_BASE_URL) to the subprocess.
   // Since SDK 0.2.113, options.env replaces process.env instead of overlaying it.
   sdkOptions.env = { ...process.env, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: String(BG_WAIT_CEILING_MS) };
+
+  // Multi-tenant env overrides. `options.claudeConfigDir`/`options.anthropicApiKey`
+  // are set explicitly by the chat WebSocket handler (chat-websocket.service.ts),
+  // which resolves them from the message's own userId - AsyncLocalStorage context
+  // does not reach a WebSocket 'message' handler, only HTTP request call stacks.
+  // getClaudeConfigDir()/getRequestRuntimeContext() cover the HTTP call sites
+  // (git.routes.ts's commit-message helper, agent.routes.ts) automatically.
+  // On every install that never sets either (Account 1/2 included), both
+  // resolve to exactly what was already in `...process.env` above, so this
+  // changes nothing for them - CLAUDE_CONFIG_DIR/ANTHROPIC_API_KEY end up with
+  // the same values, just spelled out explicitly instead of inherited.
+  const resolvedConfigDir = options.claudeConfigDir || getClaudeConfigDir();
+  if (resolvedConfigDir) {
+    sdkOptions.env.CLAUDE_CONFIG_DIR = resolvedConfigDir;
+  }
+  const resolvedApiKey = options.anthropicApiKey
+    ?? getRequestRuntimeContext()?.anthropicApiKey
+    ?? null;
+  if (resolvedApiKey) {
+    sdkOptions.env.ANTHROPIC_API_KEY = resolvedApiKey;
+  }
 
   // Resolve the executable eagerly on Windows because the SDK uses raw child_process.spawn,
   // which does not reliably follow npm's shell wrappers like cross-spawn does.

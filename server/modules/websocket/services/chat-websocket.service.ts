@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import type { WebSocket } from 'ws';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { credentialsDb, sessionsDb } from '@/modules/database/index.js';
 import { providerModelsService } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
@@ -19,7 +19,39 @@ import type {
   ProviderPermissionDecision,
   ProviderRuntimeWriter,
 } from '@/shared/types.js';
-import { parseIncomingJsonObject } from '@/shared/utils.js';
+import { OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
+import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
+
+const ANTHROPIC_API_KEY_CREDENTIAL_TYPE = 'anthropic_api_key';
+
+/**
+ * Resolves this OPEN_REGISTRATION user's own CLAUDE_CONFIG_DIR and Anthropic
+ * API key so the chat runtime dispatch below can pass them straight through
+ * to the Claude SDK's per-call `env` (claude-runtime.provider.js). The chat
+ * WebSocket's 'message' handler runs outside any HTTP request's call stack,
+ * so the AsyncLocalStorage context that covers REST routes cannot reach it -
+ * this resolves the same per-user values explicitly instead.
+ *
+ * Returns nulls when OPEN_REGISTRATION is off (the runtime then falls back to
+ * process.env, i.e. Account 1/2's existing behavior) or when userId is unset.
+ */
+function resolveOpenRegistrationRuntimeContext(
+  userId: string | number | null,
+): { claudeConfigDir: string | null; anthropicApiKey: string | null } {
+  if (!OPEN_REGISTRATION || userId === null) {
+    return { claudeConfigDir: null, anthropicApiKey: null };
+  }
+
+  const numericUserId = Number(userId);
+  if (!Number.isFinite(numericUserId)) {
+    return { claudeConfigDir: null, anthropicApiKey: null };
+  }
+
+  return {
+    claudeConfigDir: getWebUserClaudeConfigDir(numericUserId),
+    anthropicApiKey: credentialsDb.getActiveCredential(numericUserId, ANTHROPIC_API_KEY_CREDENTIAL_TYPE),
+  };
+}
 
 /**
  * Trust boundary for client-supplied image attachments: chat.send options come
@@ -172,6 +204,17 @@ async function handleChatSend(
     return;
   }
 
+  const openRegistrationContext = resolveOpenRegistrationRuntimeContext(userId);
+  if (OPEN_REGISTRATION && provider === 'claude' && !openRegistrationContext.anthropicApiKey) {
+    sendProtocolError(
+      ws,
+      'ANTHROPIC_API_KEY_REQUIRED',
+      'Add your Anthropic API key in Settings to start chatting with Claude.',
+      sessionId,
+    );
+    return;
+  }
+
   const run = chatRunRegistry.startRun({
     appSessionId: sessionId,
     provider,
@@ -229,6 +272,11 @@ async function handleChatSend(
     sessionId,
     cwd: clientOptions.cwd ?? session.project_path ?? undefined,
     projectPath: session.project_path ?? clientOptions.projectPath,
+    // Per-user Claude SDK env override (claude-runtime.provider.js). Both are
+    // null outside OPEN_REGISTRATION, so the runtime falls back to
+    // process.env exactly as it always has for Account 1/2.
+    claudeConfigDir: openRegistrationContext.claudeConfigDir ?? undefined,
+    anthropicApiKey: openRegistrationContext.anthropicApiKey ?? undefined,
   };
 
   try {

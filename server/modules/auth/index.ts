@@ -7,3 +7,7 @@ export { authenticateToken } from './auth.middleware.js';
 export { authenticateWebSocket } from './auth.middleware.js';
 // validateApiKey: used by the server entrypoint for optional API-wide key validation.
 export { validateApiKey } from './auth.middleware.js';
+// requestRuntimeContextMiddleware: used by the server entrypoint, mounted after
+// authenticateToken, to resolve per-user CLAUDE_CONFIG_DIR/workspace/API key on
+// OPEN_REGISTRATION instances (no-op everywhere else).
+export { requestRuntimeContextMiddleware } from './request-runtime-context.middleware.js';
