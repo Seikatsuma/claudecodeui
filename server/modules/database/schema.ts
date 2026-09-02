@@ -179,6 +179,30 @@ CREATE TABLE IF NOT EXISTS provider_models (
 );
 `;
 
+/**
+ * Invite-only registration for OPEN_REGISTRATION instances.
+ *
+ * Any logged-in user on the instance can mint an invite token from Settings
+ * and hand it to someone else as `/invite/<token>`. A token is single-use:
+ * `used_at`/`used_by_user_id` stay NULL until someone registers through it,
+ * and a second attempt through the same token is rejected (see
+ * auth.service.ts registerOpen()). `label` is an optional free-text note the
+ * creator sets for their own bookkeeping (e.g. "for Ivanov") - never shown to
+ * the invitee, only in the creator's own invite list.
+ */
+export const INVITE_TOKENS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS invite_tokens (
+    token TEXT PRIMARY KEY NOT NULL,
+    created_by_user_id INTEGER NOT NULL,
+    label TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    used_at DATETIME,
+    used_by_user_id INTEGER,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (used_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -200,6 +224,9 @@ CREATE INDEX IF NOT EXISTS idx_user_credentials_active ON user_credentials(is_ac
 
 ${USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL}
 CREATE INDEX IF NOT EXISTS idx_user_notification_preferences_user_id ON user_notification_preferences(user_id);
+
+${INVITE_TOKENS_TABLE_SCHEMA_SQL}
+CREATE INDEX IF NOT EXISTS idx_invite_tokens_created_by ON invite_tokens(created_by_user_id);
 
 ${VAPID_KEYS_TABLE_SCHEMA_SQL}
 

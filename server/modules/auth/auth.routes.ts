@@ -40,8 +40,8 @@ export function createAuthRouter(
 
   router.post('/register-open', async (req, res, next) => {
     try {
-      const body = req.body as { username?: unknown };
-      res.json(await service.registerOpen(body.username));
+      const body = req.body as { username?: unknown; inviteToken?: unknown };
+      res.json(await service.registerOpen(body.username, body.inviteToken));
     } catch (error) {
       next(error);
     }
@@ -51,6 +51,33 @@ export function createAuthRouter(
     try {
       const body = req.body as { token?: unknown };
       res.json(await service.enterWithLoginToken(body.token));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Public: lets the `/invite/<token>` screen check validity before showing
+  // the registration form (and before the visitor submits anything).
+  router.get('/invite-status/:token', (req, res, next) => {
+    try {
+      res.json(service.getInviteStatus(req.params.token));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/invites', authenticateToken, (req, res, next) => {
+    try {
+      const body = req.body as { label?: unknown };
+      res.json(service.createInvite((req as AuthenticatedRequest).user, body.label));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/invites', authenticateToken, (req, res, next) => {
+    try {
+      res.json(service.listInvites((req as AuthenticatedRequest).user));
     } catch (error) {
       next(error);
     }

@@ -11,14 +11,20 @@ type AuthDependencies = Parameters<typeof createAuthService>[0];
 // tests override just the users/transaction/rateLimiter fields they care
 // about (e.g. only hasUsers/createUser) without also having to restate every
 // other method on those nested dependency objects at every call site.
-type TestDependencyOverrides = Partial<Omit<AuthDependencies, 'users' | 'transaction' | 'rateLimiter'>> & {
+type TestDependencyOverrides = Partial<Omit<AuthDependencies, 'users' | 'transaction' | 'rateLimiter' | 'invites'>> & {
   users?: Partial<AuthDependencies['users']>;
   transaction?: Partial<AuthDependencies['transaction']>;
   rateLimiter?: Partial<AuthDependencies['rateLimiter']>;
+  invites?: Partial<AuthDependencies['invites']>;
 };
 
+// Default stand-in for an already-valid, unused invite - most registerOpen
+// tests are not testing the invite gate itself, so they get a token that
+// always checks out unless a test explicitly overrides `invites`.
+const DEFAULT_INVITE_TOKEN = 'valid-invite-token';
+
 function createDependencies(overrides: TestDependencyOverrides = {}): AuthDependencies {
-  const { users, transaction, rateLimiter, ...restOverrides } = overrides;
+  const { users, transaction, rateLimiter, invites, ...restOverrides } = overrides;
 
   return {
     users: {
@@ -34,6 +40,23 @@ function createDependencies(overrides: TestDependencyOverrides = {}): AuthDepend
       setLoginToken: () => undefined,
       getLoginToken: () => null,
       ...users,
+    },
+    invites: {
+      createInvite: (token, createdByUserId, label) => ({
+        token,
+        created_by_user_id: createdByUserId,
+        label,
+        created_at: '2026-01-01T00:00:00.000Z',
+        used_at: null,
+      }),
+      getInviteByToken: (token) => (
+        token === DEFAULT_INVITE_TOKEN
+          ? { token, label: null, created_at: '2026-01-01T00:00:00.000Z', used_at: null }
+          : undefined
+      ),
+      claimInvite: () => true,
+      listInvitesByCreator: () => [],
+      ...invites,
     },
     transaction: {
       begin: () => undefined,
@@ -175,12 +198,48 @@ test('registerOpen is rejected on an instance that does not enable open registra
   const service = createAuthService(createDependencies({ openRegistration: false }));
 
   await assert.rejects(
-    service.registerOpen('alice'),
+    service.registerOpen('alice', DEFAULT_INVITE_TOKEN),
     (error: unknown) => error instanceof AppError && error.code === 'OPEN_REGISTRATION_DISABLED',
   );
 });
 
-test('registerOpen creates a passwordless account, provisions its workspace, and returns a login link token', async () => {
+test('registerOpen rejects with no invite token at all', async () => {
+  const service = createAuthService(createDependencies({ openRegistration: true }));
+
+  await assert.rejects(
+    service.registerOpen('alice', ''),
+    (error: unknown) => error instanceof AppError && error.code === 'AUTH_INVITE_REQUIRED' && error.statusCode === 400,
+  );
+});
+
+test('registerOpen rejects an invite token that does not exist', async () => {
+  const service = createAuthService(createDependencies({ openRegistration: true }));
+
+  await assert.rejects(
+    service.registerOpen('alice', 'no-such-token'),
+    (error: unknown) => error instanceof AppError && error.code === 'AUTH_INVITE_INVALID' && error.statusCode === 404,
+  );
+});
+
+test('registerOpen rejects an invite token that was already used', async () => {
+  const service = createAuthService(createDependencies({
+    openRegistration: true,
+    invites: {
+      getInviteByToken: (token) => (
+        token === 'spent-token'
+          ? { token, label: null, created_at: '2026-01-01T00:00:00.000Z', used_at: '2026-01-02T00:00:00.000Z' }
+          : undefined
+      ),
+    },
+  }));
+
+  await assert.rejects(
+    service.registerOpen('alice', 'spent-token'),
+    (error: unknown) => error instanceof AppError && error.code === 'AUTH_INVITE_ALREADY_USED' && error.statusCode === 410,
+  );
+});
+
+test('registerOpen creates a passwordless account, provisions its workspace, claims the invite, and returns a login link token', async () => {
   const operations: string[] = [];
   const service = createAuthService(createDependencies({
     openRegistration: true,
@@ -196,19 +255,86 @@ test('registerOpen creates a passwordless account, provisions its workspace, and
       },
       updateLastLogin: (userId) => operations.push(`login:${userId}`),
     },
+    invites: {
+      claimInvite: (token, usedByUserId) => {
+        operations.push(`claim:${token}:${usedByUserId}`);
+        return true;
+      },
+    },
     provisionWorkspace: async (userId) => { operations.push(`provision:${userId}`); },
   }));
 
-  const result = await service.registerOpen('bob');
+  const result = await service.registerOpen('bob', DEFAULT_INVITE_TOKEN);
 
   assert.equal(result.success, true);
   assert.equal(result.user.username, 'bob');
   assert.equal(result.loginToken, 'the-login-token');
   assert.deepEqual(operations, [
     'create:bob:hashed-password:the-login-token',
+    `claim:${DEFAULT_INVITE_TOKEN}:42`,
     'login:42',
     'provision:42',
   ]);
+});
+
+test('registerOpen rejects when the invite loses the race to claimInvite (double-submit)', async () => {
+  const service = createAuthService(createDependencies({
+    openRegistration: true,
+    invites: { claimInvite: () => false },
+  }));
+
+  await assert.rejects(
+    service.registerOpen('bob', DEFAULT_INVITE_TOKEN),
+    (error: unknown) => error instanceof AppError && error.code === 'AUTH_INVITE_ALREADY_USED',
+  );
+});
+
+test('createInvite mints a token for the authenticated caller and rejects an over-long label', async () => {
+  const created: unknown[] = [];
+  const service = createAuthService(createDependencies({
+    openRegistration: true,
+    generateLoginToken: () => 'fresh-invite-token',
+    invites: {
+      createInvite: (token, createdByUserId, label) => {
+        created.push({ token, createdByUserId, label });
+        return { token, label, created_at: '2026-01-01T00:00:00.000Z', used_at: null };
+      },
+    },
+  }));
+
+  const result = service.createInvite({ id: 3, username: 'alice' }, 'for Ivanov');
+  assert.equal(result.success, true);
+  assert.deepEqual(result.invite, {
+    token: 'fresh-invite-token',
+    label: 'for Ivanov',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    usedAt: null,
+    usedByUsername: null,
+  });
+  assert.deepEqual(created, [{ token: 'fresh-invite-token', createdByUserId: 3, label: 'for Ivanov' }]);
+
+  assert.throws(
+    () => service.createInvite({ id: 3, username: 'alice' }, 'x'.repeat(201)),
+    (error: unknown) => error instanceof AppError && error.code === 'AUTH_INVITE_LABEL_TOO_LONG',
+  );
+});
+
+test('getInviteStatus reports valid for an unused token and invalid for unknown/used ones', () => {
+  const service = createAuthService(createDependencies({
+    openRegistration: true,
+    invites: {
+      getInviteByToken: (token) => {
+        if (token === 'unused') return { token, label: 'note', created_at: 'x', used_at: null };
+        if (token === 'used') return { token, label: null, created_at: 'x', used_at: 'y' };
+        return undefined;
+      },
+    },
+  }));
+
+  assert.deepEqual(service.getInviteStatus('unused'), { valid: true, label: 'note' });
+  assert.deepEqual(service.getInviteStatus('used'), { valid: false, label: null });
+  assert.deepEqual(service.getInviteStatus('missing'), { valid: false, label: null });
+  assert.deepEqual(service.getInviteStatus(''), { valid: false, label: null });
 });
 
 test('enterWithLoginToken signs a session for the token owner without a password', async () => {

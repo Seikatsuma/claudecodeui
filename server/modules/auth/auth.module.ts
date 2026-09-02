@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 
-import { getConnection, userDb } from '@/modules/database/index.js';
+import { getConnection, invitesDb, userDb } from '@/modules/database/index.js';
 import { OPEN_REGISTRATION } from '@/shared/utils.js';
 import { ensureWebUserDirectories } from '@/shared/web-user-paths.js';
 
@@ -37,6 +37,12 @@ const authService = createAuthService({
     getUserByLoginToken: (loginToken) => userDb.getUserByLoginToken(loginToken),
     setLoginToken: (userId, loginToken) => userDb.setLoginToken(userId, loginToken),
     getLoginToken: (userId) => userDb.getLoginToken(userId),
+  },
+  invites: {
+    createInvite: (token, createdByUserId, label) => invitesDb.createInvite(token, createdByUserId, label),
+    getInviteByToken: (token) => invitesDb.getInviteByToken(token),
+    claimInvite: (token, usedByUserId) => invitesDb.claimInvite(token, usedByUserId),
+    listInvitesByCreator: (createdByUserId) => invitesDb.listInvitesByCreator(createdByUserId),
   },
   transaction: {
     begin: () => databaseConnection.prepare('BEGIN').run(),

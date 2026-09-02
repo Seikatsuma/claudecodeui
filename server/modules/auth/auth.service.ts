@@ -7,6 +7,14 @@ type AuthUser = {
 
 type AuthLoginUser = AuthUser & { password_hash: string };
 
+type InviteRecord = {
+  token: string;
+  label: string | null;
+  created_at: string;
+  used_at: string | null;
+  used_by_username?: string | null;
+};
+
 type AuthDependencies = {
   users: {
     hasUsers(): boolean;
@@ -17,6 +25,18 @@ type AuthDependencies = {
     getUserByLoginToken(loginToken: string): AuthUser | undefined;
     setLoginToken(userId: number, loginToken: string): void;
     getLoginToken(userId: number): string | null;
+  };
+  /**
+   * Invite-only registration gate (OPEN_REGISTRATION instances only - see
+   * `openRegistration` below). Any logged-in user can mint a token; only
+   * `registerOpen()` below consumes one, exactly once, via `claimInvite()`.
+   */
+  invites: {
+    createInvite(token: string, createdByUserId: number, label: string | null): InviteRecord;
+    getInviteByToken(token: string): InviteRecord | undefined;
+    /** Atomically marks the token used iff it was still unused. See repository docstring. */
+    claimInvite(token: string, usedByUserId: number): boolean;
+    listInvitesByCreator(createdByUserId: number): InviteRecord[];
   };
   transaction: {
     begin(): void;
@@ -79,6 +99,23 @@ function isUniqueConstraintError(error: unknown): boolean {
     && 'code' in error
     && error.code === 'SQLITE_CONSTRAINT_UNIQUE';
 }
+
+/** Shapes a DB invite record (snake_case) into the camelCase wire format. */
+function formatInvite(invite: InviteRecord) {
+  return {
+    token: invite.token,
+    label: invite.label,
+    createdAt: invite.created_at,
+    usedAt: invite.used_at,
+    usedByUsername: invite.used_by_username ?? null,
+  };
+}
+
+// Shown to a visitor whose token does not exist or was already redeemed.
+// Deliberately identical text for both cases (see auth.routes.ts /invite
+// endpoints) - and deliberately distinct from AUTH_LOGIN_TOKEN_INVALID's
+// "session expired"-flavored copy, since these are different situations.
+const INVITE_INVALID_MESSAGE = 'This invitation link is no longer valid.';
 
 /**
  * Creates the Auth application service around explicit persistence, crypto,
@@ -150,18 +187,43 @@ export function createAuthService(dependencies: AuthDependencies) {
     },
 
     /**
-     * Open self-service registration: no password. A random, never-shown
-     * password hash still fills the NOT NULL password_hash column (password
-     * login stays technically possible but is never offered by the UI in
-     * this mode); the account's real credential is the persistent login-link
-     * token returned here for one-time display by the caller.
+     * Invite-gated self-service registration: no password, and no account can
+     * be created without a valid, unused invite token minted by an existing
+     * user (see createInvite() below) - the bare `/register-open` surface
+     * with no token is refused just like an unknown one. A random,
+     * never-shown password hash still fills the NOT NULL password_hash
+     * column (password login stays technically possible but is never
+     * offered by the UI in this mode); the account's real credential is the
+     * persistent login-link token returned here for one-time display by the
+     * caller.
      */
-    async registerOpen(usernameInput: unknown) {
+    async registerOpen(usernameInput: unknown, inviteTokenInput: unknown) {
       if (!dependencies.openRegistration) {
         throw new AppError('Open registration is not enabled on this instance', {
           code: 'OPEN_REGISTRATION_DISABLED',
           statusCode: 403,
         });
+      }
+
+      const inviteToken = typeof inviteTokenInput === 'string' ? inviteTokenInput.trim() : '';
+      if (!inviteToken) {
+        throw new AppError('An invitation link is required to create an account.', {
+          code: 'AUTH_INVITE_REQUIRED',
+          statusCode: 400,
+        });
+      }
+
+      // Fail fast on an obviously bad/used token before doing any hashing or
+      // touching the users table. The real, race-safe guarantee that a token
+      // is spent at most once is the claimInvite() call further down, inside
+      // the same transaction as user creation - this check only exists to
+      // give a normal (non-racing) caller a clean rejection early.
+      const precheckInvite = dependencies.invites.getInviteByToken(inviteToken);
+      if (!precheckInvite) {
+        throw new AppError(INVITE_INVALID_MESSAGE, { code: 'AUTH_INVITE_INVALID', statusCode: 404 });
+      }
+      if (precheckInvite.used_at) {
+        throw new AppError(INVITE_INVALID_MESSAGE, { code: 'AUTH_INVITE_ALREADY_USED', statusCode: 410 });
       }
 
       const trimmedUsername = typeof usernameInput === 'string' ? usernameInput.trim() : '';
@@ -175,6 +237,15 @@ export function createAuthService(dependencies: AuthDependencies) {
         const passwordHash = await dependencies.hashPassword(randomPassword);
         const loginToken = dependencies.generateLoginToken();
         const user = dependencies.users.createUserWithLoginToken(username, passwordHash, loginToken);
+
+        // The actual single-use guarantee: this UPDATE only succeeds if the
+        // token was still unused at this exact moment, so two registrations
+        // racing on the same token can never both pass.
+        const claimed = dependencies.invites.claimInvite(inviteToken, numericUserId(user.id));
+        if (!claimed) {
+          throw new AppError(INVITE_INVALID_MESSAGE, { code: 'AUTH_INVITE_ALREADY_USED', statusCode: 410 });
+        }
+
         const token = dependencies.generateToken(user);
         dependencies.transaction.commit();
         dependencies.users.updateLastLogin(numericUserId(user.id));
@@ -196,6 +267,74 @@ export function createAuthService(dependencies: AuthDependencies) {
         }
         throw error;
       }
+    },
+
+    /**
+     * Mints a fresh, unused invite token owned by the caller. Any logged-in
+     * user on an OPEN_REGISTRATION instance can do this - there is no
+     * separate "admin" role (see auth.routes.ts).
+     */
+    createInvite(user: unknown, labelInput: unknown) {
+      if (!dependencies.openRegistration) {
+        throw new AppError('Open registration is not enabled on this instance', {
+          code: 'OPEN_REGISTRATION_DISABLED',
+          statusCode: 403,
+        });
+      }
+
+      const userId = numericUserId(requireAuthenticatedUser(user).id);
+
+      const trimmedLabel = typeof labelInput === 'string' ? labelInput.trim() : '';
+      if (trimmedLabel.length > 200) {
+        throw new AppError('Label is too long (200 characters max).', {
+          code: 'AUTH_INVITE_LABEL_TOO_LONG',
+          statusCode: 400,
+        });
+      }
+
+      const token = dependencies.generateLoginToken();
+      const invite = dependencies.invites.createInvite(token, userId, trimmedLabel || null);
+
+      return { success: true, invite: formatInvite(invite) };
+    },
+
+    /** Lists every invite the caller has created, most recent first. */
+    listInvites(user: unknown) {
+      if (!dependencies.openRegistration) {
+        throw new AppError('Open registration is not enabled on this instance', {
+          code: 'OPEN_REGISTRATION_DISABLED',
+          statusCode: 403,
+        });
+      }
+
+      const userId = numericUserId(requireAuthenticatedUser(user).id);
+      return { invites: dependencies.invites.listInvitesByCreator(userId).map(formatInvite) };
+    },
+
+    /**
+     * Public check used by the `/invite/<token>` screen before it shows the
+     * registration form, so an unknown or already-used link renders a clear
+     * message immediately instead of only failing on submit.
+     */
+    getInviteStatus(tokenInput: unknown) {
+      if (!dependencies.openRegistration) {
+        throw new AppError('Open registration is not enabled on this instance', {
+          code: 'OPEN_REGISTRATION_DISABLED',
+          statusCode: 403,
+        });
+      }
+
+      const token = typeof tokenInput === 'string' ? tokenInput.trim() : '';
+      if (!token) {
+        return { valid: false, label: null };
+      }
+
+      const invite = dependencies.invites.getInviteByToken(token);
+      if (!invite || invite.used_at) {
+        return { valid: false, label: null };
+      }
+
+      return { valid: true, label: invite.label };
     },
 
     /** Instant login via a previously issued persistent login-link token. */
