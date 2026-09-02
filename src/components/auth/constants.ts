@@ -6,4 +6,5 @@ export const AUTH_ERROR_MESSAGES = {
   registrationFailed: 'Registration failed',
   networkError: 'Network error. Please try again.',
   sessionExpired: 'Your session expired. Please log in again.',
+  loginLinkInvalid: 'This login link is invalid or no longer works. It may have been regenerated.',
 } as const;

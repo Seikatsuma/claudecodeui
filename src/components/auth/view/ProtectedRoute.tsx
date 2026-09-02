@@ -6,6 +6,8 @@ import Onboarding from '../../onboarding/view/Onboarding';
 
 import AuthLoadingScreen from './AuthLoadingScreen';
 import LoginForm from './LoginForm';
+import LoginLinkRevealScreen from './LoginLinkRevealScreen';
+import OpenRegisterForm from './OpenRegisterForm';
 import SetupForm from './SetupForm';
 
 type ProtectedRouteProps = {
@@ -13,7 +15,15 @@ type ProtectedRouteProps = {
 };
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, isLoading, needsSetup, hasCompletedOnboarding, refreshOnboardingStatus } = useAuth();
+  const {
+    user,
+    isLoading,
+    needsSetup,
+    hasCompletedOnboarding,
+    refreshOnboardingStatus,
+    openRegistration,
+    pendingLoginLink,
+  } = useAuth();
 
   if (isLoading) {
     return <AuthLoadingScreen />;
@@ -27,12 +37,27 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <>{children}</>;
   }
 
-  if (needsSetup) {
-    return <SetupForm />;
+  // Shown exactly once, right after a successful registerOpen() - before the
+  // normal app is reachable at all, so nobody can skip past it by navigating.
+  if (pendingLoginLink) {
+    return <LoginLinkRevealScreen />;
   }
 
-  if (!user) {
-    return <LoginForm />;
+  if (openRegistration) {
+    // No "already set up" gate here: any number of independent accounts can
+    // register on a shared instance, so needsSetup (the single-account gate)
+    // does not apply - anyone signed out sees the same registration screen.
+    if (!user) {
+      return <OpenRegisterForm />;
+    }
+  } else {
+    if (needsSetup) {
+      return <SetupForm />;
+    }
+
+    if (!user) {
+      return <LoginForm />;
+    }
   }
 
   if (!hasCompletedOnboarding) {

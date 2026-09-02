@@ -24,10 +24,18 @@ export type AuthSessionPayload = {
   user?: AuthUser;
   error?: string | ApiErrorDetail;
   message?: string;
+  /** registerOpen() only: the persistent login-link token, for one-time display. */
+  loginToken?: string;
 };
 
 export type AuthStatusPayload = {
   needsSetup?: boolean;
+  /** True on a shared, self-service multi-tenant instance (OPEN_REGISTRATION=true). */
+  openRegistration?: boolean;
+};
+
+export type LoginLinkPayload = ApiErrorPayload & {
+  loginToken?: string | null;
 };
 
 export type AuthUserPayload = {
@@ -54,6 +62,19 @@ export type AuthContextValue = {
   register: (username: string, password: string) => Promise<AuthActionResult>;
   logout: () => void;
   refreshOnboardingStatus: () => Promise<void>;
+  /** True on a shared, self-service multi-tenant instance (OPEN_REGISTRATION=true). */
+  openRegistration: boolean;
+  /** OPEN_REGISTRATION only: passwordless account creation. */
+  registerOpen: (username: string) => Promise<AuthActionResult>;
+  /**
+   * Set right after a successful registerOpen() to the full shareable login
+   * link. ProtectedRoute shows the one-time "save your link" screen while
+   * this is non-null; acknowledgeLoginLink() clears it.
+   */
+  pendingLoginLink: string | null;
+  acknowledgeLoginLink: () => void;
+  /** OPEN_REGISTRATION only: issues a new login-link token, invalidating the old one. */
+  regenerateLoginLink: () => Promise<{ success: true; loginLink: string } | { success: false; error: string }>;
 };
 
 export type AuthProviderProps = {

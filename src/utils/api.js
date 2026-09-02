@@ -139,6 +139,21 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
+    // OPEN_REGISTRATION-only: passwordless account creation. 403s with
+    // OPEN_REGISTRATION_DISABLED on every other instance.
+    registerOpen: (username) => fetch('/api/auth/register-open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username }),
+    }),
+    // Instant login via a persistent login-link token (the `/enter/<token>` URL).
+    enter: (token) => fetch('/api/auth/enter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    }),
+    getLoginLink: () => authenticatedFetch('/api/auth/login-link'),
+    regenerateLoginLink: () => authenticatedFetch('/api/auth/regenerate-login-link', { method: 'POST' }),
     refresh: () => authenticatedFetch('/api/auth/refresh', { method: 'POST' }),
     user: () => authenticatedFetch('/api/auth/user'),
     logout: () => authenticatedFetch('/api/auth/logout', { method: 'POST' }),
