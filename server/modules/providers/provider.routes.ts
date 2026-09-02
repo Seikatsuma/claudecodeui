@@ -2,7 +2,6 @@ import express, { type Request, type Response } from 'express';
 
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
-import { claudeWeeklyUsageService } from '@/modules/providers/services/claude-weekly-usage.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
@@ -693,20 +692,6 @@ router.get(
     res.json(createApiSuccessResponse(
       providerCapabilitiesService.getProviderCapabilities(provider),
     ));
-  }),
-);
-
-/**
- * Backs the composer's always-visible weekly usage indicator: the CLI's own
- * cached weekly-limit percent (when available) plus a best-effort local
- * token estimate. Account-wide, so unlike the routes above it takes no
- * `:provider` - only Claude's CLI cache holds this figure today.
- */
-router.get(
-  '/usage/weekly',
-  asyncHandler(async (_req: Request, res: Response) => {
-    const snapshot = await claudeWeeklyUsageService.getWeeklyUsageSnapshot();
-    res.json(createApiSuccessResponse(snapshot));
   }),
 );
 

@@ -14,7 +14,6 @@ import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon } from 'l
 
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { useVoiceAvailable } from '../../hooks/useVoiceAvailable';
-import { useWeeklyUsage } from '../../hooks/useWeeklyUsage';
 import type { QueuedDraft } from '../../hooks/useChatComposerState';
 import type { SessionActivity } from '../../../../hooks/useSessionProtection';
 import type { PendingPermissionRequest, PermissionMode } from '../../types/types';
@@ -36,7 +35,6 @@ import ComposerAttachment from './ComposerAttachment';
 import VoiceInputButton from './VoiceInputButton';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import TokenUsageSummary from './TokenUsageSummary';
-import WeeklyUsageIndicator from './WeeklyUsageIndicator';
 import QueuedMessageCard from './QueuedMessageCard';
 import ComposerModelMenu from './ComposerModelMenu';
 import ComposerPermissionMenu from './ComposerPermissionMenu';
@@ -241,11 +239,6 @@ export default function ChatComposer({
   const isRecording = voiceState === 'recording';
   const isTranscribing = voiceState === 'transcribing';
 
-  // Always-visible weekly usage indicator (see task brief): self-fetching,
-  // account-wide rather than tied to this session, so it lives entirely
-  // inside the composer instead of threading through ChatComposer's props.
-  const { snapshot: weeklyUsageSnapshot, isLoading: isWeeklyUsageLoading } = useWeeklyUsage();
-
   // Detect if the AskUserQuestion interactive panel is active
   const hasQuestionPanel = pendingPermissionRequests.some(
     (r) => r.toolName === 'AskUserQuestion'
@@ -446,8 +439,6 @@ export default function ChatComposer({
             )}
 
             <TokenUsageSummary usage={tokenBudget} onClick={onShowTokenUsage} />
-
-            <WeeklyUsageIndicator snapshot={weeklyUsageSnapshot} isLoading={isWeeklyUsageLoading} />
 
             <PromptInputButton
               tooltip={{ content: t('input.showAllCommands') }}
