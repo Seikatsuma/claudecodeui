@@ -2,14 +2,15 @@ import { Check, GitBranch, LogIn } from 'lucide-react';
 
 type OnboardingStepProgressProps = {
   currentStep: number;
+  isGitConfigOptional?: boolean;
 };
 
-const onboardingSteps = [
-  { title: 'Git Configuration', icon: GitBranch, required: true },
-  { title: 'Connect Agents', icon: LogIn, required: false },
-];
+export default function OnboardingStepProgress({ currentStep, isGitConfigOptional = false }: OnboardingStepProgressProps) {
+  const onboardingSteps = [
+    { title: 'Git Configuration', icon: GitBranch, required: !isGitConfigOptional },
+    { title: 'Connect Agents', icon: LogIn, required: false },
+  ];
 
-export default function OnboardingStepProgress({ currentStep }: OnboardingStepProgressProps) {
   return (
     <div className="mb-5">
       <div className="flex items-center justify-between">

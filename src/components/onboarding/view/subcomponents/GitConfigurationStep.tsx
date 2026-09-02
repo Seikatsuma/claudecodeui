@@ -4,6 +4,7 @@ type GitConfigurationStepProps = {
   gitName: string;
   gitEmail: string;
   isSubmitting: boolean;
+  isOptional?: boolean;
   onGitNameChange: (value: string) => void;
   onGitEmailChange: (value: string) => void;
 };
@@ -12,6 +13,7 @@ export default function GitConfigurationStep({
   gitName,
   gitEmail,
   isSubmitting,
+  isOptional = false,
   onGitNameChange,
   onGitEmailChange,
 }: GitConfigurationStepProps) {
@@ -23,7 +25,9 @@ export default function GitConfigurationStep({
         </div>
         <h2 className="font-serif text-xl font-bold tracking-tight text-foreground">Git Configuration</h2>
         <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-          Configure your git identity to ensure proper attribution for commits.
+          {isOptional
+            ? 'Only needed if you plan to commit code through Claude. Skip this if you are just here to chat.'
+            : 'Configure your git identity to ensure proper attribution for commits.'}
         </p>
       </div>
 
@@ -31,7 +35,7 @@ export default function GitConfigurationStep({
         <div>
           <label htmlFor="gitName" className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
             <User className="h-4 w-4" />
-            Git Name <span className="text-red-500">*</span>
+            Git Name {!isOptional && <span className="text-red-500">*</span>}
           </label>
           <input
             type="text"
@@ -40,16 +44,18 @@ export default function GitConfigurationStep({
             onChange={(event) => onGitNameChange(event.target.value)}
             className="w-full rounded-xl border border-border bg-background/60 px-4 py-2.5 text-foreground shadow-sm transition-colors placeholder:text-muted-foreground/60 hover:border-foreground/20 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             placeholder="John Doe"
-            required
+            required={!isOptional}
             disabled={isSubmitting}
           />
-          <p className="mt-1 text-xs text-muted-foreground">Saved as `git config --global user.name`.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {isOptional ? 'Saved to your account only.' : 'Saved as `git config --global user.name`.'}
+          </p>
         </div>
 
         <div>
           <label htmlFor="gitEmail" className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
             <Mail className="h-4 w-4" />
-            Git Email <span className="text-red-500">*</span>
+            Git Email {!isOptional && <span className="text-red-500">*</span>}
           </label>
           <input
             type="email"
@@ -58,10 +64,12 @@ export default function GitConfigurationStep({
             onChange={(event) => onGitEmailChange(event.target.value)}
             className="w-full rounded-xl border border-border bg-background/60 px-4 py-2.5 text-foreground shadow-sm transition-colors placeholder:text-muted-foreground/60 hover:border-foreground/20 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             placeholder="john@example.com"
-            required
+            required={!isOptional}
             disabled={isSubmitting}
           />
-          <p className="mt-1 text-xs text-muted-foreground">Saved as `git config --global user.email`.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {isOptional ? 'Saved to your account only.' : 'Saved as `git config --global user.email`.'}
+          </p>
         </div>
       </div>
     </div>

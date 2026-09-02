@@ -2,6 +2,7 @@ import { Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LLMProvider } from '../../../types/app';
 import { authenticatedFetch } from '../../../utils/api';
+import { useAuth } from '../../auth/context/AuthContext';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
 import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
 import AgentConnectionsStep from './subcomponents/AgentConnectionsStep';
@@ -30,6 +31,12 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   } = useProviderAuthStatus();
 
   const previousActiveLoginProviderRef = useRef<LLMProvider | null | undefined>(undefined);
+  // On the open self-service instance, git identity is irrelevant to most
+  // visitors (they are here to chat, not to commit code) - do not block
+  // onboarding on it. Single-account installs keep the original required
+  // behavior.
+  const { openRegistration } = useAuth();
+  const isGitConfigOptional = openRegistration;
 
   const loadGitConfig = useCallback(async () => {
     try {
@@ -87,13 +94,23 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       return;
     }
 
-    if (!gitName.trim() || !gitEmail.trim()) {
+    const hasGitName = gitName.trim().length > 0;
+    const hasGitEmail = gitEmail.trim().length > 0;
+
+    if (!isGitConfigOptional && (!hasGitName || !hasGitEmail)) {
       setErrorMessage('Both git name and email are required.');
       return;
     }
 
-    if (!gitEmailPattern.test(gitEmail)) {
+    // Optional here: skip entirely if left blank rather than forcing the
+    // visitor to type a placeholder value just to get past validation.
+    if ((hasGitName || hasGitEmail) && !gitEmailPattern.test(gitEmail)) {
       setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+
+    if (!hasGitName && !hasGitEmail) {
+      setCurrentStep((previous) => previous + 1);
       return;
     }
 
@@ -157,7 +174,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
         <div className="relative mx-auto flex min-h-full w-full max-w-2xl items-center justify-center p-4">
           <div className="w-full py-6">
-          <OnboardingStepProgress currentStep={currentStep} />
+          <OnboardingStepProgress currentStep={currentStep} isGitConfigOptional={isGitConfigOptional} />
 
           <div className="rounded-2xl border border-border/70 bg-card/90 p-6 shadow-[0_24px_60px_-20px_hsl(var(--foreground)/0.18)] ring-1 ring-foreground/5 backdrop-blur-xl">
             {currentStep === 0 ? (
@@ -165,6 +182,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 gitName={gitName}
                 gitEmail={gitEmail}
                 isSubmitting={isSubmitting}
+                isOptional={isGitConfigOptional}
                 onGitNameChange={setGitName}
                 onGitEmailChange={setGitEmail}
               />
