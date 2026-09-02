@@ -14,7 +14,6 @@ import { getSessionTitle } from '../../../../utils/pageTitle';
 import SidebarFooter from './SidebarFooter';
 import SidebarHeader from './SidebarHeader';
 import SidebarProjectList, { type SidebarProjectListProps } from './SidebarProjectList';
-import SidebarPulseList from './SidebarPulseList';
 import SidebarRecentConversations from './SidebarRecentConversations';
 import SidebarWorkspaceTabs from './SidebarWorkspaceTabs';
 
@@ -233,6 +232,14 @@ export default function SidebarContent({
         isRefreshing={isRefreshing}
         onCreateProject={onCreateProject}
         onCollapseSidebar={onCollapseSidebar}
+        pulseProjects={projectListProps.projects}
+        pulseGetProjectSessions={projectListProps.getProjectSessions}
+        pulseActiveSessions={projectListProps.activeSessions}
+        pulseAttentionSessionIds={projectListProps.attentionSessionIds}
+        pulseSelectedSession={projectListProps.selectedSession}
+        pulseCurrentTime={projectListProps.currentTime}
+        onPulseProjectSelect={projectListProps.onProjectSelect}
+        onPulseSessionSelect={projectListProps.onSessionSelect}
         t={t}
       />
 
@@ -439,19 +446,6 @@ export default function SidebarContent({
             onConversationSelect={onConversationResultClick}
             onLoadMore={onLoadMoreRecentConversations}
             onRetry={onRetryRecentConversations}
-            t={t}
-          />
-        ) : searchMode === 'pulse' ? (
-          <SidebarPulseList
-            projects={projectListProps.projects}
-            getProjectSessions={projectListProps.getProjectSessions}
-            activeSessions={projectListProps.activeSessions}
-            attentionSessionIds={projectListProps.attentionSessionIds}
-            selectedSession={projectListProps.selectedSession}
-            currentTime={projectListProps.currentTime}
-            searchFilter={searchFilter}
-            onProjectSelect={projectListProps.onProjectSelect}
-            onSessionSelect={projectListProps.onSessionSelect}
             t={t}
           />
         ) : searchMode === 'archived' ? (

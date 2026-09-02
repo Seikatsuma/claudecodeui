@@ -1,13 +1,16 @@
-import { Activity, Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button, Input, Tooltip } from '../../../../shared/view/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../shared/constants';
 import { IS_PLATFORM } from '../../../../shared/utils';
 import { cn } from '../../../../lib/utils';
-import type { SidebarSearchMode } from '../../types/types';
+import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
+import type { Project, ProjectSession } from '../../../../types/app';
+import type { SessionWithProvider, SidebarSearchMode } from '../../types/types';
 
 import GitHubStarBadge from './GitHubStarBadge';
+import SidebarPulseTrigger from './SidebarPulseTrigger';
 
 const MOD_KEY =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
@@ -29,6 +32,16 @@ type SidebarHeaderProps = {
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
+  // Data for the always-visible Pulse trigger/overlay — same inputs
+  // SidebarPulseList already consumes elsewhere in the sidebar.
+  pulseProjects: Project[];
+  pulseGetProjectSessions: (project: Project) => SessionWithProvider[];
+  pulseActiveSessions: SessionActivityMap;
+  pulseAttentionSessionIds: ReadonlySet<string>;
+  pulseSelectedSession: ProjectSession | null;
+  pulseCurrentTime: Date;
+  onPulseProjectSelect: (project: Project) => void;
+  onPulseSessionSelect: (session: SessionWithProvider, projectId: string) => void;
   t: TFunction;
 };
 
@@ -49,6 +62,14 @@ export default function SidebarHeader({
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
+  pulseProjects,
+  pulseGetProjectSessions,
+  pulseActiveSessions,
+  pulseAttentionSessionIds,
+  pulseSelectedSession,
+  pulseCurrentTime,
+  onPulseProjectSelect,
+  onPulseSessionSelect,
   t,
 }: SidebarHeaderProps) {
   const showSearchTools = (projectsCount > 0 || pulseSessionsCount > 0 || archivedSessionsCount > 0 || isArchivedSessionsLoading) && !isLoading;
@@ -56,10 +77,7 @@ export default function SidebarHeader({
     ? t('search.conversationsPlaceholder')
     : searchMode === 'archived'
       ? t('search.archivedPlaceholder', 'Search archived sessions...')
-      : searchMode === 'pulse'
-        ? t('search.pulsePlaceholder', { defaultValue: 'Search active sessions...' })
-        : t('projects.searchPlaceholder');
-  const pulseBadgeText = pulseSessionsCount > 99 ? '99+' : String(pulseSessionsCount);
+      : t('projects.searchPlaceholder');
 
   const LogoBlock = () => (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -112,6 +130,19 @@ export default function SidebarHeader({
                 }`}
               />
             </Button>
+            <SidebarPulseTrigger
+              variant="desktop"
+              pulseSessionsCount={pulseSessionsCount}
+              projects={pulseProjects}
+              getProjectSessions={pulseGetProjectSessions}
+              activeSessions={pulseActiveSessions}
+              attentionSessionIds={pulseAttentionSessionIds}
+              selectedSession={pulseSelectedSession}
+              currentTime={pulseCurrentTime}
+              onProjectSelect={onPulseProjectSelect}
+              onSessionSelect={onPulseSessionSelect}
+              t={t}
+            />
             <Button
               variant="ghost"
               size="sm"
@@ -165,26 +196,6 @@ export default function SidebarHeader({
               >
                 <MessageSquare className="h-3 w-3" />
                 {t('search.modeConversations')}
-              </button>
-              <button
-                onClick={() => onSearchModeChange('pulse')}
-                aria-pressed={searchMode === 'pulse'}
-                aria-label={t('search.modePulse', { defaultValue: 'Pulse' })}
-                title={t('search.pulseTooltip', { defaultValue: 'Sessions currently running or waiting on you' })}
-                className={cn(
-                  "flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-normal transition-all",
-                  searchMode === 'pulse'
-                    ? "bg-background shadow-sm text-foreground ring-1 ring-emerald-500/15"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Activity className={cn("h-3 w-3", pulseSessionsCount > 0 && "text-emerald-500")} />
-                {t('search.modePulse', { defaultValue: 'Pulse' })}
-                {pulseSessionsCount > 0 && (
-                  <span className="flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-semibold leading-none text-white">
-                    {pulseBadgeText}
-                  </span>
-                )}
               </button>
               <Tooltip content={t('search.archiveOnlyTooltip', 'Archive only')} position="top">
                 <button
@@ -264,6 +275,19 @@ export default function SidebarHeader({
             >
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
+            <SidebarPulseTrigger
+              variant="mobile"
+              pulseSessionsCount={pulseSessionsCount}
+              projects={pulseProjects}
+              getProjectSessions={pulseGetProjectSessions}
+              activeSessions={pulseActiveSessions}
+              attentionSessionIds={pulseAttentionSessionIds}
+              selectedSession={pulseSelectedSession}
+              currentTime={pulseCurrentTime}
+              onProjectSelect={onPulseProjectSelect}
+              onSessionSelect={onPulseSessionSelect}
+              t={t}
+            />
             <button
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-all active:scale-95"
               onClick={onCreateProject}
@@ -302,26 +326,6 @@ export default function SidebarHeader({
               >
                 <MessageSquare className="h-3 w-3" />
                 {t('search.modeConversations')}
-              </button>
-              <button
-                onClick={() => onSearchModeChange('pulse')}
-                aria-pressed={searchMode === 'pulse'}
-                aria-label={t('search.modePulse', { defaultValue: 'Pulse' })}
-                title={t('search.pulseTooltip', { defaultValue: 'Sessions currently running or waiting on you' })}
-                className={cn(
-                  "flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-normal transition-all",
-                  searchMode === 'pulse'
-                    ? "bg-background shadow-sm text-foreground ring-1 ring-emerald-500/15"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Activity className={cn("h-3 w-3", pulseSessionsCount > 0 && "text-emerald-500")} />
-                {t('search.modePulse', { defaultValue: 'Pulse' })}
-                {pulseSessionsCount > 0 && (
-                  <span className="flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-semibold leading-none text-white">
-                    {pulseBadgeText}
-                  </span>
-                )}
               </button>
               <Tooltip content={t('search.archiveOnlyTooltip', 'Archive only')} position="top">
                 <button

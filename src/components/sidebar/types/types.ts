@@ -2,7 +2,7 @@ import type { AppTab, LoadingProgress, Project, ProjectSession, LLMProvider } fr
 import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
 
 export type ProjectSortOrder = 'name' | 'date';
-export type SidebarSearchMode = 'projects' | 'conversations' | 'pulse' | 'archived';
+export type SidebarSearchMode = 'projects' | 'conversations' | 'archived';
 export type ArchivedProjectListItem = Project & { isArchived: true };
 
 export type SessionWithProvider = ProjectSession & {
