@@ -86,8 +86,29 @@ export const projectsDb = {
         return row?.project_path ?? null;
     },
 
-    getProjectPaths(): ProjectRepositoryRow[] {
+    /**
+     * Lists active projects, optionally scoped to one filesystem subtree.
+     *
+     * `scopeRootDir` is how OPEN_REGISTRATION instances keep one web user's
+     * sidebar from listing another user's projects: every project this app
+     * creates or discovers lives under that user's own workspace root (see
+     * web-user-paths.ts), so filtering `project_path` by that root is
+     * equivalent to filtering by owner, without needing a `user_id` column
+     * or touching every session/project write path to stamp one. Omitting it
+     * (the default - every call site outside OPEN_REGISTRATION) returns every
+     * active project exactly as before.
+     */
+    getProjectPaths(scopeRootDir?: string | null): ProjectRepositoryRow[] {
         const db = getConnection();
+        if (scopeRootDir) {
+            const normalizedScopeRoot = normalizeProjectPath(scopeRootDir);
+            return db.prepare(`
+                SELECT project_id, project_path, custom_project_name, isStarred, isArchived
+                FROM projects
+                WHERE isArchived = 0
+                AND (project_path = ? OR project_path LIKE ? || '/%')
+            `).all(normalizedScopeRoot, normalizedScopeRoot) as ProjectRepositoryRow[];
+        }
         return db.prepare(`
             SELECT project_id, project_path, custom_project_name, isStarred, isArchived
             FROM projects
@@ -98,14 +119,37 @@ export const projectsDb = {
     /**
      * Archived rows are queried separately so archive-focused UIs can present
      * hidden workspaces without reintroducing them into the active sidebar list.
+     * See getProjectPaths() above for `scopeRootDir` semantics.
      */
-    getArchivedProjectPaths(): ProjectRepositoryRow[] {
+    getArchivedProjectPaths(scopeRootDir?: string | null): ProjectRepositoryRow[] {
         const db = getConnection();
+        if (scopeRootDir) {
+            const normalizedScopeRoot = normalizeProjectPath(scopeRootDir);
+            return db.prepare(`
+                SELECT project_id, project_path, custom_project_name, isStarred, isArchived
+                FROM projects
+                WHERE isArchived = 1
+                AND (project_path = ? OR project_path LIKE ? || '/%')
+            `).all(normalizedScopeRoot, normalizedScopeRoot) as ProjectRepositoryRow[];
+        }
         return db.prepare(`
             SELECT project_id, project_path, custom_project_name, isStarred, isArchived
             FROM projects
             WHERE isArchived = 1
         `).all() as ProjectRepositoryRow[];
+    },
+
+    /**
+     * True when `projectPath` is exactly `scopeRootDir` or nested under it.
+     * Used to guard `:projectId`-addressed mutations (rename/star/delete/...)
+     * against cross-user access on OPEN_REGISTRATION instances - see
+     * projects.routes.ts's `router.param('projectId', ...)` guard.
+     */
+    isProjectPathInScope(projectPath: string, scopeRootDir: string): boolean {
+        const normalizedScopeRoot = normalizeProjectPath(scopeRootDir);
+        const normalizedProjectPath = normalizeProjectPath(projectPath);
+        return normalizedProjectPath === normalizedScopeRoot
+            || normalizedProjectPath.startsWith(`${normalizedScopeRoot}${path.sep}`);
     },
 
     getCustomProjectName(projectPath: string): string | null {

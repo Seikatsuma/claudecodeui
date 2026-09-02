@@ -1,8 +1,10 @@
 import express from 'express';
 
+import { projectsDb } from '@/modules/database/index.js';
 import { createProject, updateProjectDisplayName } from '@/modules/projects/services/project-management.service.js';
 import { startCloneProject } from '@/modules/projects/services/project-clone.service.js';
 import { getProjectTaskMaster } from '@/modules/projects/services/projects-has-taskmaster.service.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 import { getArchivedProjectsWithSessions, getProjectSessionsPage, getProjectsWithSessions } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
 import { deleteOrArchiveProject, restoreArchivedProject } from '@/modules/projects/services/project-delete.service.js';
@@ -10,6 +12,33 @@ import { applyLegacyStarredProjectIds, toggleProjectStar } from '@/modules/proje
 import { autoGroupProjectSessions } from '@/modules/providers/index.js';
 
 const router = express.Router();
+
+/**
+ * Guards every `:projectId`-addressed route below against cross-user access
+ * on OPEN_REGISTRATION instances. `req.user`'s workspace root is only set in
+ * the request context there (see request-runtime-context.middleware.ts), so
+ * this is a no-op everywhere else - a project id from outside the caller's
+ * own workspace 404s exactly like an id that does not exist at all, so this
+ * never reveals whether the id belongs to someone else.
+ */
+router.param('projectId', (req, res, next, projectId: string) => {
+  const scopeRootDir = getRequestRuntimeContext()?.workspaceRoot;
+  if (!scopeRootDir) {
+    next();
+    return;
+  }
+
+  const projectRow = projectsDb.getProjectById(projectId);
+  if (projectRow && !projectsDb.isProjectPathInScope(projectRow.project_path, scopeRootDir)) {
+    next(new AppError(`Project "${projectId}" was not found.`, {
+      code: 'PROJECT_NOT_FOUND',
+      statusCode: 404,
+    }));
+    return;
+  }
+
+  next();
+});
 
 type AuthenticatedUser = {
   id?: number | string;

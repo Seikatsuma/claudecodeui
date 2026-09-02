@@ -4,6 +4,7 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -190,7 +191,7 @@ export async function getProjectsWithSessions(
     await sessionSynchronizerService.synchronizeSessions();
   }
 
-  const projectRows = projectsDb.getProjectPaths() as Array<{
+  const projectRows = projectsDb.getProjectPaths(getRequestRuntimeContext()?.workspaceRoot) as Array<{
     project_id: string;
     project_path: string;
     custom_project_name?: string | null;
@@ -258,7 +259,7 @@ export async function getArchivedProjectsWithSessions(
     await sessionSynchronizerService.synchronizeSessions();
   }
 
-  const projectRows = projectsDb.getArchivedProjectPaths() as Array<{
+  const projectRows = projectsDb.getArchivedProjectPaths(getRequestRuntimeContext()?.workspaceRoot) as Array<{
     project_id: string;
     project_path: string;
     custom_project_name?: string | null;
