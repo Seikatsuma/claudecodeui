@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { deleteSession, query } from '@anthropic-ai/claude-agent-sdk';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted } from '@/modules/providers/services/sessions-watcher.service.js';
@@ -120,6 +120,16 @@ function parseGroupingResponse(rawText: string, itemCount: number): GroupingResp
  * text. `tools: []` keeps this a plain text-completion call - no file reads,
  * no permission prompts possible - since all it needs is a topic clustering
  * of the titles already in the prompt.
+ *
+ * Every `query()` call - including this internal, user-invisible one -
+ * still makes the CLI persist a normal session transcript on disk under the
+ * target project, which the file watcher would otherwise index as a real,
+ * visible sidebar session ("Cluster coding session..." showed up in manual
+ * testing). Since this call has no conversational value to the user, its
+ * transcript is deleted again once the call finishes (best-effort - a
+ * failed cleanup just leaves one harmless extra history entry, never a
+ * crash), including a corresponding DB row that raced the watcher into
+ * being created in the meantime.
  */
 async function runOneShotJsonPrompt(prompt: string, cwd: string): Promise<string> {
   const instance = query({
@@ -132,6 +142,7 @@ async function runOneShotJsonPrompt(prompt: string, cwd: string): Promise<string
   });
 
   let resultText = '';
+  let capturedSessionId: string | undefined;
   const timeoutHandle = setTimeout(() => {
     try {
       instance.close?.();
@@ -144,6 +155,9 @@ async function runOneShotJsonPrompt(prompt: string, cwd: string): Promise<string
 
   try {
     for await (const message of instance as AsyncIterable<Record<string, unknown>>) {
+      if (typeof message.session_id === 'string' && !capturedSessionId) {
+        capturedSessionId = message.session_id;
+      }
       if (message.type === 'result' && typeof message.result === 'string') {
         resultText = message.result;
       }
@@ -152,7 +166,32 @@ async function runOneShotJsonPrompt(prompt: string, cwd: string): Promise<string
     clearTimeout(timeoutHandle);
   }
 
+  if (capturedSessionId) {
+    await cleanupEphemeralSession(capturedSessionId, cwd);
+  }
+
   return resultText;
+}
+
+/**
+ * Removes the on-disk transcript (and, if the watcher already raced it into
+ * the DB, the resulting row) for one internal one-shot grouping call. Never
+ * throws - this is post-hoc tidying, not correctness-critical.
+ */
+async function cleanupEphemeralSession(sessionId: string, cwd: string): Promise<void> {
+  try {
+    await deleteSession(sessionId, { dir: cwd });
+  } catch {
+    // Transcript may not exist yet, or already removed - fine either way.
+  }
+  try {
+    const row = sessionsDb.getSessionByProviderSessionId(sessionId);
+    if (row) {
+      sessionsDb.deleteSessionById(row.session_id);
+    }
+  } catch {
+    // Best-effort DB cleanup only.
+  }
 }
 
 /**

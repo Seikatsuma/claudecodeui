@@ -451,6 +451,18 @@ const addSessionTitleSourceColumn = (db: Database): void => {
   const sessionsTableInfo = getTableInfo(db, 'sessions');
   const columnNames = sessionsTableInfo.map((column) => column.name);
 
+  // The backfill below must run exactly once, the moment this column is
+  // actually created - never on a later startup. It intentionally
+  // reclassifies every pre-existing 'naive'-tier row with a real title, so
+  // running it again on every restart would keep re-promoting brand new
+  // naive placeholders (sessions created *after* this migration already
+  // ran) to 'ai' tier before they ever earned a real title, silently
+  // defeating the whole point of the tier system. Guarding on "column did
+  // not exist yet" makes this a true one-time migration.
+  if (columnNames.includes('title_source')) {
+    return;
+  }
+
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'title_source', "TEXT NOT NULL DEFAULT 'naive'");
 
   const placeholderTitles = [
