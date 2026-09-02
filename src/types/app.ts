@@ -48,6 +48,10 @@ export interface ProjectSession {
   lastActivity?: string;
   messageCount?: number;
   provider?: LLMProvider;
+  // Topic group this session was placed in (manual or "Organize by topic"
+  // auto-grouping). Absent/null means ungrouped.
+  groupId?: string | null;
+  groupLabel?: string | null;
   __provider?: LLMProvider;
   // Tags the session with the owning project's DB `projectId` so UI handlers
   // (session switching, sidebar focus, etc.) can match against selectedProject.

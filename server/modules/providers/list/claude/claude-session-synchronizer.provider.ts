@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { sessionsDb, type SessionTitleSource } from '@/modules/database/index.js';
+import { sessionsDb } from '@/modules/database/index.js';
 import {
   buildLookupMap,
   extractFirstValidJsonlData,
@@ -11,6 +11,7 @@ import {
   readFileTimestamps,
 } from '@/shared/utils.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
+import type { SessionTitleSource } from '@/shared/types.js';
 
 type ParsedSession = {
   sessionId: string;

@@ -246,6 +246,14 @@ export const api = {
     authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/toggle-star`, {
       method: 'POST',
     }),
+  // Clusters this project's currently ungrouped sessions by topic via one
+  // LLM call. Assignments land through the usual session_upserted websocket
+  // broadcast, so this response is mainly useful for immediate UI feedback
+  // (spinner/toast) rather than something callers need to apply themselves.
+  organizeProjectSessions: (projectId) =>
+    authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/organize-sessions`, {
+      method: 'POST',
+    }),
   readFile: (projectId, filePath) =>
     authenticatedFetch(`/api/file-tree/projects/${projectId}/file?filePath=${encodeURIComponent(filePath)}`),
   readFileBlob: (projectId, filePath) =>

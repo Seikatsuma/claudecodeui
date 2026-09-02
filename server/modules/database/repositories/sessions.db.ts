@@ -1,14 +1,7 @@
 import { getConnection } from '@/modules/database/connection.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
+import type { SessionTitleSource } from '@/shared/types.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
-
-/**
- * Provenance tier for `custom_name`. Sync only ever moves a row's tier up
- * (naive -> ai -> custom), never down, so a later worse-quality candidate
- * (e.g. a stale naive fallback re-derived on disk) can never clobber a
- * better title that is already in place. See `resolveTitleUpdate()`.
- */
-export type SessionTitleSource = 'naive' | 'ai' | 'custom';
 
 const TITLE_SOURCE_RANK: Record<SessionTitleSource, number> = {
   naive: 0,
@@ -55,7 +48,7 @@ const SESSION_ROW_COLUMNS =
  * better to protect. Returns `undefined` fields when nothing should change,
  * so callers can `COALESCE` them against the existing column value.
  */
-export function resolveTitleUpdate(
+function resolveTitleUpdate(
   existingName: string | null | undefined,
   existingSource: SessionTitleSource | null | undefined,
   candidateName: string | null | undefined,

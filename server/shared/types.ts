@@ -642,6 +642,19 @@ export type WorkspacePathValidationResult = {
   error?: string;
 };
 
+//----------------- SESSION PERSISTENCE TYPES ------------
+/**
+ * Provenance tier for a session's `custom_name`, used by the sessions
+ * repository and the Claude session synchronizer (two modules) to decide
+ * whether a freshly-derived title candidate should replace what is stored:
+ * 'naive' (a first-words placeholder from the web composer, or raw CLI
+ * history/last-prompt text) < 'ai' (a genuine LLM-generated title) <
+ * 'custom' (an explicit user rename or CLI custom-title entry). A later
+ * sync only ever moves a row's tier up, never down - see
+ * `resolveTitleUpdate()` in `sessions.db.ts`.
+ */
+export type SessionTitleSource = 'naive' | 'ai' | 'custom';
+
 // ---------------------------
 //----------------- GIT WORKTREE MANAGEMENT ------------
 /**
