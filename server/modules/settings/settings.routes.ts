@@ -38,6 +38,14 @@ export function createSettingsRouter(
   router.patch('/credentials/:credentialId/toggle', respond((req) => service.toggleCredential(
     userId(req), Number(req.params.credentialId), req.body?.isActive,
   )));
+  router.get('/anthropic-keys', respond((req) => service.listAnthropicApiKeys(userId(req))));
+  router.post('/anthropic-keys', respond((req) => service.createAnthropicApiKey(userId(req), req.body ?? {})));
+  router.delete('/anthropic-keys/:credentialId', respond((req) => service.deleteAnthropicApiKey(
+    userId(req), Number(req.params.credentialId),
+  )));
+  router.patch('/anthropic-keys/:credentialId/activate', respond((req) => service.activateAnthropicApiKey(
+    userId(req), Number(req.params.credentialId),
+  )));
   router.get('/notification-preferences', respond((req) => service.getNotificationPreferences(userId(req))));
   router.put('/notification-preferences', respond((req) => service.updateNotificationPreferences(
     userId(req), req.body ?? {},

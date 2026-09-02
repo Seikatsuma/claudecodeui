@@ -22,11 +22,16 @@ const settingsService = createSettingsService({
   },
   credentials: {
     list: (userId, type) => credentialsDb.getCredentials(userId, type),
-    create: (userId, name, type, value, description) =>
-      credentialsDb.createCredential(userId, name, type, value, description),
+    create: (userId, name, type, value, description, isActive) =>
+      credentialsDb.createCredential(userId, name, type, value, description, isActive),
     remove: (userId, credentialId) => credentialsDb.deleteCredential(userId, credentialId),
     toggle: (userId, credentialId, isActive) =>
       credentialsDb.toggleCredential(userId, credentialId, isActive),
+    listWithPreview: (userId, type) => credentialsDb.getCredentialsWithPreview(userId, type),
+    getMeta: (userId, credentialId) => credentialsDb.getCredentialMeta(userId, credentialId),
+    countByType: (userId, type) => credentialsDb.countCredentialsByType(userId, type),
+    activateExclusive: (userId, credentialId, type) =>
+      credentialsDb.activateCredentialExclusive(userId, credentialId, type),
   },
   notifications: {
     getPreferences: (userId) => notificationPreferencesDb.getPreferences(userId),

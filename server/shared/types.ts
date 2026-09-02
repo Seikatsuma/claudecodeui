@@ -591,6 +591,25 @@ export type CreateCredentialResult = {
   credentialType: string;
 };
 
+/**
+ * Safe credential view that also carries a masked preview of the secret
+ * (first ~10 characters + ellipsis, never the full value) - mirrors how the
+ * app API keys list already previews its own generated keys. Used by
+ * credential slots the UI needs to visually distinguish (e.g. the two
+ * Anthropic API key connections), where showing a stable prefix helps users
+ * tell entries apart without ever round-tripping the full secret.
+ */
+export type CredentialPreviewRow = CredentialPublicRow & {
+  value_preview: string;
+};
+
+/** Minimal ownership/business-rule metadata for one credential row. */
+export type CredentialMetaRow = {
+  id: number;
+  credential_type: string;
+  is_active: number;
+};
+
 // ---------------------------
 //----------------- PROJECT PERSISTENCE TYPES ------------
 /**
