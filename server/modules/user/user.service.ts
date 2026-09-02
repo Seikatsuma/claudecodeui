@@ -16,6 +16,18 @@ type UserDependencies = {
   applyGlobalGitConfig(gitName: string, gitEmail: string): Promise<void>;
   logInfo(message: string): void;
   logError(message: string, error: unknown): void;
+  /**
+   * Gates readSystemGitConfig()/applyGlobalGitConfig() below. Both shell out
+   * to `git config --global` - a SINGLE identity shared by the whole host
+   * (and every other instance/account on it), not per-user. That is a nice
+   * convenience on a single-account install (defaults a new setup to
+   * whoever is already logged into the host's own git) but actively wrong
+   * on OPEN_REGISTRATION: one web user's onboarding would silently read
+   * (and, on save, overwrite) another user's - or Account 1/2's own -
+   * machine-wide git identity. False (the default) preserves the exact
+   * previous behavior.
+   */
+  openRegistration: boolean;
 };
 
 /** Creates user-profile workflows with explicit repository and Git adapters. */
@@ -23,7 +35,7 @@ export function createUserService(dependencies: UserDependencies) {
   return {
     async getGitConfig(userId: number) {
       let gitConfig = dependencies.users.getGitConfig(userId);
-      if (!gitConfig || (!gitConfig.git_name && !gitConfig.git_email)) {
+      if (!dependencies.openRegistration && (!gitConfig || (!gitConfig.git_name && !gitConfig.git_email))) {
         const systemConfig = await dependencies.readSystemGitConfig();
         if (systemConfig.git_name || systemConfig.git_email) {
           dependencies.users.updateGitConfig(
@@ -60,12 +72,14 @@ export function createUserService(dependencies: UserDependencies) {
       }
 
       dependencies.users.updateGitConfig(userId, gitName, gitEmail);
-      try {
-        await dependencies.applyGlobalGitConfig(gitName, gitEmail);
-      } catch (error) {
-        // Persisted user settings remain authoritative even if the host Git
-        // installation cannot be updated (matching the previous behavior).
-        dependencies.logError('Failed to apply global Git config', error);
+      if (!dependencies.openRegistration) {
+        try {
+          await dependencies.applyGlobalGitConfig(gitName, gitEmail);
+        } catch (error) {
+          // Persisted user settings remain authoritative even if the host Git
+          // installation cannot be updated (matching the previous behavior).
+          dependencies.logError('Failed to apply global Git config', error);
+        }
       }
       return { success: true, gitName, gitEmail };
     },

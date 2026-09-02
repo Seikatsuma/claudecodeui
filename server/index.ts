@@ -9,7 +9,7 @@ import http from 'http';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 
-import { AppError, findApplicationRoot, getClaudeJsonPath, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
+import { AppError, findApplicationRoot, getClaudeJsonPath, getModuleDirectory, IS_PLATFORM, OPEN_REGISTRATION, terminalTextStyles } from '@/shared/utils.js';
 import {
     closeSessionsWatcher,
     initializeSessionsWatcher,
@@ -90,7 +90,15 @@ const SWITCH_ACCOUNT_URL = process.env.SWITCH_ACCOUNT_URL || null;
 // operator-chosen strings and can accidentally end up identical, but the
 // email can't. Never throws: a missing/unreadable file or a config without
 // oauthAccount just means no email badge, not a crash.
-const CLAUDE_ACCOUNT_EMAIL = (() => {
+//
+// Deliberately skipped on OPEN_REGISTRATION: getClaudeJsonPath() at this
+// point in the module runs at PROCESS BOOT, outside any request's
+// AsyncLocalStorage context, so it would resolve to whatever CLAUDE_CONFIG_DIR
+// (or its ~/.claude.json default) happens to be set for THIS PROCESS - not
+// any particular web user's own account. Showing that as "the account this
+// instance represents" would be actively misleading on a shared instance
+// with no single fixed account at all.
+const CLAUDE_ACCOUNT_EMAIL = OPEN_REGISTRATION ? null : (() => {
     try {
         const parsed = JSON.parse(fs.readFileSync(getClaudeJsonPath(), 'utf8'));
         const email = parsed?.oauthAccount?.emailAddress;

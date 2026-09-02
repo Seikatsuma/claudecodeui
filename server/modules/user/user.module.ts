@@ -1,6 +1,7 @@
 import spawn from 'cross-spawn';
 
 import { userDb } from '@/modules/database/index.js';
+import { OPEN_REGISTRATION } from '@/shared/utils.js';
 
 import { createUserRouter } from './user.routes.js';
 import { createUserService } from './user.service.js';
@@ -52,6 +53,7 @@ const userService = createUserService({
   },
   logInfo: (message) => console.log(message),
   logError: (message, error) => console.error(message, error),
+  openRegistration: OPEN_REGISTRATION,
 });
 
 /** User router assembled for the authenticated server mount. */

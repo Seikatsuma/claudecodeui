@@ -17,6 +17,7 @@ function createDependencies(overrides: Partial<UserDependencies> = {}): UserDepe
     applyGlobalGitConfig: async () => undefined,
     logInfo: () => undefined,
     logError: () => undefined,
+    openRegistration: false,
     ...overrides,
   };
 }
@@ -58,4 +59,45 @@ test('updateGitConfig persists valid input and invokes the Git adapter', async (
     'persist:Alice:alice@example.com',
     'git:Alice:alice@example.com',
   ]);
+});
+
+test('getGitConfig does NOT import the shared system config on an OPEN_REGISTRATION instance', async () => {
+  let systemConfigRead = false;
+  const service = createUserService(createDependencies({
+    openRegistration: true,
+    users: {
+      getGitConfig: () => undefined,
+      updateGitConfig: () => undefined,
+      completeOnboarding: () => undefined,
+      hasCompletedOnboarding: () => false,
+    },
+    readSystemGitConfig: async () => {
+      systemConfigRead = true;
+      return { git_name: 'Host Owner', git_email: 'host@example.com' };
+    },
+  }));
+
+  const result = await service.getGitConfig(7);
+
+  assert.equal(systemConfigRead, false, 'must never read the machine-wide git identity for an open-registration user');
+  assert.equal(result.gitName, null);
+  assert.equal(result.gitEmail, null);
+});
+
+test('updateGitConfig does NOT write the shared system config on an OPEN_REGISTRATION instance', async () => {
+  let systemConfigWritten = false;
+  const service = createUserService(createDependencies({
+    openRegistration: true,
+    users: {
+      getGitConfig: () => undefined,
+      updateGitConfig: () => undefined,
+      completeOnboarding: () => undefined,
+      hasCompletedOnboarding: () => false,
+    },
+    applyGlobalGitConfig: async () => { systemConfigWritten = true; },
+  }));
+
+  await service.updateGitConfig(1, 'Alice', 'alice@example.com');
+
+  assert.equal(systemConfigWritten, false, 'must never overwrite the machine-wide git identity for an open-registration user');
 });
