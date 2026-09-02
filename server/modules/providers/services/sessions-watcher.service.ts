@@ -160,6 +160,8 @@ async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Prom
       summary: row.custom_name || '',
       messageCount: 0,
       lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),
+      groupId: row.group_id ?? null,
+      groupLabel: row.group_label ?? null,
     },
     project: project
       ? {
@@ -171,6 +173,27 @@ async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Prom
       }
       : null,
     timestamp: new Date().toISOString(),
+  });
+}
+
+/**
+ * Broadcasts a `session_upserted` delta for one already-persisted session to
+ * every connected client, without going through the file-watcher's
+ * debounce/queue. For updates that never touch a provider transcript file on
+ * disk (e.g. group assignment, which only writes DB columns), nothing would
+ * ever trigger the chokidar-driven path in `onUpdate()`, so callers that
+ * mutate a session outside of a provider synchronizer call this directly.
+ */
+export async function broadcastSessionUpserted(sessionId: string): Promise<void> {
+  const event = await buildSessionUpsertedEvent(sessionId);
+  if (!event) {
+    return;
+  }
+
+  connectedClients.forEach(client => {
+    if (client.readyState === WS_OPEN_STATE) {
+      client.send(event);
+    }
   });
 }
 

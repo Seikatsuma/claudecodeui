@@ -13,6 +13,8 @@ type SessionSummary = {
   summary: string;
   messageCount: number;
   lastActivity: string;
+  groupId: string | null;
+  groupLabel: string | null;
 };
 
 type SessionRepositoryRow = {
@@ -21,6 +23,8 @@ type SessionRepositoryRow = {
   custom_name?: string | null;
   updated_at?: string | null;
   created_at?: string | null;
+  group_id?: string | null;
+  group_label?: string | null;
 };
 
 export type ProjectListItem = {
@@ -124,6 +128,8 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
     summary: row.custom_name || '',
     messageCount: 0,
     lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),
+    groupId: row.group_id ?? null,
+    groupLabel: row.group_label ?? null,
   };
 }
 

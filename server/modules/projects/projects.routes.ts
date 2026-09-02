@@ -7,6 +7,7 @@ import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils
 import { getArchivedProjectsWithSessions, getProjectSessionsPage, getProjectsWithSessions } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
 import { deleteOrArchiveProject, restoreArchivedProject } from '@/modules/projects/services/project-delete.service.js';
 import { applyLegacyStarredProjectIds, toggleProjectStar } from '@/modules/projects/services/project-star.service.js';
+import { autoGroupProjectSessions } from '@/modules/providers/index.js';
 
 const router = express.Router();
 
@@ -244,6 +245,22 @@ router.post(
     const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
     const { isStarred } = toggleProjectStar(projectId);
     res.json({ success: true, isStarred });
+  }),
+);
+
+/**
+ * One-shot "Organize by topic" action: clusters this project's currently
+ * ungrouped sessions by topic via a single LLM call and persists the
+ * resulting group assignments. Never runs automatically - only in response
+ * to this explicit request - so it never surprises the user by reshuffling
+ * labels in the background.
+ */
+router.post(
+  '/:projectId/organize-sessions',
+  asyncHandler(async (req, res) => {
+    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
+    const result = await autoGroupProjectSessions(projectId);
+    res.json(createApiSuccessResponse(result));
   }),
 );
 
