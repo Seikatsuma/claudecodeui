@@ -140,6 +140,12 @@ tasks/
 # Git worktrees
 .worktrees/
 
+# Opt-out marker for the host's git-autopush.sh Stop-hook (see
+# ~/scripts/git-autopush.sh) - this is a reviewed branch with running
+# production instances depending on it, so commits/pushes here must stay
+# deliberate and hand-written, never an auto-generated snapshot.
+.no-autopush
+
 # Local desktop packaging artifacts
 /.desktop-build/
 /release/
