@@ -14,7 +14,7 @@ import type {
   FileTreeProjectGateway,
   FileTreeWorkspaceGateway,
 } from '@/shared/types.js';
-import { WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
+import { getWorkspacesRoot, validateWorkspacePath } from '@/shared/utils.js';
 
 const MAXIMUM_UPLOAD_SIZE_MEGABYTES = 200;
 const MAXIMUM_UPLOAD_SIZE_BYTES = MAXIMUM_UPLOAD_SIZE_MEGABYTES * 1024 * 1024;
@@ -71,7 +71,15 @@ const fileTreeProjects: FileTreeProjectGateway = {
  * the path policy explicit for every service instance.
  */
 const fileTreeWorkspace: FileTreeWorkspaceGateway = {
-  rootPath: WORKSPACES_ROOT,
+  // A getter, not a plain field: this singleton object is shared across every
+  // request, so `rootPath` must be re-resolved on each read rather than
+  // captured once at module load. getWorkspacesRoot() honors the current
+  // request's OPEN_REGISTRATION-scoped workspace root when set (see
+  // shared/utils.ts) and falls back to the process-wide WORKSPACES_ROOT
+  // otherwise, so Account 1/2 read the exact same value as before.
+  get rootPath() {
+    return getWorkspacesRoot();
+  },
   validatePath: (candidatePath) => validateWorkspacePath(candidatePath),
 };
 

@@ -8,7 +8,13 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN DEFAULT 1,
     git_name TEXT,
     git_email TEXT,
-    has_completed_onboarding BOOLEAN DEFAULT 0
+    has_completed_onboarding BOOLEAN DEFAULT 0,
+    -- Persistent magic-link secret used by OPEN_REGISTRATION instances (see
+    -- server/shared/utils.ts) instead of a password. NULL on every install
+    -- that never enables open registration (Account 1/2 keep using
+    -- password_hash exactly as before). Never expires and is never rotated
+    -- automatically - see auth.service.ts registerOpen()/enterWithLoginToken().
+    login_token TEXT
 );
 `;
 

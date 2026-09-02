@@ -5,6 +5,7 @@ import express from 'express';
 
 import type { ProviderRunFunction } from '@/shared/types.js';
 
+import { getRequestRuntimeContext } from '../../shared/request-context.js';
 import { normalizeProjectPath } from '../../shared/utils.js';
 
 type AgentRouterDependencies = {
@@ -37,7 +38,11 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
   // injected homeDirectory() dependency instead of a direct os import - keeps
   // temp GitHub clones and their cleanup scoped to the account this instance
   // (CLAUDE_CONFIG_DIR) actually represents, not always the default account.
-  const claudeConfigDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  // Also honors the OPEN_REGISTRATION per-request override when this router
+  // is ever mounted behind requestRuntimeContextMiddleware (it is not today -
+  // /api/agent uses its own API-key auth - so this is a no-op fallback here).
+  const claudeConfigDir = () =>
+    getRequestRuntimeContext()?.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const spawn = dependencies.spawnProcess;
   const IS_PLATFORM = dependencies.platformMode;
   const userDb = dependencies.users;

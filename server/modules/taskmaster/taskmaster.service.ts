@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
+
 type TaskmasterServiceDependencies = {
     readTextFile(filePath: string): Promise<string>;
     getHomeDirectory(): string;
@@ -18,10 +20,18 @@ export function createTaskmasterService(dependencies: TaskmasterServiceDependenc
             // Mirrors getClaudeJsonPath()/getClaudeConfigDir() (shared/utils.ts):
             // honor CLAUDE_CONFIG_DIR (multi-account setups) instead of always
             // reading the default account's config, so TaskMaster detection
-            // reflects the account this instance actually represents.
+            // reflects the account this instance actually represents. The
+            // request-scoped override (OPEN_REGISTRATION instances - see
+            // shared/request-context.ts) takes priority over the process-wide
+            // env var, same as getClaudeConfigDir() itself; outside that
+            // context (including these unit tests, which inject a fake
+            // getHomeDirectory()) this falls through to the exact same
+            // env-var-or-injected-home behavior as before.
+            const requestConfigDir = getRequestRuntimeContext()?.claudeConfigDir;
+            const configuredDir = requestConfigDir || process.env.CLAUDE_CONFIG_DIR;
             const configurationPaths = [
-                path.join(process.env.CLAUDE_CONFIG_DIR || homeDirectory, '.claude.json'),
-                path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homeDirectory, '.claude'), 'settings.json'),
+                path.join(configuredDir || homeDirectory, '.claude.json'),
+                path.join(configuredDir || path.join(homeDirectory, '.claude'), 'settings.json'),
             ];
             let configuration: Record<string, unknown> | null = null;
             let configurationPath: string | null = null;

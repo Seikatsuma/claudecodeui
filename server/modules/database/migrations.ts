@@ -531,6 +531,11 @@ export const runMigrations = (db: Database) => {
       'has_completed_onboarding',
       'BOOLEAN DEFAULT 0'
     );
+    addColumnToTableIfNotExists(db, 'users', userColumnNames, 'login_token', 'TEXT');
+    // Partial-unique-like lookup index. SQLite allows multiple NULLs through a
+    // UNIQUE index (every pre-existing/non-open-registration row stays NULL),
+    // so this stays safe on installs that never use magic-link login.
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_token ON users(login_token)');
 
     db.exec(APP_CONFIG_TABLE_SCHEMA_SQL);
     db.exec(USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL);

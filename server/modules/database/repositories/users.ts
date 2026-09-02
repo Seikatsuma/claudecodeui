@@ -137,4 +137,46 @@ export const userDb = {
       .get(userId) as { has_completed_onboarding: number } | undefined;
     return row?.has_completed_onboarding === 1;
   },
+
+  // -------------------------------------------------------------------------
+  // OPEN_REGISTRATION magic-link support (see server/modules/auth/auth.service.ts).
+  // Unused on installs that never set OPEN_REGISTRATION=true - every row's
+  // login_token stays NULL there, exactly like today.
+  // -------------------------------------------------------------------------
+
+  /** Inserts a new user with a password hash AND a persistent login-link token. */
+  createUserWithLoginToken(
+    username: string,
+    passwordHash: string,
+    loginToken: string
+  ): CreateUserResult {
+    const db = getConnection();
+    const result = db
+      .prepare('INSERT INTO users (username, password_hash, login_token) VALUES (?, ?, ?)')
+      .run(username, passwordHash, loginToken);
+    return { id: result.lastInsertRowid, username };
+  },
+
+  /** Looks up an active user by their persistent login-link token. */
+  getUserByLoginToken(loginToken: string): UserRow | undefined {
+    const db = getConnection();
+    return db
+      .prepare('SELECT * FROM users WHERE login_token = ? AND is_active = 1')
+      .get(loginToken) as UserRow | undefined;
+  },
+
+  /** Replaces a user's login-link token (used to invalidate a leaked link). */
+  setLoginToken(userId: number, loginToken: string): void {
+    const db = getConnection();
+    db.prepare('UPDATE users SET login_token = ? WHERE id = ?').run(loginToken, userId);
+  },
+
+  /** Returns the user's current login-link token, or null if none is set. */
+  getLoginToken(userId: number): string | null {
+    const db = getConnection();
+    const row = db
+      .prepare('SELECT login_token FROM users WHERE id = ?')
+      .get(userId) as { login_token: string | null } | undefined;
+    return row?.login_token ?? null;
+  },
 };

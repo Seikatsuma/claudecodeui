@@ -4,6 +4,7 @@ import path from "path";
 import express from "express";
 
 import { parseFrontMatter } from "../../shared/frontmatter.js";
+import { getRequestRuntimeContext } from "../../shared/request-context.js";
 
 type CommandsRouterDependencies = {
   fileSystem: typeof import('node:fs/promises');
@@ -30,7 +31,9 @@ const providerModelsService = dependencies.models;
 // `process` is shadowed below by dependencies.runtime (a narrow
 // uptime/memoryUsage/pid facade with no .env).
 const claudeConfigDir = () =>
-  globalThis.process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+  getRequestRuntimeContext()?.claudeConfigDir
+  || globalThis.process.env.CLAUDE_CONFIG_DIR
+  || path.join(os.homedir(), ".claude");
 const process = dependencies.runtime;
 const router = express.Router();
 

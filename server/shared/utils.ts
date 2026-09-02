@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import { parseFrontMatter } from '@/shared/frontmatter.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type {
   AnyRecord,
   ApiSuccessShape,
@@ -40,6 +41,16 @@ import type {
 export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
 
 /**
+ * Enables the open, self-service registration flow (persistent login-link
+ * instead of a password, per-request `CLAUDE_CONFIG_DIR`/workspace/API key
+ * resolved from `AsyncLocalStorage` instead of `process.env`) used by a
+ * shared multi-tenant instance. Off by default, so an install that never
+ * sets `OPEN_REGISTRATION=true` (Account 1/2 included) behaves exactly as it
+ * did before this flag existed - see auth.service.ts and request-context.ts.
+ */
+export const OPEN_REGISTRATION = process.env.OPEN_REGISTRATION === 'true';
+
+/**
  * Resolves this process's Claude Code CLI config directory - the directory
  * that normally holds settings.json, .credentials.json, projects/, commands/,
  * skills/. Honors CLAUDE_CONFIG_DIR exactly like the `claude` CLI itself does
@@ -58,8 +69,20 @@ export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
  * default account's data even when this process is meant to represent a
  * different account (this was a real bug: a second CLAUDE_CONFIG_DIR-scoped
  * instance showed the first account's session history).
+ *
+ * On an OPEN_REGISTRATION instance, the request-scoped context set by
+ * `requestRuntimeContextMiddleware` (server/modules/auth/request-runtime-context.middleware.ts)
+ * takes priority over `process.env.CLAUDE_CONFIG_DIR` - each web user gets
+ * their own config dir per request instead of one shared process-wide value.
+ * Outside a request with that context (Account 1/2, CLI/background code,
+ * tests), this falls through to the exact same `process.env` behavior as
+ * before.
  */
 export function getClaudeConfigDir(): string {
+  const requestConfigDir = getRequestRuntimeContext()?.claudeConfigDir;
+  if (requestConfigDir) {
+    return requestConfigDir;
+  }
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
@@ -73,8 +96,14 @@ export function getClaudeConfigDir(): string {
  * set, though, the CLI puts this file directly inside that directory,
  * alongside settings.json etc - the same directory getClaudeConfigDir()
  * returns in that case.
+ *
+ * Honors the same per-request context as getClaudeConfigDir() above.
  */
 export function getClaudeJsonPath(): string {
+  const requestConfigDir = getRequestRuntimeContext()?.claudeConfigDir;
+  if (requestConfigDir) {
+    return path.join(requestConfigDir, '.claude.json');
+  }
   return path.join(process.env.CLAUDE_CONFIG_DIR || os.homedir(), '.claude.json');
 }
 
@@ -158,6 +187,19 @@ export class AppError extends Error {
  * back to the current user's home directory.
  */
 export const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || os.homedir();
+
+/**
+ * Per-request-aware counterpart to `WORKSPACES_ROOT` above. On an
+ * OPEN_REGISTRATION instance this resolves to the CURRENT web user's own
+ * workspace root (set by requestRuntimeContextMiddleware), so browsing,
+ * creating, and listing projects stays scoped to that one user's files.
+ * Outside that context it returns the exact same value as the `WORKSPACES_ROOT`
+ * constant, so Account 1/2 and every other caller keep their existing
+ * single-root behavior unchanged.
+ */
+export function getWorkspacesRoot(): string {
+  return getRequestRuntimeContext()?.workspaceRoot || WORKSPACES_ROOT;
+}
 
 /**
  * System-critical paths that must never be used as workspace roots.
@@ -320,14 +362,15 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
       }
     }
 
-    const resolvedWorkspaceRoot = normalizeProjectPath(await realpath(WORKSPACES_ROOT));
+    const workspacesRoot = getWorkspacesRoot();
+    const resolvedWorkspaceRoot = normalizeProjectPath(await realpath(workspacesRoot));
     if (
       !resolvedPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
       && resolvedPath !== resolvedWorkspaceRoot
     ) {
       return {
         valid: false,
-        error: `Workspace path must be within the allowed workspace root: ${WORKSPACES_ROOT}`,
+        error: `Workspace path must be within the allowed workspace root: ${workspacesRoot}`,
       };
     }
 
