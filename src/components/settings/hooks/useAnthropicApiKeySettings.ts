@@ -3,30 +3,39 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
 
 /**
- * Manages this user's own Anthropic API key on an OPEN_REGISTRATION instance
- * (see server/modules/websocket/services/chat-websocket.service.ts and
- * claude-runtime.provider.js, which read it via credentialsDb using this
- * exact credential type). Built on the generic per-user credential store
- * (`/api/settings/credentials`) rather than a dedicated endpoint - no backend
- * change was needed for storage, only "keep at most one" semantics here:
- * saving a new key deletes whichever credential row already held one first.
+ * Manages this user's Anthropic API key "connections" on an OPEN_REGISTRATION
+ * instance (see server/modules/websocket/services/chat-websocket.service.ts
+ * and claude-runtime.provider.js, which read the active one via
+ * credentialsDb.getActiveCredential() using this exact credential type).
+ *
+ * A user can hold up to two connections (hard-capped server-side too, see
+ * settings.service.ts's createAnthropicApiKey), exactly one of which is
+ * "active" at a time - that's the one the next chat turn's SDK call uses.
+ * Switching which one is active never touches chat history, only which key
+ * future turns resolve.
+ *
+ * Built on a small set of dedicated endpoints
+ * (`/api/settings/anthropic-keys*`) layered on the generic per-user
+ * credential store rather than a new table - see settings.service.ts for the
+ * cap + exclusive-active-slot business rules.
  */
 
-const CREDENTIAL_TYPE = 'anthropic_api_key';
-const CREDENTIAL_NAME = 'Anthropic API Key';
+export const MAX_ANTHROPIC_API_KEYS = 2;
 
-type CredentialListItem = {
+type AnthropicKeyItem = {
   id: string | number;
-  credential_type: string;
+  credential_name: string;
   created_at: string;
+  is_active: number | boolean;
+  value_preview: string;
 };
 
-type CredentialsListResponse = {
-  credentials?: CredentialListItem[];
+type AnthropicKeysListResponse = {
+  keys?: AnthropicKeyItem[];
   error?: string;
 };
 
-type CredentialWriteResponse = {
+type AnthropicKeyWriteResponse = {
   success?: boolean;
   error?: string;
 };
@@ -34,13 +43,17 @@ type CredentialWriteResponse = {
 type SaveStatus = 'success' | 'error' | null;
 
 export function useAnthropicApiKeySettings() {
-  const [isConfigured, setIsConfigured] = useState(false);
-  const [configuredAt, setConfiguredAt] = useState<string | null>(null);
-  const [existingCredentialId, setExistingCredentialId] = useState<string | number | null>(null);
-  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [keys, setKeys] = useState<AnthropicKeyItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newKeyLabel, setNewKeyLabel] = useState('');
+  const [apiKeyInput, setApiKeyInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  // Id of the connection whose activate/delete button is mid-request - only
+  // that row shows a busy state rather than freezing the whole list.
+  const [pendingId, setPendingId] = useState<string | number | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const clearStatusTimerRef = useRef<number | null>(null);
 
   const scheduleStatusClear = useCallback((status: SaveStatus) => {
@@ -54,84 +67,84 @@ export function useAnthropicApiKeySettings() {
     }, 3000);
   }, []);
 
-  const loadStatus = useCallback(async () => {
+  const loadKeys = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await authenticatedFetch(`/api/settings/credentials?type=${CREDENTIAL_TYPE}`);
-      const payload = await response.json() as CredentialsListResponse;
-      const existing = payload.credentials?.[0] ?? null;
-      setIsConfigured(Boolean(existing));
-      setConfiguredAt(existing?.created_at ?? null);
-      setExistingCredentialId(existing?.id ?? null);
+      const response = await authenticatedFetch('/api/settings/anthropic-keys');
+      const payload = await response.json() as AnthropicKeysListResponse;
+      setKeys(payload.keys || []);
     } catch (error) {
-      console.error('Error loading Anthropic API key status:', error);
+      console.error('Error loading Anthropic API keys:', error);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  const saveApiKey = useCallback(async () => {
+  const addKey = useCallback(async () => {
     const trimmedKey = apiKeyInput.trim();
-    if (!trimmedKey) {
+    if (!trimmedKey || keys.length >= MAX_ANTHROPIC_API_KEYS) {
       return;
     }
 
     try {
       setIsSaving(true);
+      setErrorMessage(null);
 
-      // Enforce "at most one key" client-side: the underlying store allows
-      // several credentials of the same type, but this UI always presents a
-      // single active key.
-      if (existingCredentialId !== null) {
-        await authenticatedFetch(`/api/settings/credentials/${existingCredentialId}`, { method: 'DELETE' });
-      }
-
-      const response = await authenticatedFetch('/api/settings/credentials', {
+      const response = await authenticatedFetch('/api/settings/anthropic-keys', {
         method: 'POST',
         body: JSON.stringify({
-          credentialName: CREDENTIAL_NAME,
-          credentialType: CREDENTIAL_TYPE,
-          credentialValue: trimmedKey,
+          label: newKeyLabel.trim(),
+          apiKey: trimmedKey,
         }),
       });
 
-      const payload = await response.json() as CredentialWriteResponse;
+      const payload = await response.json() as AnthropicKeyWriteResponse;
       if (!response.ok || !payload.success) {
-        console.error('Error saving Anthropic API key:', payload.error);
+        setErrorMessage(payload.error || null);
         scheduleStatusClear('error');
         return;
       }
 
       setApiKeyInput('');
+      setNewKeyLabel('');
+      setShowAddForm(false);
       scheduleStatusClear('success');
-      await loadStatus();
+      await loadKeys();
     } catch (error) {
       console.error('Error saving Anthropic API key:', error);
       scheduleStatusClear('error');
     } finally {
       setIsSaving(false);
     }
-  }, [apiKeyInput, existingCredentialId, loadStatus, scheduleStatusClear]);
+  }, [apiKeyInput, keys.length, loadKeys, newKeyLabel, scheduleStatusClear]);
 
-  const removeApiKey = useCallback(async () => {
-    if (existingCredentialId === null) {
-      return;
-    }
-
+  const removeKey = useCallback(async (credentialId: string | number) => {
     try {
-      setIsSaving(true);
-      await authenticatedFetch(`/api/settings/credentials/${existingCredentialId}`, { method: 'DELETE' });
-      await loadStatus();
+      setPendingId(credentialId);
+      await authenticatedFetch(`/api/settings/anthropic-keys/${credentialId}`, { method: 'DELETE' });
+      await loadKeys();
     } catch (error) {
       console.error('Error removing Anthropic API key:', error);
     } finally {
-      setIsSaving(false);
+      setPendingId(null);
     }
-  }, [existingCredentialId, loadStatus]);
+  }, [loadKeys]);
+
+  const activateKey = useCallback(async (credentialId: string | number) => {
+    try {
+      setPendingId(credentialId);
+      await authenticatedFetch(`/api/settings/anthropic-keys/${credentialId}/activate`, { method: 'PATCH' });
+      await loadKeys();
+    } catch (error) {
+      console.error('Error activating Anthropic API key:', error);
+    } finally {
+      setPendingId(null);
+    }
+  }, [loadKeys]);
 
   useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+    void loadKeys();
+  }, [loadKeys]);
 
   useEffect(() => () => {
     if (clearStatusTimerRef.current !== null) {
@@ -140,14 +153,21 @@ export function useAnthropicApiKeySettings() {
   }, []);
 
   return {
-    isConfigured,
-    configuredAt,
+    keys,
+    isLoading,
+    canAddMore: keys.length < MAX_ANTHROPIC_API_KEYS,
+    showAddForm,
+    setShowAddForm,
+    newKeyLabel,
+    setNewKeyLabel,
     apiKeyInput,
     setApiKeyInput,
-    isLoading,
     isSaving,
+    pendingId,
     saveStatus,
-    saveApiKey,
-    removeApiKey,
+    errorMessage,
+    addKey,
+    removeKey,
+    activateKey,
   };
 }
