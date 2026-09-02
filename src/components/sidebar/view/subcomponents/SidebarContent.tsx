@@ -1,19 +1,22 @@
 import { type ReactNode } from 'react';
-import { Activity, Archive, Folder, MessageSquare, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { Archive, Folder, MessageSquare, RotateCcw, Search, Trash2 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { ScrollArea } from '../../../../shared/view/ui';
-import type { Project } from '../../../../types/app';
+import type { AppTab, Project, ProjectSession } from '../../../../types/app';
 import type { ReleaseInfo } from '../../../../shared/types';
 import type { ConversationSearchResults, SearchProgress } from '../../hooks/useSidebarController';
 import type { ArchivedProjectListItem, ArchivedSessionListItem, RecentConversationListItem, SidebarSearchMode } from '../../types/types';
 import LLMProviderLogo from '../../../llm-provider-logo/LLMProviderLogo';
 import { formatCompactAge, getAllSessions } from '../../utils/utils';
+import { getSessionTitle } from '../../../../utils/pageTitle';
 
 import SidebarFooter from './SidebarFooter';
 import SidebarHeader from './SidebarHeader';
 import SidebarProjectList, { type SidebarProjectListProps } from './SidebarProjectList';
+import SidebarPulseList from './SidebarPulseList';
 import SidebarRecentConversations from './SidebarRecentConversations';
+import SidebarWorkspaceTabs from './SidebarWorkspaceTabs';
 
 function HighlightedSnippet({ snippet, highlights }: { snippet: string; highlights: { start: number; end: number }[] }) {
   const parts: ReactNode[] = [];
@@ -91,7 +94,13 @@ type SidebarContentProps = {
   isMobile: boolean;
   isLoading: boolean;
   projects: Project[];
-  runningSessionsCount: number;
+  selectedProject: Project | null;
+  selectedSession: ProjectSession | null;
+  activeTab: AppTab;
+  setActiveTab: (tab: AppTab) => void;
+  shouldShowTasksTab: boolean;
+  shouldShowBrowserTab: boolean;
+  pulseSessionsCount: number;
   archivedProjects: ArchivedProjectListItem[];
   archivedSessions: ArchivedSessionListItem[];
   archivedSessionsCount: number;
@@ -142,7 +151,13 @@ export default function SidebarContent({
   isMobile,
   isLoading,
   projects,
-  runningSessionsCount,
+  selectedProject,
+  selectedSession,
+  activeTab,
+  setActiveTab,
+  shouldShowTasksTab,
+  shouldShowBrowserTab,
+  pulseSessionsCount,
   archivedProjects,
   archivedSessions,
   archivedSessionsCount,
@@ -206,7 +221,7 @@ export default function SidebarContent({
         isMobile={isMobile}
         isLoading={isLoading}
         projectsCount={projects.length}
-        runningSessionsCount={runningSessionsCount}
+        pulseSessionsCount={pulseSessionsCount}
         archivedSessionsCount={archivedSessionsCount}
         isArchivedSessionsLoading={isArchivedSessionsLoading}
         searchFilter={searchFilter}
@@ -220,6 +235,30 @@ export default function SidebarContent({
         onCollapseSidebar={onCollapseSidebar}
         t={t}
       />
+
+      {selectedProject && (
+        <div className="flex-shrink-0 border-b border-border/60 px-3 py-2">
+          <div className="mb-1.5 min-w-0">
+            <p
+              className="truncate text-xs font-medium leading-tight text-foreground"
+              title={selectedSession ? getSessionTitle(selectedSession) : selectedProject.displayName}
+            >
+              {selectedSession ? getSessionTitle(selectedSession) : selectedProject.displayName}
+            </p>
+            {selectedSession && (
+              <p className="truncate text-[10px] leading-tight text-muted-foreground/70">
+                {selectedProject.displayName}
+              </p>
+            )}
+          </div>
+          <SidebarWorkspaceTabs
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            shouldShowTasksTab={shouldShowTasksTab}
+            shouldShowBrowserTab={shouldShowBrowserTab}
+          />
+        </div>
+      )}
 
       <ScrollArea className="flex-1 overflow-y-auto overscroll-contain md:px-1.5 md:py-2">
         {showConversationSearch ? (
@@ -402,39 +441,19 @@ export default function SidebarContent({
             onRetry={onRetryRecentConversations}
             t={t}
           />
-        ) : searchMode === 'running' ? (
-          projectListProps.filteredProjects.length === 0 ? (
-            <div className="px-4 py-12 text-center md:py-8">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-border/70 bg-muted/50 md:mb-3">
-                <Activity className="h-6 w-6 text-muted-foreground" />
-              </div>
-              <h3 className="mb-2 text-base font-medium text-foreground md:mb-1">
-                {t('running.emptyTitle', 'No sessions running')}
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                {runningSessionsCount > 0
-                  ? t('running.noMatchingSessions', 'No running sessions match this search.')
-                  : t('running.emptyDescription', 'Active work will appear here while a provider is processing.')}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="mx-2 flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-3 py-2 shadow-sm">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                    <Activity className="h-3.5 w-3.5" />
-                  </span>
-                  <span className="truncate text-xs font-normal text-foreground">
-                    {t('running.title', 'Running now')}
-                  </span>
-                </div>
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-normal text-emerald-700 dark:text-emerald-300">
-                  {runningSessionsCount}
-                </span>
-              </div>
-              <SidebarProjectList {...projectListProps} />
-            </div>
-          )
+        ) : searchMode === 'pulse' ? (
+          <SidebarPulseList
+            projects={projectListProps.projects}
+            getProjectSessions={projectListProps.getProjectSessions}
+            activeSessions={projectListProps.activeSessions}
+            attentionSessionIds={projectListProps.attentionSessionIds}
+            selectedSession={projectListProps.selectedSession}
+            currentTime={projectListProps.currentTime}
+            searchFilter={searchFilter}
+            onProjectSelect={projectListProps.onProjectSelect}
+            onSessionSelect={projectListProps.onSessionSelect}
+            t={t}
+          />
         ) : searchMode === 'archived' ? (
           isArchivedSessionsLoading ? (
             <div className="space-y-2 px-2 py-1" aria-live="polite" aria-busy="true">

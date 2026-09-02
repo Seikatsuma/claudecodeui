@@ -1,8 +1,8 @@
-import type { LoadingProgress, Project, ProjectSession, LLMProvider } from '../../../types/app';
+import type { AppTab, LoadingProgress, Project, ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
 
 export type ProjectSortOrder = 'name' | 'date';
-export type SidebarSearchMode = 'projects' | 'conversations' | 'running' | 'archived';
+export type SidebarSearchMode = 'projects' | 'conversations' | 'pulse' | 'archived';
 export type ArchivedProjectListItem = Project & { isArchived: true };
 
 export type SessionWithProvider = ProjectSession & {
@@ -64,6 +64,11 @@ export type SidebarProps = {
   settingsInitialTab: string;
   onCloseSettings: () => void;
   isMobile: boolean;
+  /** Workspace view (Chat/Shell/Files/Source Control/...) shown in the main content area, switched from the compact tab strip under the active session's title. */
+  activeTab: AppTab;
+  setActiveTab: (tab: AppTab) => void;
+  shouldShowTasksTab: boolean;
+  shouldShowBrowserTab: boolean;
 };
 
 export type SessionViewModel = {

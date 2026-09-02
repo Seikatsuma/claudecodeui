@@ -44,6 +44,10 @@ export type MainContentProps = {
   selectedSession: ProjectSession | null;
   activeTab: AppTab;
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
+  /** Whether the TaskMaster "Tasks" workspace tab should be offered — lifted up from MainContent so the sidebar's tab switcher can gate on it too. */
+  shouldShowTasksTab: boolean;
+  /** Whether the "Browser" workspace tab should be offered — lifted up from MainContent so the sidebar's tab switcher can gate on it too. */
+  shouldShowBrowserTab: boolean;
   ws: WebSocket | null;
   sendMessage: (message: unknown) => void;
   isMobile: boolean;
@@ -68,11 +72,9 @@ export type MainContentProps = {
 
 export type MainContentHeaderProps = {
   activeTab: AppTab;
-  setActiveTab: Dispatch<SetStateAction<AppTab>>;
   selectedProject: Project;
   selectedSession: ProjectSession | null;
   shouldShowTasksTab: boolean;
-  shouldShowBrowserTab: boolean;
   isMobile: boolean;
   onMenuClick: () => void;
 };

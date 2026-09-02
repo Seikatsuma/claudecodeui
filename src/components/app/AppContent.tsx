@@ -8,12 +8,15 @@ import CommandPalette from '../command-palette/CommandPalette';
 import SessionTabsBar from '../session-tabs/SessionTabsBar';
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { PaletteOpsProvider, usePaletteOpsRegister } from '../../contexts/PaletteOpsContext';
+import { useTasksSettings } from '../../contexts/TasksSettingsContext';
 import { useDeviceSettings } from '../../hooks/useDeviceSettings';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import { useOpenSessionTabs } from '../../hooks/useOpenSessionTabs';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
+import { useBrowserUseEnabled } from '../../hooks/useBrowserUseEnabled';
 import { api } from '../../utils/api';
+import type { AppTab } from '../../types/app';
 
 type RunningSessionApiItem = {
   sessionId?: unknown;
@@ -90,6 +93,26 @@ function AppContentInner() {
     isMobile,
     activeSessions: processingSessions,
   });
+
+  // Whether the TaskMaster "Tasks" and "Browser" workspace tabs should be
+  // offered. Computed here (not inside MainContent) so both the main content
+  // area and the sidebar's compact tab switcher gate on the same values.
+  const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
+  const shouldShowTasksTab = Boolean(tasksEnabled && isTaskMasterInstalled);
+  const shouldShowBrowserTab = useBrowserUseEnabled();
+
+  // The sidebar's workspace tab switcher lives inside the mobile drawer too;
+  // picking a tab there should close the drawer like picking a project or
+  // session does, so the user actually sees the tab they just switched to.
+  const handleSidebarTabSelect = useCallback(
+    (tab: AppTab) => {
+      setActiveTab(tab);
+      if (isMobile) {
+        setSidebarOpen(false);
+      }
+    },
+    [isMobile, setActiveTab, setSidebarOpen],
+  );
 
   // Open-session tabs (VS Code-style strip above the chat area): a session
   // gets a tab the moment it's actually viewed — sidebar click, search
@@ -231,7 +254,14 @@ function AppContentInner() {
     <div className="fixed inset-0 flex bg-background" style={{ bottom: 'var(--keyboard-height, 0px)' }}>
       {!isMobile ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
-          <Sidebar {...sidebarSharedProps} onSessionDelete={handleSessionDeleteWithTabCleanup} />
+          <Sidebar
+            {...sidebarSharedProps}
+            onSessionDelete={handleSessionDeleteWithTabCleanup}
+            activeTab={activeTab}
+            setActiveTab={handleSidebarTabSelect}
+            shouldShowTasksTab={shouldShowTasksTab}
+            shouldShowBrowserTab={shouldShowBrowserTab}
+          />
         </div>
       ) : (
         <div
@@ -257,7 +287,14 @@ function AppContentInner() {
             onClick={(event) => event.stopPropagation()}
             onTouchStart={(event) => event.stopPropagation()}
           >
-            <Sidebar {...sidebarSharedProps} onSessionDelete={handleSessionDeleteWithTabCleanup} />
+            <Sidebar
+            {...sidebarSharedProps}
+            onSessionDelete={handleSessionDeleteWithTabCleanup}
+            activeTab={activeTab}
+            setActiveTab={handleSidebarTabSelect}
+            shouldShowTasksTab={shouldShowTasksTab}
+            shouldShowBrowserTab={shouldShowBrowserTab}
+          />
           </div>
         </div>
       )}
@@ -275,6 +312,8 @@ function AppContentInner() {
           selectedSession={selectedSession}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          shouldShowTasksTab={shouldShowTasksTab}
+          shouldShowBrowserTab={shouldShowBrowserTab}
           ws={ws}
           sendMessage={sendMessage}
           isMobile={isMobile}

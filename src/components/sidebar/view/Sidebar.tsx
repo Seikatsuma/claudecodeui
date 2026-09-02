@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
@@ -41,6 +41,10 @@ function Sidebar({
   settingsInitialTab,
   onCloseSettings,
   isMobile,
+  activeTab,
+  setActiveTab,
+  shouldShowTasksTab,
+  shouldShowBrowserTab,
 }: SidebarProps) {
   const { t } = useTranslation(['sidebar', 'common']);
   const { isPWA } = useDeviceSettings({ trackMobile: false });
@@ -82,7 +86,6 @@ function Sidebar({
     isSearching,
     searchProgress,
     clearConversationResults,
-    runningSessionsCount,
     deletingProjects,
     deleteConfirmation,
     sessionDeleteConfirmation,
@@ -134,7 +137,6 @@ function Sidebar({
     projects,
     selectedProject,
     selectedSession,
-    activeSessions,
     isLoading,
     isMobile,
     t,
@@ -148,6 +150,17 @@ function Sidebar({
     setSidebarVisible: (visible) => setPreference('sidebarVisible', visible),
     sidebarVisible,
   });
+
+  // "Pulse" = sessions currently running/busy (actively processing) or
+  // waiting on the user (needs-attention) — the same statuses that already
+  // drive the green/amber dot on each session row. Computed straight from
+  // the props this component already receives, independent of the
+  // project/search filtering the rest of the sidebar list uses.
+  const pulseSessionsCount = useMemo(() => {
+    const ids = new Set(activeSessions.keys());
+    attentionSessionIds.forEach((id) => ids.add(id));
+    return ids.size;
+  }, [activeSessions, attentionSessionIds]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -183,7 +196,6 @@ function Sidebar({
     loadingMoreProjects,
     activeSessions,
     attentionSessionIds,
-    forceExpanded: searchMode === 'running',
     isProjectStarred,
     onEditingNameChange: setEditingName,
     onToggleProject: toggleProject,
@@ -255,7 +267,13 @@ function Sidebar({
             isMobile={isMobile}
             isLoading={isLoading}
             projects={projects}
-            runningSessionsCount={runningSessionsCount}
+            selectedProject={selectedProject}
+            selectedSession={selectedSession}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            shouldShowTasksTab={shouldShowTasksTab}
+            shouldShowBrowserTab={shouldShowBrowserTab}
+            pulseSessionsCount={pulseSessionsCount}
             archivedProjects={archivedProjects}
             archivedSessions={archivedSessions}
             archivedSessionsCount={archivedSessionsCount}
