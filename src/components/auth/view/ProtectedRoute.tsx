@@ -68,6 +68,13 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
 
       return <NoInvitationScreen />;
     }
+
+    // Skip the Git Configuration / Connect Agents onboarding flow entirely
+    // here: it exists to set up a coding workstation, not to gate access to
+    // a chat. A multi-tenant visitor is in the app immediately after
+    // registering; both are still reachable any time from Settings for
+    // whoever actually wants them.
+    return <>{children}</>;
   } else {
     if (needsSetup) {
       return <SetupForm />;
