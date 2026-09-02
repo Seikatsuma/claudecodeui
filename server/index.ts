@@ -402,8 +402,22 @@ async function startServer() {
             console.log(`${terminalTextStyles.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');
 
-            // Start watching the projects folder for changes
-            await initializeSessionsWatcher();
+            // Start watching the projects folder for changes. Skipped on
+            // OPEN_REGISTRATION: with no fixed CLAUDE_CONFIG_DIR for this
+            // instance, the watcher's boot-time root falls back to the
+            // host's own default ~/.claude - on this host that is the
+            // owner's real, large personal account (hundreds of sessions),
+            // and chokidar's initial crawl of it was enough to exhaust this
+            // instance's 450M heap and crash-loop the whole service. The
+            // watcher only covers sessions created OUTSIDE this web app
+            // (e.g. directly in a terminal) - the primary path, creating a
+            // session through this app's own UI, already broadcasts
+            // session_upserted without it, so skipping it here only means
+            // multi-tenant web users won't see externally-created sessions
+            // live, not that their own sessions stop working.
+            if (!OPEN_REGISTRATION) {
+                await initializeSessionsWatcher();
+            }
 
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {
