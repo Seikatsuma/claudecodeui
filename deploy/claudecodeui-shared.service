@@ -1,0 +1,132 @@
+# systemd unit template for CloudCLI (claudecodeui) - the THIRD, shared
+# multi-tenant instance: open self-service registration, one isolated
+# workspace per registered web user, each user brings their own Anthropic
+# API key. See deploy/claudecodeui.service for the original single-account
+# template and Account 1/2's live units for the pattern this extends.
+#
+# This is a TEMPLATE checked into the repo. It is not installed automatically:
+#   sudo cp deploy/claudecodeui-shared.service /etc/systemd/system/claudecodeui-shared.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now claudecodeui-shared
+#
+# =============================================================================
+# IMPORTANT - this instance needs its OWN checkout + build, NOT
+# /home/claude/claudecodeui (unlike Account 1/2, which both point
+# WorkingDirectory at that same directory and only differ via Environment=).
+# =============================================================================
+#
+# Why: the frontend's IS_PLATFORM flag (src/shared/utils.ts) is
+# `import.meta.env.VITE_IS_PLATFORM === 'true'` - a Vite BUILD-TIME constant
+# baked into the static dist/ bundle, not something read from process.env at
+# request time. Account 1 and Account 2 both build with VITE_IS_PLATFORM=true
+# and are otherwise identical on the client (they only differ in which
+# CLAUDE_CONFIG_DIR/DATABASE_PATH the SERVER process reads), so sharing one
+# dist/ build across both units is correct. This instance needs
+# VITE_IS_PLATFORM to be FALSE on the client (real login/registration screens,
+# the JWT Authorization header on API calls, etc - about a dozen frontend
+# files branch on this flag) - a different client bundle - which a shared
+# dist/ folder cannot provide. Rebuilding dist/ in place inside
+# /home/claude/claudecodeui would also immediately change what Account 1/2
+# serve to their real users, which must not happen.
+#
+# One-time setup (space-efficient: a git worktree shares the existing .git
+# object store, so this does not duplicate the repository history - only
+# node_modules/dist/dist-server are new on disk, ~2GB, so check
+# `df -h /` has enough headroom first - see the "known limitations" note in
+# the deployment report if it does not):
+#   cd /home/claude/claudecodeui
+#   git worktree add /home/claude/claudecodeui-shared feature/live-thinking   # or main, once merged
+#   cd /home/claude/claudecodeui-shared
+#   npm ci
+#   OPEN_REGISTRATION=true npm run build   # VITE_IS_PLATFORM deliberately UNSET
+#   npm prune --omit=dev                   # reclaim ~space: build tools are not needed at runtime
+#
+# After every code update: `cd /home/claude/claudecodeui-shared && git pull
+# && npm ci && OPEN_REGISTRATION=true npm run build` (same crash-loop-safety
+# reasoning as claudecodeui.service's header - this unit runs the prebuilt
+# output, it does not rebuild on every restart).
+#
+# The app listens on 127.0.0.1 only. The nginx block in this same deploy/
+# directory (claudecodeui-shared-server.conf) puts it on
+# https://sobsila.ru:8444/ - a separate port, not a subpath, for the same
+# reason Account 2 uses one (see that conf file's own header comment).
+
+[Unit]
+Description=CloudCLI (claudecodeui) - shared multi-tenant instance (open registration)
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=claude
+Group=claude
+WorkingDirectory=/home/claude/claudecodeui-shared
+
+ExecStart=/home/claude/.nvm/versions/node/v22.23.2/bin/node dist-server/server/index.js
+
+Environment=PATH=/home/claude/.nvm/versions/node/v22.23.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=SERVER_PORT=3003
+
+# The whole point of this instance: open self-service registration with
+# magic-link login instead of the single-account password gate, and every
+# route resolving CLAUDE_CONFIG_DIR/workspace/API key per-request from
+# AsyncLocalStorage context instead of this one process-wide value - see
+# server/shared/request-context.ts and server/modules/auth/auth.service.ts.
+Environment=OPEN_REGISTRATION=true
+
+# Deliberately UNSET (unlike claudecodeui.service/-account2, which set it to
+# true): this instance must show real login/registration, not auto-select a
+# single platform user. Must also be UNSET at BUILD time in this
+# WorkingDirectory (see the long comment above) - the two have to agree.
+
+# Deliberately UNSET: no fixed Claude account for this instance. Each web
+# user gets a per-request CLAUDE_CONFIG_DIR resolved from their own row
+# (server/shared/web-user-paths.ts: ~/.claude-webuser-<id>/), never one
+# shared value read from process.env.
+# Environment=CLAUDE_CONFIG_DIR=
+
+# Own database, separate from Account 1 (~/.cloudcli/auth.db) and Account 2
+# (~/.cloudcli-account2/auth.db). Holds every registered web user's account
+# row, their login-link token, and their Anthropic API key credential - the
+# access boundary for all of that is this one file.
+Environment=DATABASE_PATH=/home/claude/.cloudcli-shared/auth.db
+
+# Voice dictation bridge - same shared instance as Account 1/2, safe to
+# reuse (it is stateless per-request, keyed by nothing account-specific).
+# Remove these two lines if voice input should not be offered here.
+Environment=VOICE_API_BASE_URL=http://127.0.0.1:8092
+Environment=VOICE_API_KEY=REPLACE_WITH_YOUR_OWN_GROQ_KEY
+Environment=VOICE_STT_MODEL=whisper-large-v3
+
+Environment=ACCOUNT_LABEL="Shared"
+# No SWITCH_ACCOUNT_URL: this instance's users are not the host's personal
+# accounts, so there is nothing on Account 1/2 for them to "switch" to, and
+# the reverse link (from Account 1/2 back to here) was not requested.
+
+# --- Crash-loop protection (same reasoning as claudecodeui.service: this VPS
+# runs several other unrelated bots on 3.8GB RAM / 2 CPUs). ---
+Restart=on-failure
+RestartSec=10
+
+# --- Resource limits ---
+# Same per-instance budget as Account 1/2 (~12% of host RAM, 70% of one CPU).
+# This is a WHOLE-INSTANCE ceiling, not a per-user one - systemd has no
+# concept of "the third concurrent chat session from user 7". A separate,
+# in-process guard covers that instead: chatRunRegistry.countRunningRunsForUser()
+# (server/modules/websocket/services/chat-run-registry.service.ts) rejects a
+# user's new chat.send once they already have MAX_CONCURRENT_RUNS_PER_USER
+# (3) runs in flight, so one registered user cannot spawn an unbounded number
+# of Claude SDK subprocesses on their own. What is NOT covered: several
+# DIFFERENT users each staying under that per-user cap can still add up to
+# more load than this whole-instance MemoryMax/CPUQuota comfortably absorbs -
+# a real per-user OS-level quota (e.g. a systemd slice per user) would need
+# dynamic per-user unit generation, which is a bigger change than fit in this
+# pass. See the deployment report's "known limitations" section.
+MemoryMax=450M
+CPUQuota=70%
+
+[Install]
+WantedBy=multi-user.target

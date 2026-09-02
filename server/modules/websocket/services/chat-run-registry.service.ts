@@ -273,6 +273,27 @@ export const chatRunRegistry = {
   },
 
   /**
+   * Counts this user's own currently-running runs, across every session.
+   *
+   * Used on OPEN_REGISTRATION instances (see chat-websocket.service.ts) as a
+   * basic per-user concurrency cap: this shared VPS has no per-user OS-level
+   * quota (systemd's MemoryMax/CPUQuota on the unit are whole-instance, not
+   * per-user), so without this one registered user starting several heavy
+   * Claude SDK sessions at once could crowd out every other user on the same
+   * process. `userId` is read off each run's writer (ChatSessionWriter),
+   * which is who chatRunRegistry.startRun() was given for that run.
+   */
+  countRunningRunsForUser(userId: string | number): number {
+    let count = 0;
+    for (const run of runs.values()) {
+      if (run.status === 'running' && String(run.writer.userId) === String(userId)) {
+        count += 1;
+      }
+    }
+    return count;
+  },
+
+  /**
    * Re-attaches a run's outbound stream to a (new) websocket connection.
    *
    * This is the generic replacement for the Claude-only writer reconnect:

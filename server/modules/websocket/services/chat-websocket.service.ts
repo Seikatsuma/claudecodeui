@@ -25,6 +25,16 @@ import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
 const ANTHROPIC_API_KEY_CREDENTIAL_TYPE = 'anthropic_api_key';
 
 /**
+ * Basic per-user concurrency cap for OPEN_REGISTRATION instances (see
+ * chatRunRegistry.countRunningRunsForUser()'s doc comment for why this is
+ * needed at all on a shared VPS). Deliberately a small in-process constant
+ * rather than a config value - the actual ceiling matters far less than the
+ * fact that SOME ceiling exists, and 3 is generous for one interactive user
+ * while still bounding the worst case.
+ */
+const MAX_CONCURRENT_RUNS_PER_USER = 3;
+
+/**
  * Resolves this OPEN_REGISTRATION user's own CLAUDE_CONFIG_DIR and Anthropic
  * API key so the chat runtime dispatch below can pass them straight through
  * to the Claude SDK's per-call `env` (claude-runtime.provider.js). The chat
@@ -210,6 +220,16 @@ async function handleChatSend(
       ws,
       'ANTHROPIC_API_KEY_REQUIRED',
       'Add your Anthropic API key in Settings to start chatting with Claude.',
+      sessionId,
+    );
+    return;
+  }
+
+  if (OPEN_REGISTRATION && userId !== null && chatRunRegistry.countRunningRunsForUser(userId) >= MAX_CONCURRENT_RUNS_PER_USER) {
+    sendProtocolError(
+      ws,
+      'TOO_MANY_CONCURRENT_RUNS',
+      `You already have ${MAX_CONCURRENT_RUNS_PER_USER} chats running at once. Wait for one to finish before starting another.`,
       sessionId,
     );
     return;
