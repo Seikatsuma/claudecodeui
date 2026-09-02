@@ -430,6 +430,62 @@ const addSessionEffortColumn = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'effort', 'TEXT');
 };
 
+/**
+ * Adds the `title_source` provenance column and backfills every pre-existing
+ * row so the tiered sync logic (naive < ai < custom) has something sane to
+ * compare against from day one.
+ *
+ * Every row that predates this migration was written by the old "freeze
+ * forever once any custom_name exists" rule, which never distinguished a
+ * naive placeholder from a real AI title or a deliberate rename. There is no
+ * way to recover which of those a given row actually got, so pre-existing
+ * non-empty, non-placeholder names are backfilled to the middle 'ai' tier:
+ * good enough to never be clobbered by a plain naive candidate, but still
+ * upgradable the moment a genuine `custom-title` entry is found on disk.
+ * Rows with no name, or one of the known placeholder strings, are left at
+ * the column's 'naive' default so the next sync fills them in properly.
+ * No row's `custom_name` is touched by this migration - only the new tier
+ * column is populated - so no existing title can be blanked or lost here.
+ */
+const addSessionTitleSourceColumn = (db: Database): void => {
+  const sessionsTableInfo = getTableInfo(db, 'sessions');
+  const columnNames = sessionsTableInfo.map((column) => column.name);
+
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'title_source', "TEXT NOT NULL DEFAULT 'naive'");
+
+  const placeholderTitles = [
+    'Untitled Claude Session',
+    'Untitled Cursor Session',
+    'Untitled Codex Session',
+    'Untitled Session',
+    'Untitled',
+  ];
+  const placeholderList = placeholderTitles.map((title) => `'${title.replace(/'/g, "''")}'`).join(', ');
+
+  db.exec(`
+    UPDATE sessions
+    SET title_source = 'ai'
+    WHERE title_source = 'naive'
+      AND custom_name IS NOT NULL
+      AND trim(custom_name) <> ''
+      AND custom_name NOT IN (${placeholderList})
+  `);
+};
+
+/**
+ * Adds the nullable `group_id`/`group_label` columns backing the sidebar's
+ * topic grouping (manual or "Organize by topic" auto-grouping). NULL means
+ * ungrouped, which is the correct state for every pre-existing session, so
+ * this migration is a plain additive column - no backfill needed.
+ */
+const addSessionGroupColumns = (db: Database): void => {
+  const sessionsTableInfo = getTableInfo(db, 'sessions');
+  const columnNames = sessionsTableInfo.map((column) => column.name);
+
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'group_id', 'TEXT');
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'group_label', 'TEXT');
+};
+
 const ensureProjectsForSessionPaths = (db: Database): void => {
   if (!tableExists(db, 'sessions')) {
     return;
@@ -487,6 +543,8 @@ export const runMigrations = (db: Database) => {
     addProviderSessionIdMapping(db);
     addSessionModelColumn(db);
     addSessionEffortColumn(db);
+    addSessionTitleSourceColumn(db);
+    addSessionGroupColumns(db);
     ensureProjectsForSessionPaths(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');

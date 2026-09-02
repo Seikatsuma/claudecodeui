@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { sessionsDb, type SessionTitleSource } from '@/modules/database/index.js';
 import {
   buildLookupMap,
   extractFirstValidJsonlData,
@@ -16,6 +16,7 @@ type ParsedSession = {
   sessionId: string;
   projectPath: string;
   sessionName?: string;
+  titleSource: SessionTitleSource;
 };
 
 // The `claude` CLI's own terminal readline collapses a large paste into a
@@ -106,7 +107,8 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
         parsed.sessionName,
         timestamps.createdAt,
         timestamps.updatedAt,
-        filePath
+        filePath,
+        parsed.titleSource
       );
       processed += 1;
     }
@@ -139,12 +141,23 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       parsed.sessionName,
       timestamps.createdAt,
       timestamps.updatedAt,
-      filePath
+      filePath,
+      parsed.titleSource
     );
   }
 
   /**
    * Extracts session metadata from one Claude JSONL session file.
+   *
+   * Always re-derives the best available title from disk and lets
+   * `resolveTitleUpdate()` (called inside `sessionsDb.createSession()`)
+   * decide whether it actually beats what is already stored - this file no
+   * longer short-circuits on "a name already exists". That early return used
+   * to freeze a session's title forever the moment *any* custom_name was
+   * set, including the naive placeholder the web assigns at creation, which
+   * is exactly why a later, genuine `ai-title`/`custom-title` entry never
+   * reached the sidebar. See `resolveTitleUpdate()` in sessions.db.ts for the
+   * naive < ai < custom tiering that replaces it.
    */
   private async processSessionFile(
     filePath: string,
@@ -169,49 +182,48 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    // App-created sessions are keyed by an app id, so disk-discovered provider
-    // ids must be resolved through the provider-id mapping first.
-    const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
-      ?? sessionsDb.getSessionById(parsed.sessionId);
-    const existingSessionName = existingSession?.custom_name;
-    // A previously-synced row can itself hold a stale paste-placeholder title
-    // from before this fix. Only treat an existing name as "already good"
-    // (and thus frozen against re-derivation, so a real user rename is never
-    // clobbered) once it survives the same placeholder stripping applied
-    // below - otherwise fall through and re-derive it like a fresh session.
-    const sanitizedExistingName = existingSessionName
-      ? stripPastePlaceholders(existingSessionName)
-      : undefined;
-    if (sanitizedExistingName && existingSessionName !== 'Untitled Claude Session') {
-      return {
-        ...parsed,
-        sessionName: normalizeSessionName(sanitizedExistingName, 'Untitled Claude Session'),
-      };
+    // The end-of-file scan finds the real ai-title/custom-title entries when
+    // present - always the better candidate when it exists, since both tiers
+    // outrank the naive history.jsonl/last-prompt text below.
+    const derived = await this.extractSessionAiTitleFromEnd(filePath, parsed.sessionId);
+    if (derived) {
+      const strippedName = stripPastePlaceholders(derived.name);
+      if (strippedName) {
+        return {
+          ...parsed,
+          sessionName: normalizeSessionName(strippedName, 'Untitled Claude Session'),
+          titleSource: derived.source,
+        };
+      }
     }
 
+    // No ai-title/custom-title entry (yet): fall back to the CLI's own raw
+    // history.jsonl display text. This is still just raw prompt text, not an
+    // AI summary, so it is tagged 'naive' - the same tier as the web's own
+    // placeholder - and will be replaced the moment a real title shows up.
     let sessionName = nameMap.get(parsed.sessionId);
     if (sessionName) {
       sessionName = stripPastePlaceholders(sessionName);
-    }
-    if (!sessionName) {
-      // `lastPrompt` events carry the same kind of CLI-inserted noise, e.g.
-      // a hook appending "[Image #1]🖼 Фото сохранено:" - confirmed on disk
-      // alongside the history.jsonl case above, so the AI-derived fallback
-      // needs the same stripping rather than being assumed already clean.
-      const aiDerivedName = await this.extractSessionAiTitleFromEnd(filePath, parsed.sessionId);
-      sessionName = aiDerivedName ? stripPastePlaceholders(aiDerivedName) : undefined;
     }
 
     return {
       ...parsed,
       sessionName: normalizeSessionName(sessionName, 'Untitled Claude Session'),
+      titleSource: 'naive',
     };
   }
 
+  /**
+   * Scans a session transcript backwards for the most recent title-bearing
+   * event, classifying it by provenance tier:
+   *  - `custom-title` -> 'custom' (an explicit rename, via web or CLI)
+   *  - `ai-title` -> 'ai' (a genuine LLM-generated summary title)
+   *  - `last-prompt` -> 'naive' (just the raw last user message, no summary)
+   */
   private async extractSessionAiTitleFromEnd(
     filePath: string,
     sessionId: string
-  ): Promise<string | undefined> {
+  ): Promise<{ name: string; source: SessionTitleSource } | undefined> {
     try {
       const content = await readFile(filePath, 'utf8');
       const lines = content.split(/\r?\n/);
@@ -232,16 +244,22 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
         const data = parsed as Record<string, unknown>;
         const eventType = typeof data.type === 'string' ? data.type : undefined;
         const eventSessionId = typeof data.sessionId === 'string' ? data.sessionId : undefined;
+        if (eventSessionId !== sessionId) {
+          continue;
+        }
+
         const aiTitle = typeof data.aiTitle === 'string' ? data.aiTitle : undefined;
         const lastPrompt = typeof data.lastPrompt === 'string' ? data.lastPrompt : undefined;
         const claudeRenamedTitle = typeof data.customTitle === 'string' ? data.customTitle : undefined;
 
-        if (
-          (eventType === 'ai-title' && eventSessionId === sessionId && aiTitle?.trim()) ||
-          (eventType === 'last-prompt' && eventSessionId === sessionId && lastPrompt?.trim()) ||
-          (eventType === "custom-title" && eventSessionId === sessionId && claudeRenamedTitle?.trim())
-        ) {
-          return aiTitle || lastPrompt || claudeRenamedTitle;
+        if (eventType === 'custom-title' && claudeRenamedTitle?.trim()) {
+          return { name: claudeRenamedTitle, source: 'custom' };
+        }
+        if (eventType === 'ai-title' && aiTitle?.trim()) {
+          return { name: aiTitle, source: 'ai' };
+        }
+        if (eventType === 'last-prompt' && lastPrompt?.trim()) {
+          return { name: lastPrompt, source: 'naive' };
         }
       }
     } catch {

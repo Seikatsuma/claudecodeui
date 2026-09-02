@@ -479,7 +479,7 @@ export const sessionsService = {
       });
     }
 
-    sessionsDb.updateSessionCustomName(sessionId, summary);
+    sessionsDb.renameSessionByUser(sessionId, summary);
     return { sessionId, summary };
   },
 };

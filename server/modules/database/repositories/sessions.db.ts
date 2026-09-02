@@ -2,6 +2,20 @@ import { getConnection } from '@/modules/database/connection.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
+/**
+ * Provenance tier for `custom_name`. Sync only ever moves a row's tier up
+ * (naive -> ai -> custom), never down, so a later worse-quality candidate
+ * (e.g. a stale naive fallback re-derived on disk) can never clobber a
+ * better title that is already in place. See `resolveTitleUpdate()`.
+ */
+export type SessionTitleSource = 'naive' | 'ai' | 'custom';
+
+const TITLE_SOURCE_RANK: Record<SessionTitleSource, number> = {
+  naive: 0,
+  ai: 1,
+  custom: 2,
+};
+
 type SessionRow = {
   session_id: string;
   provider: string;
@@ -9,10 +23,14 @@ type SessionRow = {
   project_path: string | null;
   jsonl_path: string | null;
   custom_name: string | null;
+  title_source: SessionTitleSource;
   /** Model this session runs with; NULL until the app records one for it. */
   model: string | null;
   /** Reasoning effort this session runs with; NULL until the app records one. */
   effort: string | null;
+  /** Topic group this session was placed in (manual or auto); NULL = ungrouped. */
+  group_id: string | null;
+  group_label: string | null;
   isArchived: number;
   created_at: string;
   updated_at: string;
@@ -24,7 +42,48 @@ type RecentSessionsPage = {
 };
 
 const SESSION_ROW_COLUMNS =
-  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, model, effort, isArchived, created_at, updated_at';
+  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, title_source, model, effort, group_id, group_label, isArchived, created_at, updated_at';
+
+/**
+ * Decides whether a freshly-derived title candidate should replace the
+ * row's current one, based on provenance tier rather than presence alone.
+ *
+ * Ties at the 'ai' or 'custom' tier resolve in the candidate's favor: both
+ * mean "a real title was just re-read off disk", and the disk copy is the
+ * source of truth, so the freshest read wins. A tie at the 'naive' tier (or
+ * no existing name at all) also takes the candidate - there is nothing
+ * better to protect. Returns `undefined` fields when nothing should change,
+ * so callers can `COALESCE` them against the existing column value.
+ */
+export function resolveTitleUpdate(
+  existingName: string | null | undefined,
+  existingSource: SessionTitleSource | null | undefined,
+  candidateName: string | null | undefined,
+  candidateSource: SessionTitleSource | undefined,
+): { name?: string; source?: SessionTitleSource } {
+  if (candidateSource === undefined || !candidateName) {
+    return {};
+  }
+
+  const hasExistingName = Boolean(existingName && existingName.trim());
+  if (!hasExistingName) {
+    return { name: candidateName, source: candidateSource };
+  }
+
+  const existingRank = existingSource ? TITLE_SOURCE_RANK[existingSource] : -1;
+  const candidateRank = TITLE_SOURCE_RANK[candidateSource];
+
+  if (candidateRank < existingRank) {
+    return {};
+  }
+  if (candidateRank === existingRank && candidateRank === TITLE_SOURCE_RANK.naive) {
+    // Both naive: keep whichever naive title is already in place instead of
+    // re-deriving on every sync pass (matches the pre-tiering behavior).
+    return {};
+  }
+
+  return { name: candidateName, source: candidateSource };
+}
 
 const SQLITE_UTC_TIMESTAMP_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
@@ -78,6 +137,14 @@ export const sessionsDb = {
    * app-created row keeps its existing name; synchronizer names only update
    * rows that were themselves created by indexing provider storage.
    */
+  /**
+   * `titleSource` is opt-in: callers that know how to classify their
+   * candidate title (currently only the Claude synchronizer) pass it and get
+   * the tiered naive/ai/custom comparison from `resolveTitleUpdate()`.
+   * Callers that omit it (cursor/codex/opencode synchronizers) keep the
+   * original "freeze once any custom_name exists" behavior unchanged, so
+   * this fix stays scoped to the provider it was reported for.
+   */
   createSession(
     providerSessionId: string,
     provider: string,
@@ -85,7 +152,8 @@ export const sessionsDb = {
     customName?: string,
     createdAt?: string,
     updatedAt?: string,
-    jsonlPath?: string | null
+    jsonlPath?: string | null,
+    titleSource?: SessionTitleSource
   ): string {
     const db = getConnection();
     const createdAtValue = normalizeTimestamp(createdAt);
@@ -98,33 +166,58 @@ export const sessionsDb = {
 
     const existing = db
       .prepare(
-        `SELECT session_id FROM sessions
+        `SELECT session_id, custom_name, title_source FROM sessions
          WHERE provider_session_id = ? AND provider = ?
          LIMIT 1`
       )
-      .get(providerSessionId, provider) as { session_id: string } | undefined;
+      .get(providerSessionId, provider) as
+      | { session_id: string; custom_name: string | null; title_source: SessionTitleSource }
+      | undefined;
 
     if (existing) {
-      db.prepare(
-        `UPDATE sessions SET
-           provider = ?,
-           updated_at = COALESCE(?, CURRENT_TIMESTAMP),
-           project_path = ?,
-           jsonl_path = ?,
-           isArchived = 0,
-           custom_name = CASE
-             WHEN session_id <> provider_session_id AND custom_name IS NOT NULL THEN custom_name
-             ELSE COALESCE(?, custom_name)
-           END
-         WHERE session_id = ?`
-      ).run(
-        provider,
-        updatedAtValue,
-        normalizedProjectPath,
-        jsonlPath ?? null,
-        customName ?? null,
-        existing.session_id
-      );
+      if (titleSource !== undefined) {
+        const resolved = resolveTitleUpdate(existing.custom_name, existing.title_source, customName, titleSource);
+        db.prepare(
+          `UPDATE sessions SET
+             provider = ?,
+             updated_at = COALESCE(?, CURRENT_TIMESTAMP),
+             project_path = ?,
+             jsonl_path = ?,
+             isArchived = 0,
+             custom_name = COALESCE(?, custom_name),
+             title_source = COALESCE(?, title_source)
+           WHERE session_id = ?`
+        ).run(
+          provider,
+          updatedAtValue,
+          normalizedProjectPath,
+          jsonlPath ?? null,
+          resolved.name ?? null,
+          resolved.source ?? null,
+          existing.session_id
+        );
+      } else {
+        db.prepare(
+          `UPDATE sessions SET
+             provider = ?,
+             updated_at = COALESCE(?, CURRENT_TIMESTAMP),
+             project_path = ?,
+             jsonl_path = ?,
+             isArchived = 0,
+             custom_name = CASE
+               WHEN session_id <> provider_session_id AND custom_name IS NOT NULL THEN custom_name
+               ELSE COALESCE(?, custom_name)
+             END
+           WHERE session_id = ?`
+        ).run(
+          provider,
+          updatedAtValue,
+          normalizedProjectPath,
+          jsonlPath ?? null,
+          customName ?? null,
+          existing.session_id
+        );
+      }
 
       return existing.session_id;
     }
@@ -133,8 +226,8 @@ export const sessionsDb = {
     // keyed by the provider-native id for both columns. The ON CONFLICT path
     // covers legacy rows that predate the provider_session_id mapping.
     db.prepare(
-      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, project_path, jsonl_path, isArchived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, title_source, project_path, jsonl_path, isArchived, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
        ON CONFLICT(session_id) DO UPDATE SET
          provider = excluded.provider,
          provider_session_id = excluded.provider_session_id,
@@ -146,12 +239,14 @@ export const sessionsDb = {
            WHEN sessions.session_id <> sessions.provider_session_id AND sessions.custom_name IS NOT NULL
              THEN sessions.custom_name
            ELSE COALESCE(excluded.custom_name, sessions.custom_name)
-         END`
+         END,
+         title_source = COALESCE(excluded.title_source, sessions.title_source)`
     ).run(
       providerSessionId,
       provider,
       providerSessionId,
       customName ?? null,
+      titleSource ?? 'naive',
       normalizedProjectPath,
       jsonlPath ?? null,
       createdAtValue,
@@ -182,8 +277,8 @@ export const sessionsDb = {
     projectsDb.createProjectPath(normalizedProjectPath);
 
     db.prepare(
-      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, project_path, jsonl_path, isArchived, created_at, updated_at)
-       VALUES (?, ?, NULL, ?, ?, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, title_source, project_path, jsonl_path, isArchived, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, 'naive', ?, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
     ).run(sessionId, provider, customName ?? null, normalizedProjectPath);
 
     return sessionId;
@@ -273,6 +368,82 @@ export const sessionsDb = {
        SET custom_name = ?
        WHERE session_id = ?`
     ).run(customName, sessionId);
+  },
+
+  /**
+   * Renames a session on the user's explicit instruction (the web rename
+   * action), tagging it 'custom' tier. Deliberately separate from
+   * `updateSessionCustomName` - that method is also called by the codex
+   * synchronizer for its own auto-derived names, which must NOT be tagged
+   * as a manual rename or they would be frozen against future improvement.
+   * A 'custom' tier row is the top of `resolveTitleUpdate()`'s ranking, so
+   * once this runs, no later sync can silently replace the user's title.
+   */
+  renameSessionByUser(sessionId: string, customName: string): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET custom_name = ?, title_source = 'custom'
+       WHERE session_id = ?`
+    ).run(customName, sessionId);
+  },
+
+  /**
+   * Assigns a topic group (manual or auto) to one session. Passing
+   * `groupId: null` clears the session back to ungrouped.
+   */
+  setSessionGroup(sessionId: string, groupId: string | null, groupLabel: string | null): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET group_id = ?, group_label = ?
+       WHERE session_id = ?`
+    ).run(groupId, groupLabel, sessionId);
+  },
+
+  /**
+   * Applies many group assignments atomically, so the sidebar never
+   * observes a project half-regrouped mid-broadcast.
+   */
+  assignSessionGroups(assignments: Array<{ sessionId: string; groupId: string; groupLabel: string }>): void {
+    if (assignments.length === 0) {
+      return;
+    }
+
+    const db = getConnection();
+    const stmt = db.prepare(
+      `UPDATE sessions
+       SET group_id = ?, group_label = ?
+       WHERE session_id = ?`
+    );
+    const applyAll = db.transaction((rows: typeof assignments) => {
+      for (const row of rows) {
+        stmt.run(row.groupId, row.groupLabel, row.sessionId);
+      }
+    });
+    applyAll(assignments);
+  },
+
+  /**
+   * Active (non-archived) sessions for a project that have no topic group
+   * yet, newest first - the candidate pool for "Organize by topic".
+   */
+  getUngroupedSessionsByProjectPath(projectPath: string, limit: number): SessionRow[] {
+    const db = getConnection();
+    const normalizedProjectPath = normalizeProjectPath(projectPath);
+    const rows = db
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS}
+         FROM sessions
+         WHERE project_path = ?
+           AND isArchived = 0
+           AND group_id IS NULL
+         ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
+         LIMIT ?`
+      )
+      .all(normalizedProjectPath, limit) as SessionRow[];
+
+    return normalizeSessionRows(rows);
   },
 
   getSessionById(sessionId: string): SessionRow | null {

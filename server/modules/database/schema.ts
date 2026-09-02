@@ -107,6 +107,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- id mid-run, or equals \`session_id\` for sessions discovered on disk.
     provider_session_id TEXT,
     custom_name TEXT,
+    -- Provenance of \`custom_name\`, used to decide whether a later sync may
+    -- overwrite it: 'naive' (first-words placeholder from the web composer,
+    -- or raw CLI history text), 'ai' (a real ai-title/summary from the
+    -- transcript), 'custom' (an explicit user rename or a CLI custom-title
+    -- entry). Sync only ever upgrades this tier, never downgrades it, so a
+    -- manual rename can never be silently replaced by a worse auto title.
+    title_source TEXT NOT NULL DEFAULT 'naive',
     project_path TEXT,
     jsonl_path TEXT,
     -- Model and reasoning effort this session runs with. Written when the user
@@ -114,6 +121,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- restores its exact runtime configuration instead of provider defaults.
     model TEXT,
     effort TEXT,
+    -- Topic-based auto/manual grouping shown in the sidebar. Denormalized
+    -- (label stored directly on the row, no separate groups table) since
+    -- groups are lightweight, per-project labels rather than entities with
+    -- their own lifecycle. NULL group_id means "ungrouped".
+    group_id TEXT,
+    group_label TEXT,
     isArchived BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

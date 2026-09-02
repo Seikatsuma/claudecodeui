@@ -67,6 +67,61 @@ const BG_WAIT_CEILING_MS = 30 * 60 * 1000;
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
+// Bound on the real-title-generation control request below. Measured ~1-2s
+// against the actual CLI; this is a generous backstop so a slow/hung call
+// can never stall a session's turn-closing beyond a few seconds.
+const SESSION_TITLE_GENERATION_TIMEOUT_MS = parseInt(process.env.CLAUDE_TITLE_GENERATION_TIMEOUT_MS, 10) || 8000;
+// A description this long would be an unusually large first message; cap it
+// so the control-protocol payload stays small regardless of what the user pasted.
+const SESSION_TITLE_DESCRIPTION_MAX_CHARS = 4000;
+
+/**
+ * Best-effort real title generation for a brand-new session's first turn.
+ *
+ * Calls the SDK's own `generateSessionTitle` control request — the same
+ * mechanism the official CLI/IDE integrations use to name a session — with
+ * `persist: true`, so the result is appended to the session's own JSONL
+ * transcript as a normal `ai-title` entry, the exact record format the
+ * session synchronizer already reads. This gives the web and the native CLI
+ * one real, once-generated title from a single source of truth (the
+ * transcript file) instead of the web inventing its own naive placeholder
+ * that has to be reconciled with the CLI's title later.
+ *
+ * Must be called (and awaited) while `queryInstance`'s prompt stream is
+ * still held open — the underlying transport closes once the stream ends,
+ * and this control request otherwise races that shutdown. Failures
+ * (missing method on older SDKs, timeout, transport errors) are swallowed:
+ * the naive placeholder title stays in place and the regular sync (which
+ * itself is tier-aware, see `resolveTitleUpdate` in sessions.db.ts) can
+ * still pick up a title from a later organic `ai-title`/`custom-title` event.
+ */
+async function generateRealSessionTitle(queryInstance, description) {
+  if (!queryInstance || typeof queryInstance.generateSessionTitle !== 'function') {
+    return;
+  }
+  const trimmedDescription = typeof description === 'string' ? description.trim() : '';
+  if (!trimmedDescription) {
+    return;
+  }
+
+  try {
+    await Promise.race([
+      queryInstance.generateSessionTitle(
+        trimmedDescription.slice(0, SESSION_TITLE_DESCRIPTION_MAX_CHARS),
+        { persist: true }
+      ),
+      new Promise((_resolve, reject) => {
+        setTimeout(
+          () => reject(new Error('generateSessionTitle timed out')),
+          SESSION_TITLE_GENERATION_TIMEOUT_MS
+        );
+      })
+    ]);
+  } catch (error) {
+    console.warn('[Claude SDK] Real session title generation skipped:', error?.message || error);
+  }
+}
+
 function resolveClaudeEffort(model, effort, modelsDefinition = CLAUDE_PREDEFINED_MODELS) {
   const selectedModel = modelsDefinition?.OPTIONS?.find((option) => option.value === model) || null;
   const allowedEfforts = selectedModel?.effort?.values
@@ -599,6 +654,12 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   // Callers pass the stable app session id; the SDK only understands the
   // provider-native id recorded on the session row.
   const providerSessionId = context.resolveProviderSessionId(sessionId);
+  // True only for a brand-new app session's very first turn (no provider run
+  // has happened for it yet) - the one time real title generation is worth
+  // triggering. Captured once, up front, so it stays accurate regardless of
+  // what `assignProviderSessionId` does to the DB row mid-turn.
+  const isBrandNewSession = !providerSessionId && Boolean(sessionId);
+  let titleGenerationTriggered = false;
   // Provider-native id as the SDK reports it (starts as the resume id, or is
   // captured from the stream for brand-new sessions).
   let capturedSessionId = providerSessionId;
@@ -877,6 +938,17 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary
           });
         }
+
+        // One real, once-generated title per brand-new session: fired after
+        // the client already has its answer (turnCompleteSent above), so
+        // this can only add latency to the CLI process winding down, never
+        // to what the user sees. Must happen before releasePromptStream()
+        // below — the control request needs the transport still open.
+        if (isBrandNewSession && !titleGenerationTriggered && !abortPending) {
+          titleGenerationTriggered = true;
+          await generateRealSessionTitle(queryInstance, command);
+        }
+
         if (backgroundWorkPending) {
           // Work started during this turn is still running. Hold the process
           // open so it can finish and report back in a follow-up turn; the
