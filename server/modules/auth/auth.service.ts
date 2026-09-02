@@ -13,6 +13,10 @@ type AuthDependencies = {
     createUser(username: string, passwordHash: string): AuthUser;
     getUserByUsername(username: string): AuthLoginUser | undefined;
     updateLastLogin(userId: number): void;
+    createUserWithLoginToken(username: string, passwordHash: string, loginToken: string): AuthUser;
+    getUserByLoginToken(loginToken: string): AuthUser | undefined;
+    setLoginToken(userId: number, loginToken: string): void;
+    getLoginToken(userId: number): string | null;
   };
   transaction: {
     begin(): void;
@@ -29,10 +33,44 @@ type AuthDependencies = {
   hashPassword(password: string): Promise<string>;
   comparePassword(password: string, passwordHash: string): Promise<boolean>;
   generateToken(user: AuthUser): string;
+  /** Generates a persistent, unguessable login-link token (see auth.module.ts). */
+  generateLoginToken(): string;
+  /**
+   * Creates this brand-new user's isolated workspace (their own
+   * CLAUDE_CONFIG_DIR + project browsing root - see web-user-paths.ts).
+   * Only ever called from registerOpen(); a no-op function is injected on
+   * installs that never enable open registration.
+   */
+  provisionWorkspace(userId: number): Promise<void>;
+  /**
+   * Gates the whole open-registration/magic-link surface. False on every
+   * install that does not explicitly set OPEN_REGISTRATION=true (Account 1/2
+   * included) - register()/login() below are completely unaffected by it.
+   */
+  openRegistration: boolean;
 };
 
 function numericUserId(userId: number | bigint): number {
   return Number(userId);
+}
+
+/** Narrows an `authenticateToken`-populated `req.user` value, or throws. */
+function requireAuthenticatedUser(user: unknown): AuthUser {
+  if (
+    typeof user !== 'object'
+    || user === null
+    || !('id' in user)
+    || !('username' in user)
+    || (typeof (user as { id: unknown }).id !== 'number' && typeof (user as { id: unknown }).id !== 'bigint')
+    || typeof (user as { username: unknown }).username !== 'string'
+  ) {
+    throw new AppError('Authenticated user is required', {
+      code: 'AUTH_USER_REQUIRED',
+      statusCode: 401,
+    });
+  }
+
+  return user as AuthUser;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -50,8 +88,15 @@ export function createAuthService(dependencies: AuthDependencies) {
   return {
     getStatus() {
       return {
-        needsSetup: !dependencies.users.hasUsers(),
+        // Outside OPEN_REGISTRATION, this is the original single-user gate:
+        // the setup screen only ever shows once, before the first (and only)
+        // account exists. On an open-registration instance there is no such
+        // thing as "already set up" - any number of independent accounts can
+        // register - so the frontend uses `openRegistration` instead of this
+        // flag to decide which auth screen to render.
+        needsSetup: !dependencies.openRegistration && !dependencies.users.hasUsers(),
         isAuthenticated: false,
+        openRegistration: dependencies.openRegistration,
       };
     },
 
@@ -74,7 +119,7 @@ export function createAuthService(dependencies: AuthDependencies) {
 
       dependencies.transaction.begin();
       try {
-        if (dependencies.users.hasUsers()) {
+        if (!dependencies.openRegistration && dependencies.users.hasUsers()) {
           throw new AppError('User already exists. This is a single-user system.', {
             code: 'AUTH_USER_ALREADY_CONFIGURED',
             statusCode: 403,
@@ -102,6 +147,116 @@ export function createAuthService(dependencies: AuthDependencies) {
         }
         throw error;
       }
+    },
+
+    /**
+     * Open self-service registration: no password. A random, never-shown
+     * password hash still fills the NOT NULL password_hash column (password
+     * login stays technically possible but is never offered by the UI in
+     * this mode); the account's real credential is the persistent login-link
+     * token returned here for one-time display by the caller.
+     */
+    async registerOpen(usernameInput: unknown) {
+      if (!dependencies.openRegistration) {
+        throw new AppError('Open registration is not enabled on this instance', {
+          code: 'OPEN_REGISTRATION_DISABLED',
+          statusCode: 403,
+        });
+      }
+
+      const trimmedUsername = typeof usernameInput === 'string' ? usernameInput.trim() : '';
+      const username = trimmedUsername.length >= 3
+        ? trimmedUsername
+        : `user-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+      dependencies.transaction.begin();
+      try {
+        const randomPassword = dependencies.generateLoginToken();
+        const passwordHash = await dependencies.hashPassword(randomPassword);
+        const loginToken = dependencies.generateLoginToken();
+        const user = dependencies.users.createUserWithLoginToken(username, passwordHash, loginToken);
+        const token = dependencies.generateToken(user);
+        dependencies.transaction.commit();
+        dependencies.users.updateLastLogin(numericUserId(user.id));
+        await dependencies.provisionWorkspace(numericUserId(user.id));
+
+        return {
+          success: true,
+          user: { id: user.id, username: user.username },
+          token,
+          loginToken,
+        };
+      } catch (error) {
+        dependencies.transaction.rollback();
+        if (isUniqueConstraintError(error)) {
+          throw new AppError('Username already exists', {
+            code: 'AUTH_USERNAME_CONFLICT',
+            statusCode: 409,
+          });
+        }
+        throw error;
+      }
+    },
+
+    /** Instant login via a previously issued persistent login-link token. */
+    async enterWithLoginToken(tokenInput: unknown) {
+      if (!dependencies.openRegistration) {
+        throw new AppError('Open registration is not enabled on this instance', {
+          code: 'OPEN_REGISTRATION_DISABLED',
+          statusCode: 403,
+        });
+      }
+
+      const loginTokenValue = typeof tokenInput === 'string' ? tokenInput.trim() : '';
+      if (!loginTokenValue) {
+        throw new AppError('Login link token is required', {
+          code: 'AUTH_LOGIN_TOKEN_REQUIRED',
+          statusCode: 400,
+        });
+      }
+
+      const user = dependencies.users.getUserByLoginToken(loginTokenValue);
+      if (!user) {
+        throw new AppError('This login link is invalid or no longer works.', {
+          code: 'AUTH_LOGIN_TOKEN_INVALID',
+          statusCode: 401,
+        });
+      }
+
+      dependencies.users.updateLastLogin(numericUserId(user.id));
+      return {
+        success: true,
+        user: { id: user.id, username: user.username },
+        token: dependencies.generateToken(user),
+      };
+    },
+
+    /** Returns the caller's current login-link token so Settings can show/copy it again. */
+    getLoginLink(user: unknown) {
+      if (!dependencies.openRegistration) {
+        throw new AppError('Open registration is not enabled on this instance', {
+          code: 'OPEN_REGISTRATION_DISABLED',
+          statusCode: 403,
+        });
+      }
+
+      const userId = numericUserId(requireAuthenticatedUser(user).id);
+      return { loginToken: dependencies.users.getLoginToken(userId) };
+    },
+
+    /** Issues a brand-new login-link token, invalidating the previous one. */
+    regenerateLoginLink(user: unknown) {
+      if (!dependencies.openRegistration) {
+        throw new AppError('Open registration is not enabled on this instance', {
+          code: 'OPEN_REGISTRATION_DISABLED',
+          statusCode: 403,
+        });
+      }
+
+      const userId = numericUserId(requireAuthenticatedUser(user).id);
+      const loginToken = dependencies.generateLoginToken();
+      dependencies.users.setLoginToken(userId, loginToken);
+      return { loginToken };
     },
 
     async login(usernameInput: unknown, passwordInput: unknown, ip: string) {
@@ -151,21 +306,7 @@ export function createAuthService(dependencies: AuthDependencies) {
     },
 
     refreshSession(user: unknown) {
-      if (
-        typeof user !== 'object'
-        || user === null
-        || !('id' in user)
-        || !('username' in user)
-        || (typeof user.id !== 'number' && typeof user.id !== 'bigint')
-        || typeof user.username !== 'string'
-      ) {
-        throw new AppError('Authenticated user is required', {
-          code: 'AUTH_USER_REQUIRED',
-          statusCode: 401,
-        });
-      }
-
-      return { token: dependencies.generateToken(user as AuthUser) };
+      return { token: dependencies.generateToken(requireAuthenticatedUser(user)) };
     },
 
     logout() {

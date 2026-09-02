@@ -34,6 +34,44 @@ export function createAuthRouter(
     }
   });
 
+  // --- OPEN_REGISTRATION-only routes below. Each one 403s via AppError
+  // (OPEN_REGISTRATION_DISABLED) on every other install, so mounting them
+  // unconditionally cannot change Account 1/2's behavior. ---
+
+  router.post('/register-open', async (req, res, next) => {
+    try {
+      const body = req.body as { username?: unknown };
+      res.json(await service.registerOpen(body.username));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/enter', async (req, res, next) => {
+    try {
+      const body = req.body as { token?: unknown };
+      res.json(await service.enterWithLoginToken(body.token));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/login-link', authenticateToken, (req, res, next) => {
+    try {
+      res.json(service.getLoginLink((req as AuthenticatedRequest).user));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/regenerate-login-link', authenticateToken, (req, res, next) => {
+    try {
+      res.json(service.regenerateLoginLink((req as AuthenticatedRequest).user));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post('/login', async (req, res, next) => {
     try {
       const body = req.body as { username?: unknown; password?: unknown };
