@@ -7,4 +7,8 @@ export const AUTH_ERROR_MESSAGES = {
   networkError: 'Network error. Please try again.',
   sessionExpired: 'Your session expired. Please log in again.',
   loginLinkInvalid: 'This login link is invalid or no longer works. It may have been regenerated.',
+  // Deliberately distinct from loginLinkInvalid/sessionExpired above - an
+  // invite that does not exist or was already redeemed is a different
+  // situation from a returning user's expired/rotated session.
+  inviteInvalid: 'This invitation link is no longer valid.',
 } as const;

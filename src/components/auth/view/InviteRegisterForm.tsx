@@ -8,13 +8,21 @@ import AuthErrorAlert from './AuthErrorAlert';
 import AuthInputField from './AuthInputField';
 import AuthScreenLayout from './AuthScreenLayout';
 
+type InviteRegisterFormProps = {
+  /** The single-use invite token from the `/invite/<token>` URL, already confirmed valid by ProtectedRoute. */
+  inviteToken: string;
+};
+
 /**
- * Account creation screen for an OPEN_REGISTRATION instance: anyone can
- * create their own isolated account here, no invite/approval step. There is
- * no password field - registerOpen() issues a persistent login-link token
- * instead, shown once right after this succeeds (see LoginLinkRevealScreen).
+ * Account creation screen for an OPEN_REGISTRATION instance, reachable only
+ * through a valid, unused `/invite/<token>` link (see ProtectedRoute) - there
+ * is no bare "create your account" screen at the root address any more.
+ * There is no password field - registerOpen() issues a persistent login-link
+ * token instead, shown once right after this succeeds (see
+ * LoginLinkRevealScreen). Submitting consumes the invite token; it cannot be
+ * used again after this.
  */
-export default function OpenRegisterForm() {
+export default function InviteRegisterForm({ inviteToken }: InviteRegisterFormProps) {
   const { error: sessionError, registerOpen } = useAuth();
 
   const [username, setUsername] = useState('');
@@ -26,19 +34,19 @@ export default function OpenRegisterForm() {
       event.preventDefault();
       setErrorMessage('');
       setIsSubmitting(true);
-      const result = await registerOpen(username.trim());
+      const result = await registerOpen(username.trim(), inviteToken);
       if (!result.success) {
         setErrorMessage(result.error);
       }
       setIsSubmitting(false);
     },
-    [registerOpen, username],
+    [registerOpen, username, inviteToken],
   );
 
   return (
     <AuthScreenLayout
       title="Create your account"
-      description="No password to remember - you'll get a personal link to sign back in."
+      description="You've been invited. No password to remember - you'll get a personal link to sign back in."
       footerText="Your account gets its own private, empty workspace. Nobody else can see your projects or chats."
     >
       <form onSubmit={handleSubmit} className="space-y-4">

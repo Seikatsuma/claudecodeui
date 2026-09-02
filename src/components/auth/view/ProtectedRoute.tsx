@@ -5,9 +5,11 @@ import { useAuth } from '../context/AuthContext';
 import Onboarding from '../../onboarding/view/Onboarding';
 
 import AuthLoadingScreen from './AuthLoadingScreen';
+import InvalidInviteScreen from './InvalidInviteScreen';
+import InviteRegisterForm from './InviteRegisterForm';
 import LoginForm from './LoginForm';
 import LoginLinkRevealScreen from './LoginLinkRevealScreen';
-import OpenRegisterForm from './OpenRegisterForm';
+import NoInvitationScreen from './NoInvitationScreen';
 import SetupForm from './SetupForm';
 
 type ProtectedRouteProps = {
@@ -23,6 +25,8 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     refreshOnboardingStatus,
     openRegistration,
     pendingLoginLink,
+    inviteToken,
+    inviteStatus,
   } = useAuth();
 
   if (isLoading) {
@@ -46,9 +50,23 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   if (openRegistration) {
     // No "already set up" gate here: any number of independent accounts can
     // register on a shared instance, so needsSetup (the single-account gate)
-    // does not apply - anyone signed out sees the same registration screen.
+    // does not apply. But unlike before, an anonymous visitor no longer gets
+    // a self-service form by default - only a `/invite/<token>` link (see
+    // AuthContext) unlocks it, and only while that exact token is still
+    // unused. Everything else (bare root, unknown token, already-used token)
+    // renders a message, never the registration form.
     if (!user) {
-      return <OpenRegisterForm />;
+      if (inviteToken) {
+        if (inviteStatus === 'checking') {
+          return <AuthLoadingScreen />;
+        }
+        if (inviteStatus === 'valid') {
+          return <InviteRegisterForm inviteToken={inviteToken} />;
+        }
+        return <InvalidInviteScreen />;
+      }
+
+      return <NoInvitationScreen />;
     }
   } else {
     if (needsSetup) {

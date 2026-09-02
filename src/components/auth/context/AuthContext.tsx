@@ -17,6 +17,7 @@ import type {
   AuthStatusPayload,
   AuthUser,
   AuthUserPayload,
+  InviteStatusPayload,
   LoginLinkPayload,
   OnboardingStatusPayload,
 } from '../types';
@@ -28,6 +29,12 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // of a reverse-proxy subpath basename, so the magic link works whether this
 // instance is mounted at the domain root or under a prefix.
 const LOGIN_LINK_PATH_PATTERN = /\/enter\/([^/]+)\/?$/;
+
+// Same idea, for the one-time `/invite/<token>` registration link (see
+// InviteRegisterForm / Settings > Invites). Unlike `/enter/<token>` this does
+// NOT log anyone in by itself - it only unlocks the registration form, and
+// the token is consumed by registerOpen() on submit, not by visiting the URL.
+const INVITE_LINK_PATH_PATTERN = /\/invite\/([^/]+)\/?$/;
 
 const readStoredToken = (): string | null => localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
 
@@ -67,6 +74,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [error, setError] = useState<string | null>(null);
   const [openRegistration, setOpenRegistration] = useState(false);
   const [pendingLoginLink, setPendingLoginLink] = useState<string | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [inviteStatus, setInviteStatus] = useState<AuthContextValue['inviteStatus']>('idle');
+  const [inviteLabel, setInviteLabel] = useState<string | null>(null);
 
   const setSession = useCallback((nextUser: AuthUser, nextToken: string) => {
     setUser(nextUser);
@@ -173,6 +183,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setError(AUTH_ERROR_MESSAGES.loginLinkInvalid);
         // Fall through to the normal status check below (e.g. to still show
         // the open-registration screen so the visitor can create an account).
+      }
+
+      // A `/invite/<token>` visit does not log anyone in - it only decides
+      // whether ProtectedRoute can show the registration form for this exact
+      // link. This is checked against the server (not just parsed from the
+      // URL) so an unknown or already-redeemed link renders a clear message
+      // immediately, before the visitor ever fills in the form. Left in the
+      // address bar (unlike `/enter/<token>`) so a page refresh does not lose
+      // the invite - it is only stripped after a successful registration.
+      const inviteLinkMatch = window.location.pathname.match(INVITE_LINK_PATH_PATTERN);
+      if (inviteLinkMatch) {
+        const currentInviteToken = decodeURIComponent(inviteLinkMatch[1]);
+        setInviteToken(currentInviteToken);
+        setInviteStatus('checking');
+        try {
+          const inviteResponse = await api.auth.inviteStatus(currentInviteToken);
+          const invitePayload = await parseJsonSafely<InviteStatusPayload>(inviteResponse);
+          if (inviteResponse.ok && invitePayload?.valid) {
+            setInviteStatus('valid');
+            setInviteLabel(invitePayload.label ?? null);
+          } else {
+            setInviteStatus('invalid');
+            setInviteLabel(null);
+          }
+        } catch (inviteError) {
+          console.error('[Auth] Invite status check failed:', inviteError);
+          setInviteStatus('invalid');
+          setInviteLabel(null);
+        }
+      } else {
+        setInviteToken(null);
+        setInviteStatus('idle');
+        setInviteLabel(null);
       }
 
       const statusResponse = await api.auth.status();
@@ -313,10 +356,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   );
 
   const registerOpen = useCallback<AuthContextValue['registerOpen']>(
-    async (username) => {
+    async (username, inviteToken) => {
       try {
         setError(null);
-        const response = await api.auth.registerOpen(username);
+        const response = await api.auth.registerOpen(username, inviteToken);
         const payload = await parseJsonSafely<AuthSessionPayload>(response);
 
         if (!response.ok || !payload?.token || !payload.user) {
@@ -327,6 +370,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         setSession(payload.user, payload.token);
         setNeedsSetup(false);
+        // The invite token was single-use and just got consumed by the
+        // server - drop it from state and the address bar so a refresh (or
+        // navigating back) cannot re-show the now-dead registration form.
+        setInviteToken(null);
+        setInviteStatus('idle');
+        setInviteLabel(null);
+        window.history.replaceState(null, '', window.location.pathname.replace(INVITE_LINK_PATH_PATTERN, '/'));
         if (payload.loginToken) {
           setPendingLoginLink(buildLoginLink(payload.loginToken));
         }
@@ -384,12 +434,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       pendingLoginLink,
       acknowledgeLoginLink,
       regenerateLoginLink,
+      inviteToken,
+      inviteStatus,
+      inviteLabel,
     }),
     [
       acknowledgeLoginLink,
       error,
       hasCompletedOnboarding,
       isLoading,
+      inviteToken,
+      inviteStatus,
+      inviteLabel,
       login,
       logout,
       needsSetup,

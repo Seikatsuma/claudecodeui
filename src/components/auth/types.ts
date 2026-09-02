@@ -42,6 +42,29 @@ export type AuthUserPayload = {
   user?: AuthUser;
 };
 
+/** One invite token as shown in Settings > Invites. */
+export type InviteRecord = {
+  token: string;
+  label: string | null;
+  createdAt: string;
+  usedAt: string | null;
+  usedByUsername: string | null;
+};
+
+export type InviteStatusPayload = ApiErrorPayload & {
+  valid?: boolean;
+  label?: string | null;
+};
+
+export type CreateInvitePayload = ApiErrorPayload & {
+  success?: boolean;
+  invite?: InviteRecord;
+};
+
+export type ListInvitesPayload = ApiErrorPayload & {
+  invites?: InviteRecord[];
+};
+
 export type OnboardingStatusPayload = {
   hasCompletedOnboarding?: boolean;
 };
@@ -64,8 +87,8 @@ export type AuthContextValue = {
   refreshOnboardingStatus: () => Promise<void>;
   /** True on a shared, self-service multi-tenant instance (OPEN_REGISTRATION=true). */
   openRegistration: boolean;
-  /** OPEN_REGISTRATION only: passwordless account creation. */
-  registerOpen: (username: string) => Promise<AuthActionResult>;
+  /** OPEN_REGISTRATION only: passwordless account creation, gated by a single-use invite token. */
+  registerOpen: (username: string, inviteToken: string) => Promise<AuthActionResult>;
   /**
    * Set right after a successful registerOpen() to the full shareable login
    * link. ProtectedRoute shows the one-time "save your link" screen while
@@ -75,6 +98,15 @@ export type AuthContextValue = {
   acknowledgeLoginLink: () => void;
   /** OPEN_REGISTRATION only: issues a new login-link token, invalidating the old one. */
   regenerateLoginLink: () => Promise<{ success: true; loginLink: string } | { success: false; error: string }>;
+  /**
+   * The invite token parsed from a `/invite/<token>` URL, or null when the
+   * current path is not an invite link (e.g. the bare root address).
+   */
+  inviteToken: string | null;
+  /** Validity of `inviteToken`, as reported by the server - 'idle' when there is no token to check. */
+  inviteStatus: 'idle' | 'checking' | 'valid' | 'invalid';
+  /** The inviter's optional note for this token (e.g. "for Ivanov") - informational only, not shown to the invitee today. */
+  inviteLabel: string | null;
 };
 
 export type AuthProviderProps = {

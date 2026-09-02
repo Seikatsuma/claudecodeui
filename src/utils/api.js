@@ -144,12 +144,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
-    // OPEN_REGISTRATION-only: passwordless account creation. 403s with
+    // OPEN_REGISTRATION-only: passwordless account creation, gated by a
+    // single-use invite token (see /invite/<token>). 403s with
     // OPEN_REGISTRATION_DISABLED on every other instance.
-    registerOpen: (username) => fetch('/api/auth/register-open', {
+    registerOpen: (username, inviteToken) => fetch('/api/auth/register-open', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username }),
+      body: JSON.stringify({ username, inviteToken }),
     }),
     // Instant login via a persistent login-link token (the `/enter/<token>` URL).
     enter: (token) => fetch('/api/auth/enter', {
@@ -157,6 +158,15 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     }),
+    // Public: checks whether an invite token (the `/invite/<token>` URL) is
+    // still valid before showing the registration form.
+    inviteStatus: (token) => fetch(`/api/auth/invite-status/${encodeURIComponent(token)}`),
+    createInvite: (label) => authenticatedFetch('/api/auth/invites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    }),
+    listInvites: () => authenticatedFetch('/api/auth/invites'),
     getLoginLink: () => authenticatedFetch('/api/auth/login-link'),
     regenerateLoginLink: () => authenticatedFetch('/api/auth/regenerate-login-link', { method: 'POST' }),
     refresh: () => authenticatedFetch('/api/auth/refresh', { method: 'POST' }),

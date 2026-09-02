@@ -6,6 +6,7 @@ import { useCredentialsSettings } from '../../../hooks/useCredentialsSettings';
 import AnthropicApiKeySection from './sections/AnthropicApiKeySection';
 import ApiKeysSection from './sections/ApiKeysSection';
 import GithubCredentialsSection from './sections/GithubCredentialsSection';
+import InvitesSection from './sections/InvitesSection';
 import LoginLinkSection from './sections/LoginLinkSection';
 import NewApiKeyAlert from './sections/NewApiKeyAlert';
 
@@ -99,6 +100,7 @@ export default function CredentialsSettingsTab() {
         <>
           <AnthropicApiKeySection />
           <LoginLinkSection />
+          <InvitesSection />
         </>
       )}
     </div>
