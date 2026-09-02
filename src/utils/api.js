@@ -117,7 +117,12 @@ export const authenticatedFetch = (url, options = {}) => {
     if (refreshedToken) {
       storeAuthToken(refreshedToken);
     }
-    if (response.headers.get('X-Auth-Error')) {
+    // Only surface "session expired" when a token was actually sent - the
+    // server sets this same header for a plain "no token provided" 401 too
+    // (e.g. an anonymous pre-login status/health check), which is the
+    // normal, expected state for a visitor who has never logged in, not an
+    // expired session worth alarming them about.
+    if (token && response.headers.get('X-Auth-Error')) {
       expireAuthSession();
     }
     return response;
