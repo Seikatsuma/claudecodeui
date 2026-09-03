@@ -1,9 +1,26 @@
 import { randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 import { getConnection } from '@/modules/database/connection.js';
 import type { CreateProjectPathResult, ProjectRepositoryRow } from '@/shared/types.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
+
+/**
+ * Resolves `scopeRootDir` through any symlinks so the prefix comparison in
+ * getProjectPaths / isProjectPathInScope uses the same canonical form that
+ * validateWorkspacePath stores via realpath().  Falls back to the original
+ * (unresolved) path if the directory does not yet exist on disk — a brand-new
+ * user's workspace is created lazily, and a non-existent dir cannot match any
+ * stored project path anyway.
+ */
+function resolveScope(scopeRootDir: string): string {
+    try {
+        return normalizeProjectPath(realpathSync(scopeRootDir));
+    } catch {
+        return normalizeProjectPath(scopeRootDir);
+    }
+}
 
 function normalizeProjectDisplayName(projectPath: string, customProjectName: string | null): string {
     const trimmedCustomName = typeof customProjectName === 'string' ? customProjectName.trim() : '';
@@ -101,7 +118,7 @@ export const projectsDb = {
     getProjectPaths(scopeRootDir?: string | null): ProjectRepositoryRow[] {
         const db = getConnection();
         if (scopeRootDir) {
-            const normalizedScopeRoot = normalizeProjectPath(scopeRootDir);
+            const normalizedScopeRoot = resolveScope(scopeRootDir);
             return db.prepare(`
                 SELECT project_id, project_path, custom_project_name, isStarred, isArchived
                 FROM projects
@@ -124,7 +141,7 @@ export const projectsDb = {
     getArchivedProjectPaths(scopeRootDir?: string | null): ProjectRepositoryRow[] {
         const db = getConnection();
         if (scopeRootDir) {
-            const normalizedScopeRoot = normalizeProjectPath(scopeRootDir);
+            const normalizedScopeRoot = resolveScope(scopeRootDir);
             return db.prepare(`
                 SELECT project_id, project_path, custom_project_name, isStarred, isArchived
                 FROM projects
@@ -146,7 +163,7 @@ export const projectsDb = {
      * projects.routes.ts's `router.param('projectId', ...)` guard.
      */
     isProjectPathInScope(projectPath: string, scopeRootDir: string): boolean {
-        const normalizedScopeRoot = normalizeProjectPath(scopeRootDir);
+        const normalizedScopeRoot = resolveScope(scopeRootDir);
         const normalizedProjectPath = normalizeProjectPath(projectPath);
         return normalizedProjectPath === normalizedScopeRoot
             || normalizedProjectPath.startsWith(`${normalizedScopeRoot}${path.sep}`);
