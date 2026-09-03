@@ -19,7 +19,7 @@ import type {
   ProviderPermissionDecision,
   ProviderRuntimeWriter,
 } from '@/shared/types.js';
-import { OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
+import { isPlatformOwnerWebUser, OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
 import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
 
 const ANTHROPIC_API_KEY_CREDENTIAL_TYPE = 'anthropic_api_key';
@@ -215,7 +215,16 @@ async function handleChatSend(
   }
 
   const openRegistrationContext = resolveOpenRegistrationRuntimeContext(userId);
-  if (OPEN_REGISTRATION && provider === 'claude' && !openRegistrationContext.anthropicApiKey) {
+  const numericUserId = userId !== null ? Number(userId) : NaN;
+  // Owner bypass: when the owner's ~/.claude-webuser-<id> is symlinked to
+  // their real ~/.claude, the SDK authenticates via the existing OAuth session
+  // in that directory — no explicit API key is needed or stored.
+  if (
+    OPEN_REGISTRATION &&
+    provider === 'claude' &&
+    !openRegistrationContext.anthropicApiKey &&
+    !isPlatformOwnerWebUser(numericUserId)
+  ) {
     sendProtocolError(
       ws,
       'ANTHROPIC_API_KEY_REQUIRED',

@@ -56,10 +56,13 @@ function stripPastePlaceholders(candidate: string): string | undefined {
  */
 export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'claude' as const;
-  // getClaudeConfigDir() honors CLAUDE_CONFIG_DIR - see its doc comment in
-  // shared/utils.ts. A hardcoded ~/.claude here previously made every
-  // CLAUDE_CONFIG_DIR-scoped instance index the default account's sessions.
-  private readonly claudeHome = getClaudeConfigDir();
+  // claudeHome is intentionally NOT cached as a class field: the class is
+  // instantiated once at module load time (before any HTTP request context
+  // exists), so a field initializer would freeze the value to the process-wide
+  // default (~/.claude) for every user forever. Instead, each method resolves
+  // it fresh via getClaudeConfigDir(), which reads the AsyncLocalStorage
+  // request context and returns the correct per-user ~/.claude-webuser-<id>
+  // for whichever user is making the current request.
 
   /**
    * Returns true when a JSONL file is a subagent transcript or tool result
@@ -82,9 +85,10 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    * Scans ~/.claude/projects and upserts discovered sessions into DB.
    */
   async synchronize(since?: Date): Promise<number> {
-    const nameMap = await buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');
+    const claudeHome = getClaudeConfigDir();
+    const nameMap = await buildLookupMap(path.join(claudeHome, 'history.jsonl'), 'sessionId', 'display');
     const files = await findFilesRecursivelyCreatedAfter(
-      path.join(this.claudeHome, 'projects'),
+      path.join(claudeHome, 'projects'),
       '.jsonl',
       since ?? null
     );
@@ -128,7 +132,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    const nameMap = await buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');
+    const nameMap = await buildLookupMap(path.join(getClaudeConfigDir(), 'history.jsonl'), 'sessionId', 'display');
     const parsed = await this.processSessionFile(filePath, nameMap);
     if (!parsed) {
       return null;

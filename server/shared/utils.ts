@@ -51,6 +51,29 @@ export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
 export const OPEN_REGISTRATION = process.env.OPEN_REGISTRATION === 'true';
 
 /**
+ * Set of web user ids whose `~/.claude-webuser-<id>` config dir has been
+ * symlinked to the OS owner's real `~/.claude` — meaning the Claude SDK can
+ * authenticate via that directory's existing OAuth session instead of an API
+ * key. These users are exempt from the OPEN_REGISTRATION API-key gate: if no
+ * explicit key is stored, the SDK falls through to its own OAuth session.
+ *
+ * Configured via `PLATFORM_OWNER_WEB_USER_IDS` (comma-separated numbers,
+ * e.g. `"1"`). Defaults to an empty set — fully opt-in, no behavior change
+ * unless explicitly set. When a key IS stored via Settings, it is still
+ * preferred normally; this bypass only triggers when the key is absent.
+ */
+const _platformOwnerIds: Set<number> = new Set(
+  (process.env.PLATFORM_OWNER_WEB_USER_IDS ?? '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0)
+);
+
+export function isPlatformOwnerWebUser(userId: number): boolean {
+  return _platformOwnerIds.has(userId);
+}
+
+/**
  * Resolves this process's Claude Code CLI config directory - the directory
  * that normally holds settings.json, .credentials.json, projects/, commands/,
  * skills/. Honors CLAUDE_CONFIG_DIR exactly like the `claude` CLI itself does
