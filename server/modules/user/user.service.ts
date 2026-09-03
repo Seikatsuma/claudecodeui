@@ -1,4 +1,6 @@
-import { AppError } from '@/shared/utils.js';
+import { readFile } from 'node:fs/promises';
+
+import { AppError, getClaudeJsonPath, isPlatformOwnerWebUser } from '@/shared/utils.js';
 
 type GitConfig = {
   git_name: string | null;
@@ -94,6 +96,28 @@ export function createUserService(dependencies: UserDependencies) {
         success: true,
         hasCompletedOnboarding: dependencies.users.hasCompletedOnboarding(userId),
       };
+    },
+
+    /**
+     * Platform-owner-only: surfaces which real Anthropic account email is
+     * behind this user's symlinked ~/.claude-webuser-<id> config dir (see
+     * isPlatformOwnerWebUser). Reads only the non-secret `oauthAccount.
+     * emailAddress` field from the CLI's own .claude.json - never touches
+     * .credentials.json or any token/secret material. Returns null for
+     * every non-owner user and whenever the field cannot be read, rather
+     * than surfacing a read error.
+     */
+    async getOwnerAccountEmail(userId: number) {
+      if (!isPlatformOwnerWebUser(userId)) {
+        return { success: true, email: null };
+      }
+      try {
+        const raw = await readFile(getClaudeJsonPath(), 'utf-8');
+        const parsed = JSON.parse(raw) as { oauthAccount?: { emailAddress?: string } };
+        return { success: true, email: parsed.oauthAccount?.emailAddress ?? null };
+      } catch {
+        return { success: true, email: null };
+      }
     },
   };
 }

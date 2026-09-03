@@ -46,5 +46,13 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
     }
   });
 
+  router.get('/owner-account-info', async (req, res, next) => {
+    try {
+      res.json(await service.getOwnerAccountEmail(readUserId(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }

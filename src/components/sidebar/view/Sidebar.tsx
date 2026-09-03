@@ -1,9 +1,11 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
 import { useVersionCheck } from '../../../hooks/useVersionCheck';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
+import { useAuth } from '../../auth/context/AuthContext';
+import { authenticatedFetch } from '../../../utils/api';
 import { useSidebarController } from '../hooks/useSidebarController';
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
@@ -57,11 +59,38 @@ function Sidebar({
     installMode,
     accountLabel,
     switchAccountUrl,
-    accountEmail,
+    accountEmail: singleTenantAccountEmail,
   } = useVersionCheck(
     'siteboon',
     'claudecodeui',
   );
+  // Multi-tenant (OPEN_REGISTRATION) equivalent of the accountEmail above:
+  // useVersionCheck reads it from the unauthenticated /health endpoint,
+  // which is process-wide and has no per-user context - correct for a
+  // single-account instance (Account 1/2), but on a shared instance it
+  // would either be empty or (worse) leak one user's email to every
+  // visitor. This fetches the same "which real account is behind this
+  // login" info from an authenticated, per-user, owner-gated endpoint
+  // instead - see server/modules/user/user.routes.ts's /owner-account-info
+  // (returns null for every non-owner user).
+  const { openRegistration } = useAuth();
+  const [ownerAccountEmail, setOwnerAccountEmail] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openRegistration) {
+      return;
+    }
+    authenticatedFetch('/api/user/owner-account-info')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { email?: string | null } | null) => {
+        if (data?.email) {
+          setOwnerAccountEmail(data.email);
+        }
+      })
+      .catch(() => {
+        // Silently leave the badge without an email - purely cosmetic.
+      });
+  }, [openRegistration]);
+  const accountEmail = openRegistration ? ownerAccountEmail : singleTenantAccountEmail;
   const { preferences, setPreference } = useUiPreferences();
   const { sidebarVisible } = preferences;
   const { setCurrentProject, mcpServerStatus } = useTaskMaster() as TaskMasterSidebarContext;
