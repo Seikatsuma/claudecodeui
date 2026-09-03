@@ -6,7 +6,7 @@ import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, isPlatformOwnerWebUser } from '@/shared/utils.js';
 
 type SessionSummary = {
   id: string;
@@ -191,7 +191,7 @@ export async function getProjectsWithSessions(
     await sessionSynchronizerService.synchronizeSessions();
   }
 
-  const projectRows = projectsDb.getProjectPaths(getRequestRuntimeContext()?.workspaceRoot) as Array<{
+  const projectRows = projectsDb.getProjectPaths((() => { const ctx = getRequestRuntimeContext(); const uid = ctx?.userId; return (uid != null && isPlatformOwnerWebUser(Number(uid))) ? null : ctx?.workspaceRoot; })()) as Array<{
     project_id: string;
     project_path: string;
     custom_project_name?: string | null;
@@ -259,7 +259,7 @@ export async function getArchivedProjectsWithSessions(
     await sessionSynchronizerService.synchronizeSessions();
   }
 
-  const projectRows = projectsDb.getArchivedProjectPaths(getRequestRuntimeContext()?.workspaceRoot) as Array<{
+  const projectRows = projectsDb.getArchivedProjectPaths((() => { const ctx = getRequestRuntimeContext(); const uid = ctx?.userId; return (uid != null && isPlatformOwnerWebUser(Number(uid))) ? null : ctx?.workspaceRoot; })()) as Array<{
     project_id: string;
     project_path: string;
     custom_project_name?: string | null;
