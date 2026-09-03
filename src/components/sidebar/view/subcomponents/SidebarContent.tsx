@@ -1,5 +1,5 @@
-import { type ReactNode } from 'react';
-import { Archive, Folder, MessageSquare, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
+import { Archive, Folder, MessageSquare, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { ScrollArea } from '../../../../shared/view/ui';
@@ -14,6 +14,8 @@ import { getSessionTitle } from '../../../../utils/pageTitle';
 import SidebarFooter from './SidebarFooter';
 import SidebarHeader from './SidebarHeader';
 import SidebarProjectList, { type SidebarProjectListProps } from './SidebarProjectList';
+import SidebarProjectPickerTrigger from './SidebarProjectPickerTrigger';
+import SidebarProjectSessions from './SidebarProjectSessions';
 import SidebarRecentConversations from './SidebarRecentConversations';
 import SidebarWorkspaceTabs from './SidebarWorkspaceTabs';
 
@@ -210,6 +212,21 @@ export default function SidebarContent({
     projectListProps.editingProject || projectListProps.editingSession,
   );
 
+  // Flat-mode: when exactly ONE project is starred, show its sessions directly
+  // without the project-header/expand-step clutter.  0 or 2+ starred = normal mode.
+  const starredProjects = projectListProps.projects.filter((p) =>
+    projectListProps.isProjectStarred(p.projectId),
+  );
+  const singleStarredProject = starredProjects.length === 1 ? starredProjects[0] : null;
+
+  // Which project to display in the flat session list (null = show starred project).
+  // Picker sets this when user selects a different project from the overlay.
+  const [pickerProject, setPickerProject] = useState<import('../../../../types/app').Project | null>(null);
+  // The project whose sessions fill the flat view.
+  const flatDisplayProject = singleStarredProject
+    ? (pickerProject ?? singleStarredProject)
+    : null;
+
   return (
     <div
       className="flex h-full flex-col bg-background/80 backdrop-blur-sm md:w-72 md:select-none"
@@ -243,27 +260,52 @@ export default function SidebarContent({
         t={t}
       />
 
-      {selectedProject && (
+      {(selectedProject || singleStarredProject) && (
         <div className="flex-shrink-0 border-b border-border/60 px-3 py-2">
-          <div className="mb-1.5 min-w-0">
-            <p
-              className="truncate text-xs font-medium leading-tight text-foreground"
-              title={selectedSession ? getSessionTitle(selectedSession) : selectedProject.displayName}
-            >
-              {selectedSession ? getSessionTitle(selectedSession) : selectedProject.displayName}
-            </p>
-            {selectedSession && (
-              <p className="truncate text-[10px] leading-tight text-muted-foreground/70">
-                {selectedProject.displayName}
+          {selectedProject && (
+            <div className="mb-1.5 min-w-0">
+              <p
+                className="truncate text-xs font-medium leading-tight text-foreground"
+                title={selectedSession ? getSessionTitle(selectedSession) : selectedProject.displayName}
+              >
+                {selectedSession ? getSessionTitle(selectedSession) : selectedProject.displayName}
               </p>
+              {selectedSession && (
+                <p className="truncate text-[10px] leading-tight text-muted-foreground/70">
+                  {selectedProject.displayName}
+                </p>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-1.5">
+            {selectedProject && (
+              <div className="flex-1">
+                <SidebarWorkspaceTabs
+                  activeTab={activeTab}
+                  setActiveTab={setActiveTab}
+                  shouldShowTasksTab={shouldShowTasksTab}
+                  shouldShowBrowserTab={shouldShowBrowserTab}
+                />
+              </div>
+            )}
+            {singleStarredProject && (
+              <SidebarProjectPickerTrigger
+                projects={projectListProps.projects}
+                selectedProjectId={flatDisplayProject?.projectId ?? null}
+                isProjectStarred={projectListProps.isProjectStarred}
+                onProjectSelect={(project) => {
+                  if (project.projectId === singleStarredProject.projectId) {
+                    setPickerProject(null);
+                  } else {
+                    setPickerProject(project);
+                    projectListProps.onProjectSelect(project);
+                  }
+                }}
+                variant="desktop"
+                t={t}
+              />
             )}
           </div>
-          <SidebarWorkspaceTabs
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            shouldShowTasksTab={shouldShowTasksTab}
-            shouldShowBrowserTab={shouldShowBrowserTab}
-          />
         </div>
       )}
 
@@ -704,6 +746,52 @@ export default function SidebarContent({
               ))}
             </div>
           )
+        ) : flatDisplayProject ? (
+          // Flat mode: exactly one starred project — render its sessions directly,
+          // no project-name header needed for the primary (starred) project.
+          <div className="pb-safe-area-inset-bottom md:space-y-1">
+            {pickerProject && (
+              // Non-default project selected from picker — show its name so the
+              // user knows they're browsing a different project's sessions.
+              <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground">
+                <Folder className="h-3 w-3 flex-shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{pickerProject.displayName}</span>
+                <button
+                  type="button"
+                  aria-label={t('projects.backToMain', { defaultValue: 'Back to main project' })}
+                  title={t('projects.backToMain', { defaultValue: 'Back to main project' })}
+                  className="flex-shrink-0 rounded p-0.5 transition-colors hover:bg-accent/60 hover:text-foreground"
+                  onClick={() => setPickerProject(null)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+            <SidebarProjectSessions
+              project={flatDisplayProject}
+              isExpanded={true}
+              sessions={projectListProps.getProjectSessions(flatDisplayProject)}
+              selectedSession={projectListProps.selectedSession}
+              initialSessionsLoaded={projectListProps.initialSessionsLoaded.has(flatDisplayProject.projectId)}
+              hasMoreSessions={Boolean(flatDisplayProject.sessionMeta?.hasMore)}
+              isLoadingMoreSessions={projectListProps.loadingMoreProjects.has(flatDisplayProject.projectId)}
+              activeSessions={projectListProps.activeSessions}
+              attentionSessionIds={projectListProps.attentionSessionIds}
+              currentTime={projectListProps.currentTime}
+              editingSession={projectListProps.editingSession}
+              editingSessionName={projectListProps.editingSessionName}
+              onEditingSessionNameChange={projectListProps.onEditingSessionNameChange}
+              onStartEditingSession={projectListProps.onStartEditingSession}
+              onCancelEditingSession={projectListProps.onCancelEditingSession}
+              onSaveEditingSession={projectListProps.onSaveEditingSession}
+              onProjectSelect={projectListProps.onProjectSelect}
+              onSessionSelect={projectListProps.onSessionSelect}
+              onDeleteSession={projectListProps.onDeleteSession}
+              onLoadMoreSessions={projectListProps.onLoadMoreSessions}
+              onNewSession={projectListProps.onNewSession}
+              t={t}
+            />
+          </div>
         ) : (
           <SidebarProjectList {...projectListProps} />
         )}
