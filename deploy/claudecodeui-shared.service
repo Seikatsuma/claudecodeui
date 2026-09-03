@@ -106,6 +106,14 @@ Environment=ACCOUNT_LABEL="Shared"
 # accounts, so there is nothing on Account 1/2 for them to "switch" to, and
 # the reverse link (from Account 1/2 back to here) was not requested.
 
+# Web user id(s) whose ~/.claude-webuser-<id> config dir has been manually
+# symlinked to the box owner's real, already-authenticated ~/.claude (see
+# server/shared/utils.ts: isPlatformOwnerWebUser). Exempts exactly these
+# users from the "add an Anthropic API key in Settings" gate - the SDK
+# authenticates via that directory's own OAuth session instead. Comma-
+# separated numeric ids; leave unset for the default BYOK-only behavior.
+Environment=PLATFORM_OWNER_WEB_USER_IDS=1
+
 # --- Crash-loop protection (same reasoning as claudecodeui.service: this VPS
 # runs several other unrelated bots on 3.8GB RAM / 2 CPUs). ---
 Restart=on-failure
