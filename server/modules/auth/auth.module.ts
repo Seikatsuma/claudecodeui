@@ -10,9 +10,24 @@ import { createAuthRouter } from './auth.routes.js';
 import { createAuthService } from './auth.service.js';
 import { createLoginRateLimiter } from './login-rate-limiter.js';
 
-/** Generates a persistent, unguessable login-link token: 32 random bytes, base64url. */
+/** Generates a random password hash input: 32 random bytes, base64url. Kept
+ * long/high-entropy since it feeds bcrypt directly, unlike the shareable
+ * tokens below which a human actually has to copy/paste or read aloud. */
 function generateLoginToken(): string {
   return crypto.randomBytes(32).toString('base64url');
+}
+
+/**
+ * Generates a shorter random token for links a human actually has to copy,
+ * paste, or read aloud (personal login links, invite links): 16 random
+ * bytes, base64url (~22 chars) instead of the 32-byte (~43 char) token
+ * above. Still 128 bits of entropy (unguessable), but materially less
+ * likely to get truncated or mangled when copied through a messaging app -
+ * convenience over security is deliberate here, per this instance's
+ * zero-friction design (see PLATFORM_OWNER_WEB_USER_IDS elsewhere).
+ */
+function generateShareableToken(): string {
+  return crypto.randomBytes(16).toString('base64url');
 }
 
 type BcryptAdapter = {
@@ -54,6 +69,7 @@ const authService = createAuthService({
   comparePassword: (password, passwordHash) => bcrypt.compare(password, passwordHash),
   generateToken,
   generateLoginToken,
+  generateShareableToken,
   provisionWorkspace: (userId) => ensureWebUserDirectories(userId),
   openRegistration: OPEN_REGISTRATION,
 });

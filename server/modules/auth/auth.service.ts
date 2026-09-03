@@ -55,6 +55,7 @@ type AuthDependencies = {
   generateToken(user: AuthUser): string;
   /** Generates a persistent, unguessable login-link token (see auth.module.ts). */
   generateLoginToken(): string;
+  generateShareableToken(): string;
   /**
    * Creates this brand-new user's isolated workspace (their own
    * CLAUDE_CONFIG_DIR + project browsing root - see web-user-paths.ts).
@@ -235,7 +236,7 @@ export function createAuthService(dependencies: AuthDependencies) {
       try {
         const randomPassword = dependencies.generateLoginToken();
         const passwordHash = await dependencies.hashPassword(randomPassword);
-        const loginToken = dependencies.generateLoginToken();
+        const loginToken = dependencies.generateShareableToken();
         const user = dependencies.users.createUserWithLoginToken(username, passwordHash, loginToken);
 
         // The actual single-use guarantee: this UPDATE only succeeds if the
@@ -292,7 +293,7 @@ export function createAuthService(dependencies: AuthDependencies) {
         });
       }
 
-      const token = dependencies.generateLoginToken();
+      const token = dependencies.generateShareableToken();
       const invite = dependencies.invites.createInvite(token, userId, trimmedLabel || null);
 
       return { success: true, invite: formatInvite(invite) };
@@ -393,7 +394,7 @@ export function createAuthService(dependencies: AuthDependencies) {
       }
 
       const userId = numericUserId(requireAuthenticatedUser(user).id);
-      const loginToken = dependencies.generateLoginToken();
+      const loginToken = dependencies.generateShareableToken();
       dependencies.users.setLoginToken(userId, loginToken);
       return { loginToken };
     },

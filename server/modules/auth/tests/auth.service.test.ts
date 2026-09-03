@@ -74,6 +74,7 @@ function createDependencies(overrides: TestDependencyOverrides = {}): AuthDepend
     comparePassword: async () => false,
     generateToken: () => 'signed-token',
     generateLoginToken: () => 'login-token',
+    generateShareableToken: () => 'shareable-token',
     provisionWorkspace: async () => undefined,
     openRegistration: false,
     ...restOverrides,
@@ -243,10 +244,8 @@ test('registerOpen creates a passwordless account, provisions its workspace, cla
   const operations: string[] = [];
   const service = createAuthService(createDependencies({
     openRegistration: true,
-    generateLoginToken: (() => {
-      let call = 0;
-      return () => (call++ === 0 ? 'throwaway-password' : 'the-login-token');
-    })(),
+    generateLoginToken: () => 'throwaway-password',
+    generateShareableToken: () => 'the-login-token',
     users: {
       hasUsers: () => true, // open registration ignores this - many accounts may already exist
       createUserWithLoginToken: (username, passwordHash, loginToken) => {
@@ -293,7 +292,7 @@ test('createInvite mints a token for the authenticated caller and rejects an ove
   const created: unknown[] = [];
   const service = createAuthService(createDependencies({
     openRegistration: true,
-    generateLoginToken: () => 'fresh-invite-token',
+    generateShareableToken: () => 'fresh-invite-token',
     invites: {
       createInvite: (token, createdByUserId, label) => {
         created.push({ token, createdByUserId, label });
@@ -368,7 +367,7 @@ test('regenerateLoginLink replaces the stored token and returns the new one', ()
   let stored: { userId: number; token: string } | undefined;
   const service = createAuthService(createDependencies({
     openRegistration: true,
-    generateLoginToken: () => 'fresh-token',
+    generateShareableToken: () => 'fresh-token',
     users: {
       setLoginToken: (userId, token) => { stored = { userId, token }; },
     },

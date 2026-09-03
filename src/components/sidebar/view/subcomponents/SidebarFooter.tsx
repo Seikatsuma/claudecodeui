@@ -1,10 +1,7 @@
 import { Settings, ArrowUpCircle, AlertTriangle, Users, ArrowLeftRight } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
-import { IS_PLATFORM } from '../../../../shared/utils';
 import type { ReleaseInfo } from '../../../../shared/types';
-
-const GITHUB_REPO_URL = 'https://github.com/siteboon/claudecodeui';
 
 type SidebarFooterProps = {
   updateAvailable: boolean;
@@ -149,20 +146,6 @@ export default function SidebarFooter({
               </a>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Desktop version brand line (OSS mode only) */}
-      {!IS_PLATFORM && (
-        <div className="hidden px-3 py-2 text-center md:block">
-          <a
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] text-muted-foreground/40 transition-colors hover:text-muted-foreground"
-          >
-            CloudCLI v{currentVersion} – {t('branding.openSource')}
-          </a>
         </div>
       )}
 

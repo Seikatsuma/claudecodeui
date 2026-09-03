@@ -9,7 +9,6 @@ import type { SessionActivityMap } from '../../../../hooks/useSessionProtection'
 import type { Project, ProjectSession } from '../../../../types/app';
 import type { SessionWithProvider, SidebarSearchMode } from '../../types/types';
 
-import GitHubStarBadge from './GitHubStarBadge';
 import SidebarPulseTrigger from './SidebarPulseTrigger';
 
 const MOD_KEY =
@@ -163,8 +162,6 @@ export default function SidebarHeader({
             </Button>
           </div>
         </div>
-
-        <GitHubStarBadge />
 
         {/* Search bar */}
         {showSearchTools && (
