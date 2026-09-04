@@ -1030,9 +1030,19 @@ export function sanitizeLeafDirectoryName(inputName: string, label = 'directory 
  * Recursively discovers files that match one extension, with optional incremental filtering.
  *
  * Provider synchronizers call this to find transcript artifacts under provider
- * home directories. Pass `lastScanAt` to include only files created after the
+ * home directories. Pass `lastScanAt` to include only files MODIFIED after the
  * previous scan, or pass `null` to perform a full rescan. Missing directories
  * are treated as empty because not every provider exists on every machine.
+ *
+ * Filters on mtime, not birthtime - a session transcript file is created once
+ * but keeps growing (new messages appended) for as long as that conversation
+ * stays active, often across many sync cycles. Filtering by birthtime meant
+ * an ongoing/resumed session's `updated_at` (and title, activity, etc.) froze
+ * at whatever it was on the FIRST sync that ever saw the file and then never
+ * refreshed again - every later sync's incremental scan silently skipped it
+ * forever, since birthtime never changes after creation. The sidebar showed
+ * a long-running chat as stuck "1d ago" indefinitely even while it was being
+ * actively used, because the synchronizer stopped ever re-visiting it.
  */
 export async function findFilesRecursivelyCreatedAfter(
   rootDir: string,
@@ -1060,7 +1070,7 @@ export async function findFilesRecursivelyCreatedAfter(
       }
 
       const fileStat = await stat(fullPath);
-      if (fileStat.birthtime > lastScanAt) {
+      if (fileStat.mtime > lastScanAt) {
         fileList.push(fullPath);
       }
     }
