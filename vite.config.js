@@ -20,8 +20,33 @@ export default defineConfig(({ mode }) => {
   // TODO: Remove support for legacy PORT variables in all locations in a future major release, leaving only SERVER_PORT.
   const serverPort = env.SERVER_PORT || env.PORT || 3001
 
+  const isOpenRegistration = env.OPEN_REGISTRATION === 'true'
+
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      // On the shared/OPEN_REGISTRATION instance, each user's actual "app"
+      // is their personal /enter/<token> magic link, not a single fixed
+      // account - so the PWA manifest's start_url (always a fixed "/", see
+      // public/manifest.json) is actively wrong for "Add to Home Screen":
+      // iOS treats a page with a standalone-display manifest as a real
+      // installable app and launches the home-screen icon at that fixed
+      // start_url from then on, discarding whatever URL was on screen at
+      // install time. That silently drops the token, landing on a
+      // logged-out "/" and showing the invitation-only screen. Removing the
+      // manifest link here makes "Add to Home Screen" fall back to the
+      // older, simpler behavior of bookmarking whatever URL is actually on
+      // screen (the user's own /enter/<token> link) - correct for this
+      // instance, at the cost of the standalone full-screen app chrome.
+      // Account 1/2 (single fixed account, no per-user token) keep the
+      // manifest exactly as before.
+      isOpenRegistration && {
+        name: 'strip-manifest-link-on-open-registration',
+        transformIndexHtml(html) {
+          return html.replace(/\s*<link rel="manifest"[^>]*\/?>\n?/, '\n')
+        },
+      },
+    ].filter(Boolean),
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url))
