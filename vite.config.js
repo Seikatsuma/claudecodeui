@@ -49,6 +49,13 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       chunkSizeWarningLimit: 1000,
+      // The gzip-size report is purely a terminal print, not something the
+      // deployed app needs - but computing it requires holding the full
+      // compressed bundle in memory on top of everything else, and on this
+      // project's 3.8GB-RAM VPS that final step is exactly where builds have
+      // been getting OOM-killed under real-world memory pressure (other
+      // concurrent sessions/bots). Skipping it removes that peak.
+      reportCompressedSize: false,
       rollupOptions: {
         output: {
           manualChunks: {
