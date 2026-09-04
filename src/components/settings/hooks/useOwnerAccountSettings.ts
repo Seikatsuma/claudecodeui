@@ -74,12 +74,14 @@ export function useOwnerAccountSettings() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slot }),
       });
-      const data = (await response.json()) as OwnerAccountsResponse & { error?: string };
+      const data = (await response.json()) as OwnerAccountsResponse & {
+        error?: { message?: string };
+      };
       if (!response.ok || !data.success) {
         setState((prev) => ({
           ...prev,
           pendingSlot: null,
-          errorMessage: data.error ?? 'Could not switch account. Please try again.',
+          errorMessage: data.error?.message ?? 'Could not switch account. Please try again.',
         }));
         return;
       }
