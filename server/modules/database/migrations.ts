@@ -533,6 +533,7 @@ export const runMigrations = (db: Database) => {
       'BOOLEAN DEFAULT 0'
     );
     addColumnToTableIfNotExists(db, 'users', userColumnNames, 'login_token', 'TEXT');
+    addColumnToTableIfNotExists(db, 'users', userColumnNames, 'active_owner_account_slot', 'INTEGER NOT NULL DEFAULT 1');
     // Partial-unique-like lookup index. SQLite allows multiple NULLs through a
     // UNIQUE index (every pre-existing/non-open-registration row stays NULL),
     // so this stays safe on installs that never use magic-link login.

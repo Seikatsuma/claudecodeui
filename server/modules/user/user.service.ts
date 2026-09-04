@@ -1,6 +1,8 @@
+import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { AppError, getClaudeJsonPath, isPlatformOwnerWebUser } from '@/shared/utils.js';
+import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
 
 type GitConfig = {
   git_name: string | null;
@@ -13,6 +15,8 @@ type UserDependencies = {
     updateGitConfig(userId: number, gitName: string | null, gitEmail: string | null): void;
     completeOnboarding(userId: number): void;
     hasCompletedOnboarding(userId: number): boolean;
+    getActiveOwnerAccountSlot(userId: number): number;
+    setActiveOwnerAccountSlot(userId: number, slot: number): void;
   };
   readSystemGitConfig(): Promise<GitConfig>;
   applyGlobalGitConfig(gitName: string, gitEmail: string): Promise<void>;
@@ -119,5 +123,95 @@ export function createUserService(dependencies: UserDependencies) {
         return { success: true, email: null };
       }
     },
+
+    /**
+     * Platform-owner-only: returns info on both account slots so the Settings
+     * UI can render which is active and let the user switch. Non-owners always
+     * get an empty accounts list (not an error) so the UI can gate the section
+     * without a separate "am I owner?" check.
+     */
+    async getOwnerAccounts(userId: number) {
+      if (!isPlatformOwnerWebUser(userId)) {
+        return { success: true, activeSlot: null as number | null, accounts: [] as OwnerAccountInfo[] };
+      }
+
+      const activeSlot = dependencies.users.getActiveOwnerAccountSlot(userId);
+
+      const readSlotInfo = async (slot: number): Promise<OwnerAccountInfo> => {
+        try {
+          const configDir = getWebUserClaudeConfigDir(userId, slot);
+          const claudeJsonPath = path.join(configDir, '.claude.json');
+          const raw = await readFile(claudeJsonPath, 'utf-8');
+          const parsed = JSON.parse(raw) as { oauthAccount?: { emailAddress?: string } };
+          return { slot, email: parsed.oauthAccount?.emailAddress ?? null, available: true };
+        } catch {
+          return { slot, email: null, available: false };
+        }
+      };
+
+      const accounts = await Promise.all([readSlotInfo(1), readSlotInfo(2)]);
+      return { success: true, activeSlot, accounts };
+    },
+
+    /**
+     * Platform-owner-only: persists the chosen account slot (1 or 2) after
+     * verifying the target slot is actually available and authenticated.
+     * Returns the updated getOwnerAccounts shape on success.
+     */
+    async activateOwnerAccount(userId: number, slotInput: unknown) {
+      if (!isPlatformOwnerWebUser(userId)) {
+        throw new AppError('Not authorized', { code: 'NOT_OWNER', statusCode: 403 });
+      }
+
+      const slot = Number(slotInput);
+      if (slot !== 1 && slot !== 2) {
+        throw new AppError('Invalid slot: must be 1 or 2', { code: 'INVALID_SLOT', statusCode: 400 });
+      }
+
+      // Verify the target slot directory exists and is authenticated before switching.
+      const configDir = getWebUserClaudeConfigDir(userId, slot);
+      const claudeJsonPath = path.join(configDir, '.claude.json');
+      let email: string | null = null;
+      try {
+        const raw = await readFile(claudeJsonPath, 'utf-8');
+        const parsed = JSON.parse(raw) as { oauthAccount?: { emailAddress?: string } };
+        email = parsed.oauthAccount?.emailAddress ?? null;
+      } catch {
+        throw new AppError(
+          `Account slot ${slot} is not available or not authenticated`,
+          { code: 'SLOT_UNAVAILABLE', statusCode: 400 },
+        );
+      }
+
+      if (!email) {
+        throw new AppError(
+          `Account slot ${slot} has no authenticated email in .claude.json`,
+          { code: 'SLOT_UNAVAILABLE', statusCode: 400 },
+        );
+      }
+
+      dependencies.users.setActiveOwnerAccountSlot(userId, slot);
+
+      // Return the same shape as getOwnerAccounts so the client can update in place.
+      const activeSlot = slot;
+      const readSlotInfo = async (s: number): Promise<OwnerAccountInfo> => {
+        try {
+          const dir = getWebUserClaudeConfigDir(userId, s);
+          const raw = await readFile(path.join(dir, '.claude.json'), 'utf-8');
+          const parsed = JSON.parse(raw) as { oauthAccount?: { emailAddress?: string } };
+          return { slot: s, email: parsed.oauthAccount?.emailAddress ?? null, available: true };
+        } catch {
+          return { slot: s, email: null, available: false };
+        }
+      };
+      const accounts = await Promise.all([readSlotInfo(1), readSlotInfo(2)]);
+      return { success: true, activeSlot, accounts };
+    },
   };
 }
+
+type OwnerAccountInfo = {
+  slot: number;
+  email: string | null;
+  available: boolean;
+};

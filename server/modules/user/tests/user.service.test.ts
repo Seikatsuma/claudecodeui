@@ -5,20 +5,29 @@ import { createUserService } from '../user.service.js';
 
 type UserDependencies = Parameters<typeof createUserService>[0];
 
-function createDependencies(overrides: Partial<UserDependencies> = {}): UserDependencies {
+const defaultUsers: UserDependencies['users'] = {
+  getGitConfig: () => undefined,
+  updateGitConfig: () => undefined,
+  completeOnboarding: () => undefined,
+  hasCompletedOnboarding: () => false,
+  getActiveOwnerAccountSlot: () => 1,
+  setActiveOwnerAccountSlot: () => undefined,
+};
+
+type PartialDependencies = Partial<Omit<UserDependencies, 'users'>> & {
+  users?: Partial<UserDependencies['users']>;
+};
+
+function createDependencies(overrides: PartialDependencies = {}): UserDependencies {
+  const { users: usersOverride, ...rest } = overrides;
   return {
-    users: {
-      getGitConfig: () => undefined,
-      updateGitConfig: () => undefined,
-      completeOnboarding: () => undefined,
-      hasCompletedOnboarding: () => false,
-    },
+    users: { ...defaultUsers, ...usersOverride },
     readSystemGitConfig: async () => ({ git_name: null, git_email: null }),
     applyGlobalGitConfig: async () => undefined,
     logInfo: () => undefined,
     logError: () => undefined,
     openRegistration: false,
-    ...overrides,
+    ...rest,
   };
 }
 

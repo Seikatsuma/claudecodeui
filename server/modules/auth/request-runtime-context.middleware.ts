@@ -14,9 +14,9 @@
  */
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
-import { credentialsDb } from '@/modules/database/index.js';
+import { credentialsDb, userDb } from '@/modules/database/index.js';
 import { getWebUserClaudeConfigDir, getWebUserWorkspaceRoot } from '@/shared/web-user-paths.js';
-import { OPEN_REGISTRATION } from '@/shared/utils.js';
+import { isPlatformOwnerWebUser, OPEN_REGISTRATION } from '@/shared/utils.js';
 import { runWithRequestRuntimeContext } from '@/shared/request-context.js';
 
 type AuthenticatedRequest = Request & { user?: { id?: number | string } };
@@ -44,10 +44,20 @@ export const requestRuntimeContextMiddleware: RequestHandler = (
     ? credentialsDb.getActiveCredential(numericUserId, ANTHROPIC_API_KEY_CREDENTIAL_TYPE)
     : null;
 
+  // For the platform owner, resolve which account slot they've selected so
+  // that ALL subsequent request handlers (REST, settings, email-display,
+  // project-listing) see the correct claudeConfigDir without any additional
+  // per-handler logic. BYOK users are unaffected: slot concept is irrelevant
+  // for them and they always resolve to their single ~/.claude-webuser-<id>.
+  const ownerSlot =
+    Number.isFinite(numericUserId) && isPlatformOwnerWebUser(numericUserId)
+      ? userDb.getActiveOwnerAccountSlot(numericUserId)
+      : undefined;
+
   runWithRequestRuntimeContext(
     {
       userId,
-      claudeConfigDir: getWebUserClaudeConfigDir(userId),
+      claudeConfigDir: getWebUserClaudeConfigDir(userId, ownerSlot),
       workspaceRoot: getWebUserWorkspaceRoot(userId),
       anthropicApiKey,
     },

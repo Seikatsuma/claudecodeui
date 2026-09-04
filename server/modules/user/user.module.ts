@@ -45,6 +45,8 @@ const userService = createUserService({
     ),
     completeOnboarding: (userId) => userDb.completeOnboarding(userId),
     hasCompletedOnboarding: (userId) => userDb.hasCompletedOnboarding(userId),
+    getActiveOwnerAccountSlot: (userId) => userDb.getActiveOwnerAccountSlot(userId),
+    setActiveOwnerAccountSlot: (userId, slot) => userDb.setActiveOwnerAccountSlot(userId, slot),
   },
   readSystemGitConfig,
   applyGlobalGitConfig: async (gitName, gitEmail) => {

@@ -179,4 +179,25 @@ export const userDb = {
       .get(userId) as { login_token: string | null } | undefined;
     return row?.login_token ?? null;
   },
+
+  // -------------------------------------------------------------------------
+  // Platform-owner account slot (see PLATFORM_OWNER_WEB_USER_IDS in utils.ts).
+  // Only meaningful for the platform owner who has symlinked multiple
+  // ~/.claude-webuser-<id>-account* directories. Ignored for all other users.
+  // -------------------------------------------------------------------------
+
+  /** Returns which Claude OAuth slot (1 or 2) the platform owner is using. Defaults to 1. */
+  getActiveOwnerAccountSlot(userId: number): number {
+    const db = getConnection();
+    const row = db
+      .prepare('SELECT active_owner_account_slot FROM users WHERE id = ?')
+      .get(userId) as { active_owner_account_slot: number } | undefined;
+    return row?.active_owner_account_slot ?? 1;
+  },
+
+  /** Persists the platform owner's chosen account slot (1 or 2). */
+  setActiveOwnerAccountSlot(userId: number, slot: number): void {
+    const db = getConnection();
+    db.prepare('UPDATE users SET active_owner_account_slot = ? WHERE id = ?').run(slot, userId);
+  },
 };

@@ -54,5 +54,26 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
     }
   });
 
+  // Platform-owner-only: list both Claude account slots with their email and
+  // availability. Non-owners receive an empty accounts list (not an error).
+  router.get('/owner-accounts', async (req, res, next) => {
+    try {
+      res.json(await service.getOwnerAccounts(readUserId(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Platform-owner-only: switch the active account slot. Body: { slot: 1 | 2 }.
+  // Validates that the target slot is available before persisting.
+  router.post('/owner-accounts/activate', async (req, res, next) => {
+    try {
+      const body = req.body as { slot?: unknown };
+      res.json(await service.activateOwnerAccount(readUserId(req), body.slot));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }

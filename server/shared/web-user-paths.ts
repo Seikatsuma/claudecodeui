@@ -22,8 +22,21 @@ function webUserRootDir(userId: number | string): string {
   return path.join(os.homedir(), `.claude-webuser-${userId}`);
 }
 
-/** This user's own Claude CLI config directory (their CLAUDE_CONFIG_DIR). */
-export function getWebUserClaudeConfigDir(userId: number | string): string {
+/**
+ * This user's own Claude CLI config directory (their CLAUDE_CONFIG_DIR).
+ *
+ * When `slot` is 2 the directory is `~/.claude-webuser-<id>-account2` instead
+ * of the default `~/.claude-webuser-<id>`. This lets the platform owner (the
+ * one user whose id appears in PLATFORM_OWNER_WEB_USER_IDS) switch between two
+ * real Anthropic OAuth sessions without touching non-owner BYOK users, who
+ * always use slot 1 (their single directory). The caller is responsible for
+ * looking up the active slot from the DB and passing it in — this function
+ * stays a pure path deriver with no DB access.
+ */
+export function getWebUserClaudeConfigDir(userId: number | string, slot?: number): string {
+  if (slot === 2) {
+    return path.join(os.homedir(), `.claude-webuser-${userId}-account2`);
+  }
   return webUserRootDir(userId);
 }
 

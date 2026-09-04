@@ -9,6 +9,7 @@ import GithubCredentialsSection from './sections/GithubCredentialsSection';
 import InvitesSection from './sections/InvitesSection';
 import LoginLinkSection from './sections/LoginLinkSection';
 import NewApiKeyAlert from './sections/NewApiKeyAlert';
+import OwnerAccountSection from './sections/OwnerAccountSection';
 
 export default function CredentialsSettingsTab() {
   const { t } = useTranslation('settings');
@@ -98,6 +99,10 @@ export default function CredentialsSettingsTab() {
           this field, so it stays hidden there rather than sitting unused. */}
       {openRegistration && (
         <>
+          {/* Platform-owner-only: switch between real OAuth sessions.
+              OwnerAccountSection self-gates on the owner-accounts endpoint
+              returning available accounts — non-owners see nothing. */}
+          <OwnerAccountSection />
           <AnthropicApiKeySection />
           <LoginLinkSection />
           <InvitesSection />

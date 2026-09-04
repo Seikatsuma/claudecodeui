@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import type { WebSocket } from 'ws';
 
-import { credentialsDb, sessionsDb } from '@/modules/database/index.js';
+import { credentialsDb, sessionsDb, userDb } from '@/modules/database/index.js';
 import { providerModelsService } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
@@ -57,8 +57,15 @@ function resolveOpenRegistrationRuntimeContext(
     return { claudeConfigDir: null, anthropicApiKey: null };
   }
 
+  // Mirror the same slot-awareness applied in requestRuntimeContextMiddleware
+  // for the HTTP path. The WebSocket 'message' handler runs outside any HTTP
+  // request's ALS context, so the slot must be resolved here explicitly.
+  const ownerSlot = isPlatformOwnerWebUser(numericUserId)
+    ? userDb.getActiveOwnerAccountSlot(numericUserId)
+    : undefined;
+
   return {
-    claudeConfigDir: getWebUserClaudeConfigDir(numericUserId),
+    claudeConfigDir: getWebUserClaudeConfigDir(numericUserId, ownerSlot),
     anthropicApiKey: credentialsDb.getActiveCredential(numericUserId, ANTHROPIC_API_KEY_CREDENTIAL_TYPE),
   };
 }

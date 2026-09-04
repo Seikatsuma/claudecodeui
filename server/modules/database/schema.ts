@@ -14,7 +14,13 @@ CREATE TABLE IF NOT EXISTS users (
     -- that never enables open registration (Account 1/2 keep using
     -- password_hash exactly as before). Never expires and is never rotated
     -- automatically - see auth.service.ts registerOpen()/enterWithLoginToken().
-    login_token TEXT
+    login_token TEXT,
+    -- Which Claude OAuth account slot the platform owner is currently using.
+    -- Only meaningful when isPlatformOwnerWebUser(id) is true; ignored for
+    -- all other users. 1 = ~/.claude-webuser-<id> (Account 1, default),
+    -- 2 = ~/.claude-webuser-<id>-account2. Defaults to 1 so existing rows
+    -- and fresh non-owner rows work without any special handling.
+    active_owner_account_slot INTEGER NOT NULL DEFAULT 1
 );
 `;
 
