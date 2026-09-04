@@ -24,7 +24,16 @@ export default function SessionTabsBar({ tabs, activeSessionId, onSelect, onClos
   useEffect(() => {
     const activeTabElement = scrollRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
     activeTabElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-  }, [activeSessionId]);
+    // `tabs` (not just activeSessionId) is a real dependency here: opening a
+    // session that isn't an existing tab yet adds it to `tabs` one render
+    // after activeSessionId changes (see useOpenSessionTabs - the tab-adding
+    // effect and this one both key off activeSessionId, but React commits
+    // that render before either effect runs, so the querySelector above finds
+    // nothing on the render where activeSessionId first changes). Without
+    // `tabs` here, that first (and only) run finds no match and this effect
+    // never re-fires once the tab actually exists in the DOM - the active
+    // tab silently stays off-screen with no scrollbar to reveal it.
+  }, [activeSessionId, tabs]);
 
   if (tabs.length === 0) {
     return null;
