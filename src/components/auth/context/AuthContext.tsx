@@ -159,18 +159,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setError(null);
 
       // A `/enter/<token>` visit is a magic-link login: exchange it for a
-      // session before anything else, then strip it from the address bar so
-      // it does not linger there (or get re-exchanged on a later reload)
-      // past this one load. This runs even before the status check below -
-      // ProtectedRoute renders this provider's children inside the auth gate
-      // itself, so there is no router yet to declare this as a normal route.
+      // session before anything else. This runs even before the status check
+      // below - ProtectedRoute renders this provider's children inside the
+      // auth gate itself, so there is no router yet to declare this as a
+      // normal route.
+      //
+      // Deliberately NOT stripped from the address bar (an earlier version
+      // did, via history.replaceState right after the exchange): this token
+      // is reusable, not single-use (see enterWithLoginToken on the server -
+      // no invalidation, just a lookup), and a real user relies on that -
+      // e.g. iOS "Add to Home Screen" captures whatever URL is on screen at
+      // that moment (and some iOS versions read a PWA manifest's start_url
+      // instead, but that is the app-wide "/" - either way, only a
+      // persistent /enter/<token> URL survives to work from a home-screen
+      // icon later). Stripping it broke that: the icon ended up pointing at
+      // bare "/" with no session, showing the invitation-only screen.
       const loginLinkMatch = window.location.pathname.match(LOGIN_LINK_PATH_PATTERN);
       if (loginLinkMatch) {
         const loginToken = decodeURIComponent(loginLinkMatch[1]);
         const enterResponse = await api.auth.enter(loginToken);
         const enterPayload = await parseJsonSafely<AuthSessionPayload>(enterResponse);
-
-        window.history.replaceState(null, '', window.location.pathname.replace(LOGIN_LINK_PATH_PATTERN, '/'));
 
         if (enterResponse.ok && enterPayload?.token && enterPayload.user) {
           setSession(enterPayload.user, enterPayload.token);
