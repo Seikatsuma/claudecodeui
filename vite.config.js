@@ -74,6 +74,13 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       chunkSizeWarningLimit: 1000,
+      // CSS minification has been a consistent extra memory/CPU cost during
+      // the exact "rendering chunks"/final-bundle step where builds on this
+      // VPS have been getting killed under real contention from other
+      // concurrent processes. CSS is a tiny fraction of total bundle size
+      // compared to JS, so skipping just its minification is a low-cost way
+      // to shave the build's peak memory footprint. JS still gets minified.
+      cssMinify: !isOpenRegistration,
       // The gzip-size report is purely a terminal print, not something the
       // deployed app needs - but computing it requires holding the full
       // compressed bundle in memory on top of everything else, and on this
