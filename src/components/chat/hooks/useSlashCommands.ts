@@ -393,8 +393,19 @@ export function useSlashCommands({
         return;
       }
 
-      // Match / at start of input OR after whitespace, capturing the /word up to cursor.
-      const slashPattern = /(?:^|\s)(\/\S*)$/;
+      // A slash command is the WHOLE message, so only match one typed at the
+      // very start of the input, and only while it still looks like a command
+      // name (letters, digits, dash, underscore - no further slashes).
+      //
+      // The previous pattern also matched a /token after any whitespace, which
+      // meant that typing or pasting an ordinary absolute path - and people
+      // paste those into this app constantly, e.g.
+      // "открой /home/claude/.claude/projects/..." - popped the command menu
+      // open over the conversation, usually showing "No commands available"
+      // and covering the messages behind it. Anchoring to the start removes
+      // that whole class of false positive; a path can no longer look like a
+      // command unless the message itself begins with one.
+      const slashPattern = /^(\/[A-Za-z0-9_-]*)$/;
       const match = textBeforeCursor.match(slashPattern);
 
       if (!match) {
