@@ -141,7 +141,15 @@ function MainContent({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    // flex-1 + min-h-0, not h-full: this sits in a flex column directly under
+    // SessionTabsBar (see AppContent), so `height: 100%` resolved against the
+    // WHOLE column and pushed this block past the bottom of the screen by
+    // exactly the height of that tab strip. Everything below - including the
+    // composer's button row - was then clipped by the ancestors' overflow
+    // hidden, with no way to scroll to it. It only showed up once at least one
+    // session tab existed, which is why the layout looked fine at first and
+    // "slid out of frame" later. flex-1 takes the space that is actually left.
+    <div className="flex min-h-0 flex-1 flex-col">
       <MainContentHeader
         activeTab={activeTab}
         selectedProject={selectedProject}
