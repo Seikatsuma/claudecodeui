@@ -257,6 +257,28 @@ export default function ChatComposer({
     : sendByCtrlEnter
       ? t('input.hintText.ctrlEnter')
       : t('input.hintText.enter');
+  // The hint is shown only when the WHOLE string fits on one line. It used to
+  // be gated on a viewport breakpoint (xl) plus an ellipsis class, which meant
+  // it still got visibly chopped mid-sentence whenever the text was longer
+  // than that breakpoint assumed - e.g. the Russian translation, which is
+  // markedly longer than the English one it was tuned against, and any narrow
+  // window or phone. Measuring the element itself removes the guesswork:
+  // scrollWidth is the full text width, clientWidth is what the flex row
+  // actually left for it. When it does not fit we hide it with `invisible`
+  // rather than `display:none` on purpose - the box keeps its size, so hiding
+  // cannot free up space, make it fit again, and oscillate.
+  const hintRef = useRef<HTMLDivElement>(null);
+  const [hintFits, setHintFits] = useState(true);
+  useEffect(() => {
+    const element = hintRef.current;
+    if (!element) return;
+    const measure = () => setHintFits(element.scrollWidth <= element.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [submitHint]);
+
   const submitAriaLabel = canQueueDraft
     ? hasQueuedDraft
       ? t('input.queue.update', { defaultValue: 'Update queued message' })
@@ -491,8 +513,10 @@ export default function ChatComposer({
                 weekly-usage-indicator change already verified clean
                 (1280-1440px) instead of inventing a new cutoff. */}
             <div
-              className={`hidden min-w-0 flex-1 truncate text-xs text-muted-foreground/50 transition-opacity duration-200 xl:block ${
-                input.trim() && !canQueueDraft ? 'opacity-0' : 'opacity-100'
+              ref={hintRef}
+              aria-hidden={!hintFits}
+              className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground/50 transition-opacity duration-200 ${
+                !hintFits || (input.trim() && !canQueueDraft) ? 'invisible opacity-0' : 'opacity-100'
               }`}
             >
               {submitHint}
