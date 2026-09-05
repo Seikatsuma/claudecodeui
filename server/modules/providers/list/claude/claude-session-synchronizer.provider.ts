@@ -187,10 +187,18 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    // The end-of-file scan finds the real ai-title/custom-title entries when
-    // present - always the better candidate when it exists, since both tiers
-    // outrank the naive history.jsonl/last-prompt text below.
-    const derived = await this.extractSessionAiTitleFromEnd(filePath, parsed.sessionId);
+    // A real title (explicit rename, or the CLI's own generated summary) always
+    // wins over raw prompt text, no matter which of them the CLI happened to
+    // append last.
+    const candidates = await this.extractSessionTitleCandidates(filePath, parsed.sessionId);
+
+    const derived: { name: string; source: SessionTitleSource } | undefined =
+      candidates.customTitle
+        ? { name: candidates.customTitle, source: 'custom' }
+        : candidates.aiTitle
+          ? { name: candidates.aiTitle, source: 'ai' }
+          : undefined;
+
     if (derived) {
       const strippedName = stripPastePlaceholders(derived.name);
       if (strippedName) {
@@ -202,11 +210,14 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       }
     }
 
-    // No ai-title/custom-title entry (yet): fall back to the CLI's own raw
-    // history.jsonl display text. This is still just raw prompt text, not an
-    // AI summary, so it is tagged 'naive' - the same tier as the web's own
-    // placeholder - and will be replaced the moment a real title shows up.
-    let sessionName = nameMap.get(parsed.sessionId);
+    // No ai-title/custom-title entry (yet): fall back to raw prompt text, tagged
+    // 'naive' - the same tier as the web's own placeholder - so it is replaced
+    // the moment a real title shows up. The CLI's history.jsonl display text
+    // comes first because `buildLookupMap` keeps the *first* entry per session,
+    // i.e. the message that opened the chat and usually names its subject;
+    // `last-prompt` is the latest message instead, which for an ongoing chat is
+    // as likely to be "продолжай"/"yes" as anything descriptive.
+    let sessionName = nameMap.get(parsed.sessionId) ?? candidates.lastPrompt;
     if (sessionName) {
       sessionName = stripPastePlaceholders(sessionName);
     }
@@ -219,16 +230,29 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
   }
 
   /**
-   * Scans a session transcript backwards for the most recent title-bearing
-   * event, classifying it by provenance tier:
+   * Collects the most recent title-bearing event of each kind from one session
+   * transcript, so the caller can rank them by provenance tier:
    *  - `custom-title` -> 'custom' (an explicit rename, via web or CLI)
    *  - `ai-title` -> 'ai' (a genuine LLM-generated summary title)
    *  - `last-prompt` -> 'naive' (just the raw last user message, no summary)
+   *
+   * Scans backwards so the first hit of each kind is the newest one, and
+   * deliberately does NOT stop at the first title-bearing entry of any kind.
+   * The CLI appends a `last-prompt` on every single user message but refreshes
+   * `ai-title` only now and then, so in an active chat the last such entry is
+   * almost always `last-prompt` - returning early there made the sidebar show
+   * the raw text of whatever was typed most recently ("есть", "продолжай")
+   * instead of the real title, and made it change with every message. Measured
+   * on the owner's own machine: 30 of the 40 most recent chats ended in
+   * `last-prompt`, and 90 chats had a real title on disk that never surfaced.
+   * A `custom-title` outranks everything, so that one can still return early.
    */
-  private async extractSessionAiTitleFromEnd(
+  private async extractSessionTitleCandidates(
     filePath: string,
     sessionId: string
-  ): Promise<{ name: string; source: SessionTitleSource } | undefined> {
+  ): Promise<{ customTitle?: string; aiTitle?: string; lastPrompt?: string }> {
+    const candidates: { customTitle?: string; aiTitle?: string; lastPrompt?: string } = {};
+
     try {
       const content = await readFile(filePath, 'utf8');
       const lines = content.split(/\r?\n/);
@@ -258,19 +282,20 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
         const claudeRenamedTitle = typeof data.customTitle === 'string' ? data.customTitle : undefined;
 
         if (eventType === 'custom-title' && claudeRenamedTitle?.trim()) {
-          return { name: claudeRenamedTitle, source: 'custom' };
+          candidates.customTitle = claudeRenamedTitle;
+          return candidates;
         }
-        if (eventType === 'ai-title' && aiTitle?.trim()) {
-          return { name: aiTitle, source: 'ai' };
+        if (eventType === 'ai-title' && aiTitle?.trim() && !candidates.aiTitle) {
+          candidates.aiTitle = aiTitle;
         }
-        if (eventType === 'last-prompt' && lastPrompt?.trim()) {
-          return { name: lastPrompt, source: 'naive' };
+        if (eventType === 'last-prompt' && lastPrompt?.trim() && !candidates.lastPrompt) {
+          candidates.lastPrompt = lastPrompt;
         }
       }
     } catch {
       // Ignore missing/unreadable files so sync can continue.
     }
 
-    return undefined;
+    return candidates;
   }
 }

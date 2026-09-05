@@ -242,3 +242,54 @@ test(
     });
   },
 );
+
+test(
+  'a real AI title still wins when the CLI appended a newer last-prompt after it',
+  { concurrency: false },
+  async () => {
+    await withIsolatedClaudeHome(async (claudeHome) => {
+      const sessionId = 'sess-ai-title-then-newer-prompt';
+      // The CLI appends `last-prompt` on every user message but refreshes
+      // `ai-title` only occasionally, so in any active chat the newest
+      // title-bearing entry is a raw prompt. Taking the newest entry made
+      // the sidebar show whatever was typed last ("продолжай") and rewrite
+      // the title on every message.
+      await writeHistoryJsonl(claudeHome, []);
+      const filePath = await writeSessionTranscript(claudeHome, sessionId, {
+        trailingLines: [
+          JSON.stringify({ type: 'ai-title', sessionId, aiTitle: 'Починка входа на сервер' }),
+          JSON.stringify({ type: 'last-prompt', sessionId, lastPrompt: 'продолжай' }),
+        ],
+      });
+
+      await new ClaudeSessionSynchronizer().synchronizeFile(filePath);
+
+      const row = sessionsDb.getSessionById(sessionId);
+      assert.equal(row?.custom_name, 'Починка входа на сервер');
+      assert.equal(row?.title_source, 'ai');
+    });
+  },
+);
+
+test(
+  'with no AI title, the opening message names the chat rather than the latest one',
+  { concurrency: false },
+  async () => {
+    await withIsolatedClaudeHome(async (claudeHome) => {
+      const sessionId = 'sess-no-ai-title';
+      await writeHistoryJsonl(claudeHome, [
+        { sessionId, display: 'Бот не отвечает, помоги разобраться' },
+      ]);
+      const filePath = await writeSessionTranscript(claudeHome, sessionId, {
+        trailingLines: [
+          JSON.stringify({ type: 'last-prompt', sessionId, lastPrompt: 'есть' }),
+        ],
+      });
+
+      await new ClaudeSessionSynchronizer().synchronizeFile(filePath);
+
+      const row = sessionsDb.getSessionById(sessionId);
+      assert.equal(row?.custom_name, 'Бот не отвечает, помоги разобраться');
+    });
+  },
+);
