@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Layers, Star } from 'lucide-react';
+import { Layers } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { cn } from '../../../../lib/utils';
@@ -88,7 +88,54 @@ export default function SidebarProjectPickerTrigger({
   }, [isOpen]);
 
   const isDesktop = variant === 'desktop';
-  const label = t('projects.allProjects', { defaultValue: 'All projects' });
+  const label = t('projects.chatsAndFolders', { defaultValue: 'Chats and folders' });
+  const mainLabel = t('projects.mainChats', { defaultValue: 'Main chats' });
+  const otherLabel = t('projects.otherFolders', { defaultValue: 'Other folders' });
+
+  // The starred folder holds the day-to-day chats; every other entry is a working
+  // directory that gets opened occasionally and never written in. One flat "all
+  // projects" list made the main one read as just another project, so the two are
+  // split under named headings - but only when both groups exist, otherwise the
+  // single remaining group would sit under a heading that misdescribes it.
+  const mainProjects = projects.filter((project) => isProjectStarred(project.projectId));
+  const otherProjects = projects.filter((project) => !isProjectStarred(project.projectId));
+  const sectioned = mainProjects.length > 0 && otherProjects.length > 0;
+  const headingClass = 'px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground';
+
+  const renderProject = (project: Project) => {
+    const isSelected = project.projectId === selectedProjectId;
+    const total = Number(project.sessionMeta?.total ?? 0);
+
+    return (
+      <button
+        key={project.projectId}
+        type="button"
+        className={cn(
+          'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-accent/60',
+          isSelected && 'bg-accent/40',
+        )}
+        onClick={() => {
+          onProjectSelect(project);
+          setIsOpen(false);
+        }}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] text-foreground">
+            {project.displayName}
+          </span>
+          {total > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              {total}
+              {' '}
+              {total === 1
+                ? t('sessions.sessionCount_one', { defaultValue: 'session' })
+                : t('sessions.sessionCount_other', { defaultValue: 'sessions', count: total })}
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
 
   const panel = isOpen && panelPosition && typeof document !== 'undefined' && createPortal(
     <div
@@ -98,50 +145,22 @@ export default function SidebarProjectPickerTrigger({
       className="animate-in fade-in-0 zoom-in-95 fixed z-[70] overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
       style={{ top: panelPosition.top, left: panelPosition.left, width: PANEL_WIDTH }}
     >
-      <div className="border-b border-border/60 px-3 py-2">
-        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      </div>
+      {!sectioned && (
+        <div className="border-b border-border/60 px-3 py-2">
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        </div>
+      )}
       <div className="max-h-[60vh] overflow-y-auto py-1">
-        {projects.map((project) => {
-          const starred = isProjectStarred(project.projectId);
-          const isSelected = project.projectId === selectedProjectId;
-          const total = Number(project.sessionMeta?.total ?? 0);
-
-          return (
-            <button
-              key={project.projectId}
-              type="button"
-              className={cn(
-                'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-accent/60',
-                isSelected && 'bg-accent/40',
-              )}
-              onClick={() => {
-                onProjectSelect(project);
-                setIsOpen(false);
-              }}
-            >
-              {starred ? (
-                <Star className="h-3 w-3 flex-shrink-0 text-yellow-500 fill-current" />
-              ) : (
-                <span className="h-3 w-3 flex-shrink-0" aria-hidden />
-              )}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] text-foreground">
-                  {project.displayName}
-                </span>
-                {total > 0 && (
-                  <span className="text-[10px] text-muted-foreground">
-                    {total}
-                    {' '}
-                    {total === 1
-                      ? t('sessions.sessionCount_one', { defaultValue: 'session' })
-                      : t('sessions.sessionCount_other', { defaultValue: 'sessions', count: total })}
-                  </span>
-                )}
-              </span>
-            </button>
-          );
-        })}
+        {sectioned ? (
+          <>
+            <p className={headingClass}>{mainLabel}</p>
+            {mainProjects.map(renderProject)}
+            <p className={cn(headingClass, 'mt-1 border-t border-border/60 pt-3')}>{otherLabel}</p>
+            {otherProjects.map(renderProject)}
+          </>
+        ) : (
+          projects.map(renderProject)
+        )}
       </div>
     </div>,
     document.body,
