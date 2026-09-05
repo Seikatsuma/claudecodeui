@@ -1,7 +1,8 @@
-import { Settings, ArrowUpCircle, AlertTriangle, Users, ArrowLeftRight } from 'lucide-react';
+import { Settings, ArrowUpCircle, AlertTriangle, ArrowLeftRight } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import type { ReleaseInfo } from '../../../../shared/types';
+import SidebarAccountSwitcher from './SidebarAccountSwitcher';
 
 type SidebarFooterProps = {
   updateAvailable: boolean;
@@ -121,31 +122,24 @@ export default function SidebarFooter({
           ACCOUNT_LABEL set (multi-instance setup, one instance per account). */}
       {accountLabel && (
         <div className="hidden px-2 pb-1.5 md:block">
-          <div className="flex items-center gap-2.5 rounded-lg border border-violet-300/60 bg-violet-50/80 px-2.5 py-2 dark:border-violet-700/40 dark:bg-violet-900/15">
-            <Users className="h-4 w-4 flex-shrink-0 text-violet-500 dark:text-violet-400" />
-            <div className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-medium text-violet-700 dark:text-violet-300">
-                {accountLabel}
-              </span>
-              {/* The real account email - unlike accountLabel (an operator-chosen
-                  string), this can't accidentally be identical across instances,
-                  which is exactly what makes two accounts look "the same". */}
-              {accountEmail && (
-                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70" title={accountEmail}>
-                  {accountEmail}
-                </span>
-              )}
-            </div>
-            {switchAccountUrl && (
-              <a
-                href={switchAccountUrl}
-                className="flex flex-shrink-0 items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-100"
-              >
-                <ArrowLeftRight className="h-3 w-3" />
-                {t('actions.switchAccount')}
-              </a>
-            )}
-          </div>
+          {/* The badge doubles as the account switcher when this user has more
+              than one real Claude account wired up - see
+              SidebarAccountSwitcher for why it lives here and not only in
+              Settings. With a single account it renders exactly as before. */}
+          <SidebarAccountSwitcher
+            accountLabel={accountLabel}
+            accountEmail={accountEmail}
+            variant="desktop"
+          />
+          {switchAccountUrl && (
+            <a
+              href={switchAccountUrl}
+              className="mt-1 flex items-center gap-1 px-1 text-xs font-medium text-violet-600 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-100"
+            >
+              <ArrowLeftRight className="h-3 w-3" />
+              {t('actions.switchAccount')}
+            </a>
+          )}
         </div>
       )}
 
@@ -166,30 +160,20 @@ export default function SidebarFooter({
           ACCOUNT_LABEL set (multi-instance setup, one instance per account). */}
       {accountLabel && (
         <div className="px-3 pb-3 md:hidden">
-          <div className="flex h-10 w-full items-center gap-3 rounded-xl border border-violet-300/60 bg-violet-50/80 px-3.5 dark:border-violet-700/40 dark:bg-violet-900/15">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-background/80">
-              <Users className="h-4 w-4 text-violet-500 dark:text-violet-400" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-normal text-violet-700 dark:text-violet-300">
-                {accountLabel}
-              </span>
-              {accountEmail && (
-                <span className="block truncate text-[10px] text-violet-500/80 dark:text-violet-400/70" title={accountEmail}>
-                  {accountEmail}
-                </span>
-              )}
-            </div>
-            {switchAccountUrl && (
-              <a
-                href={switchAccountUrl}
-                className="flex flex-shrink-0 items-center gap-1 text-xs font-medium text-violet-600 dark:text-violet-300"
-              >
-                <ArrowLeftRight className="h-3.5 w-3.5" />
-                {t('actions.switchAccount')}
-              </a>
-            )}
-          </div>
+          <SidebarAccountSwitcher
+            accountLabel={accountLabel}
+            accountEmail={accountEmail}
+            variant="mobile"
+          />
+          {switchAccountUrl && (
+            <a
+              href={switchAccountUrl}
+              className="mt-1 flex items-center gap-1 px-1 text-xs font-medium text-violet-600 dark:text-violet-300"
+            >
+              <ArrowLeftRight className="h-3.5 w-3.5" />
+              {t('actions.switchAccount')}
+            </a>
+          )}
         </div>
       )}
     </div>
