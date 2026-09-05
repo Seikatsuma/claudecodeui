@@ -2,31 +2,14 @@ import { useState, useEffect } from 'react';
 import { version } from '../../package.json';
 import { ReleaseInfo } from '../shared/types';
 
-/**
- * Compare two semantic version strings
- * Works only with numeric versions separated by dots (e.g. "1.2.3")
- * @param {string} v1 
- * @param {string} v2
- * @returns positive if v1 > v2, negative if v1 < v2, 0 if equal
- */
-const compareVersions = (v1: string, v2: string) => {
-  const parts1 = v1.split('.').map(Number);
-  const parts2 = v2.split('.').map(Number);
-  
-  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-    const p1 = parts1[i] || 0;
-    const p2 = parts2[i] || 0;
-    if (p1 !== p2) return p1 - p2;
-  }
-  return 0;
-};
-
 export type InstallMode = 'git' | 'npm';
 
-export const useVersionCheck = (owner: string, repo: string) => {
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
+export const useVersionCheck = () => {
+  // Always empty: the upstream release check that used to populate these was
+  // removed (see the note further down), so the update banner never shows.
+  const updateAvailable = false;
+  const latestVersion: string | null = null;
+  const releaseInfo: ReleaseInfo | null = null;
   const [installMode, setInstallMode] = useState<InstallMode>('git');
   const [runningVersion, setRunningVersion] = useState<string | null>(null);
   const [restartRequired, setRestartRequired] = useState(false);
@@ -74,45 +57,16 @@ export const useVersionCheck = (owner: string, repo: string) => {
     fetchHealth();
   }, []);
 
-  useEffect(() => {
-    const checkVersion = async () => {
-      try {
-        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`);
-        const data = await response.json();
+  // Upstream release-check deliberately removed. It fetched
+  // api.github.com/repos/<owner>/<repo>/releases/latest from the user's own
+  // browser every 5 minutes to show an "update available" banner for the
+  // upstream project. This fork does not track upstream releases, so the
+  // banner had nothing useful to say - and the call itself is a third-party
+  // request that is frequently slow or unreachable on the networks this
+  // instance is actually used from, with no timeout on the fetch. The
+  // update-banner state below simply stays empty, so the banner never shows;
+  // `owner`/`repo` are kept in the signature so callers need no change.
 
-        // Handle the case where there might not be any releases
-        if (data.tag_name) {
-          const latest = data.tag_name.replace(/^v/, '');
-          setLatestVersion(latest);
-          // Only show update if latest version is actually newer
-          setUpdateAvailable(compareVersions(latest, version) > 0);
-
-          // Store release information
-          setReleaseInfo({
-            title: data.name || data.tag_name,
-            body: data.body || '',
-            htmlUrl: data.html_url || `https://github.com/${owner}/${repo}/releases/latest`,
-            publishedAt: data.published_at
-          });
-        } else {
-          // No releases found, don't show update notification
-          setUpdateAvailable(false);
-          setLatestVersion(null);
-          setReleaseInfo(null);
-        }
-      } catch (error) {
-        console.error('Version check failed:', error);
-        // On error, don't show update notification
-        setUpdateAvailable(false);
-        setLatestVersion(null);
-        setReleaseInfo(null);
-      }
-    };
-
-    checkVersion();
-    const interval = setInterval(checkVersion, 5 * 60 * 1000); // Check every 5 minutes
-    return () => clearInterval(interval);
-  }, [owner, repo]);
 
   return {
     updateAvailable,

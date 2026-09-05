@@ -60,10 +60,7 @@ function Sidebar({
     accountLabel,
     switchAccountUrl,
     accountEmail: singleTenantAccountEmail,
-  } = useVersionCheck(
-    'siteboon',
-    'claudecodeui',
-  );
+  } = useVersionCheck();
   // Multi-tenant (OPEN_REGISTRATION) equivalent of the accountEmail above:
   // useVersionCheck reads it from the unauthenticated /health endpoint,
   // which is process-wide and has no per-user context - correct for a
