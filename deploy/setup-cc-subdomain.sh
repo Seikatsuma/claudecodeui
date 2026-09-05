@@ -158,9 +158,23 @@ trap - ERR
 # ── Проверка ─────────────────────────────────────────────────────────────────
 echo
 echo "==> Проверка"
-code=$(curl -s -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/" || echo "нет ответа")
-echo "    https://$DOMAIN/ отвечает: $code   (ожидается 200)"
-redirect=$(curl -s -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:80:127.0.0.1" "http://$DOMAIN/" || echo "нет ответа")
-echo "    http://$DOMAIN/ отвечает:  $redirect  (ожидается 301 — переброс на https)"
+
+# С повторами: `systemctl reload` возвращает управление раньше, чем новые
+# рабочие процессы начинают принимать соединения, поэтому проверка сразу
+# после него один раз уже давала пустой ответ на полностью исправной
+# конфигурации — ложная тревога дороже трёх секунд ожидания.
+probe() {
+    local scheme=$1 port=$2 want=$3 code=""
+    for _ in 1 2 3 4 5; do
+        code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                    --resolve "$DOMAIN:$port:127.0.0.1" "$scheme://$DOMAIN/" || true)
+        [[ "$code" == "$want" ]] && break
+        sleep 1
+    done
+    printf '    %-28s %s   (ожидается %s)\n' "$scheme://$DOMAIN/" "${code:-нет ответа}" "$want"
+}
+
+probe https 443 200
+probe http  80  301
 echo
 echo "Готово. Резервная копия прежней конфигурации: $BACKUP"
