@@ -34,6 +34,7 @@ export default function SidebarAccountSwitcher({
   const [isOpen, setIsOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const available = accounts.filter((account) => account.available);
   const canSwitch = available.length > 1;
@@ -41,9 +42,23 @@ export default function SidebarAccountSwitcher({
   useEffect(() => {
     if (!isOpen) return;
     const close = () => setIsOpen(false);
+    // Outside-click is handled by a document listener rather than a full-screen
+    // catcher element on purpose. The catcher mounts during the very click that
+    // opens the menu, and on touch that same gesture then reached it and closed
+    // the menu again before anything could be seen - it looked like the badge
+    // simply did not work on a phone. This effect is registered after that
+    // click has finished, so it can only ever see the NEXT one.
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (menuRef.current?.contains(target ?? null)) return;
+      if (triggerRef.current?.contains(target ?? null)) return;
+      setIsOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('resize', close);
     window.addEventListener('scroll', close, true);
     return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('resize', close);
       window.removeEventListener('scroll', close, true);
     };
@@ -106,8 +121,8 @@ export default function SidebarAccountSwitcher({
       {isOpen && anchor
         ? createPortal(
             <>
-              <div className="fixed inset-0 z-[9998]" onClick={() => setIsOpen(false)} />
               <div
+                ref={menuRef}
                 role="menu"
                 className="fixed z-[9999] overflow-hidden rounded-xl border border-border bg-popover shadow-xl"
                 style={{ left: anchor.left, bottom: anchor.bottom, width: Math.max(anchor.width, 240) }}
