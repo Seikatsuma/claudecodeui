@@ -150,7 +150,13 @@
   
   /* Root element with safe area padding for PWA */
   #root {
+    /* 100vh on mobile Safari means the viewport WITHOUT the browser toolbars,
+       so anything anchored to the bottom sat underneath them. 100dvh tracks
+       the viewport that is actually visible and updates on its own as the
+       toolbars come and go. The plain vh line stays first as the fallback for
+       browsers that do not support dvh. */
     min-height: 100vh;
+    min-height: 100dvh;
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -172,6 +178,7 @@
     padding-left: var(--safe-area-inset-left);
     padding-right: var(--safe-area-inset-right);
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 

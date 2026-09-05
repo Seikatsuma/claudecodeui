@@ -246,12 +246,39 @@ function AppContentInner() {
       const kb = Math.max(0, window.innerHeight - vv.height);
       document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
     };
+    // Run once on mount, not only on the next resize: if the browser's own
+    // toolbars are already showing when the app loads (the normal state on a
+    // phone), innerHeight already exceeds the visible height, and without this
+    // first call the offset stayed 0 until something happened to fire a
+    // resize - leaving the composer's bottom row tucked under the toolbar with
+    // no way to scroll to it, since the shell is fixed and the document does
+    // not scroll.
+    update();
     vv.addEventListener('resize', update);
-    return () => vv.removeEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
   }, []);
 
   return (
-    <div className="fixed inset-0 flex bg-background" style={{ bottom: 'var(--keyboard-height, 0px)' }}>
+    <div
+      className="fixed inset-0 flex bg-background"
+      // inset-0 alone sizes this to the LAYOUT viewport, which on mobile
+      // Safari stays at its full height even while the browser's toolbars are
+      // covering the bottom of the screen - so the composer's last row ended
+      // up underneath them, unreachable because the shell is fixed and the
+      // page itself does not scroll. Clamping to 100dvh ties the shell to the
+      // viewport that is actually visible right now, and the browser
+      // recalculates it by itself whenever the toolbars or the window change,
+      // at any size. The keyboard offset stays on top of that for iOS, where
+      // the keyboard overlays rather than shrinks the layout viewport.
+      style={{
+        bottom: 'var(--keyboard-height, 0px)',
+        maxHeight: 'calc(100dvh - var(--keyboard-height, 0px))',
+      }}
+    >
       {!isMobile ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
           <Sidebar
