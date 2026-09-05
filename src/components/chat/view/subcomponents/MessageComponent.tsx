@@ -46,6 +46,20 @@ type InteractiveOption = {
 
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
+/**
+ * Boilerplate the CLI and the upload flow splice into a user message: paste and
+ * image placeholders, and the "saved to <path>" line an attachment leaves
+ * behind. Fine inside the message bubble, but as the one-line label in
+ * ChatRequestBar they crowd out the words that actually say what was asked.
+ */
+const REQUEST_LABEL_NOISE = /\[(?:Pasted (?:text|image)|Image) #\d+(?: \+\d+ lines)?\]|(?:\u{1F5BC}|✅)?\s*(?:Фото|Файл|Photo|File)\s+сохранено:\s*\S*/gu;
+
+/** One trimmed, noise-free line for the request bar, or nothing worth showing. */
+function toRequestLabel(content: string): string | undefined {
+  const cleaned = content.replace(REQUEST_LABEL_NOISE, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned ? cleaned.slice(0, 300) : undefined;
+}
+
 const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const isGrouped = prevMessage && prevMessage.type === message.type &&
@@ -94,9 +108,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
       // scroll position, without the message list re-rendering on every scroll.
       // Truncated here because the bar only ever shows one clipped line.
       data-user-request={
-        message.type === 'user' && userCopyContent.trim()
-          ? userCopyContent.trim().replace(/\s+/g, ' ').slice(0, 300)
-          : undefined
+        message.type === 'user' ? toRequestLabel(userCopyContent) : undefined
       }
       className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${message.type === 'user' ? 'flex justify-end px-3 sm:px-0' : 'px-3 sm:px-0'}`}
     >
