@@ -1,4 +1,5 @@
 import React from 'react';
+
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
 
@@ -41,15 +42,23 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </CollapsibleTrigger>
+          {/* The tool name must be allowed to shrink. With flex-shrink-0 a long
+              one (e.g. mcp__claude_ai_Google_Calendar__create_event, ~292px)
+              pushed the whole row past its container AND squeezed the title
+              next to it down to zero width, so the title vanished with no
+              ellipsis at all. Capping it at 40% keeps both parts readable at
+              any width instead of one of them winning outright. */}
           {toolName && (
-            <span className="flex-shrink-0 font-medium text-muted-foreground">{toolName}</span>
+            <span className="min-w-0 max-w-[40%] shrink overflow-hidden text-ellipsis whitespace-nowrap font-medium text-muted-foreground">
+              {toolName}
+            </span>
           )}
           {toolName && (
             <span className="flex-shrink-0 text-[10px] text-muted-foreground/40">/</span>
           )}
           <button
             onClick={onTitleClick}
-            className="flex-1 truncate text-left font-mono text-primary transition-colors hover:text-primary/80 hover:underline"
+            className="min-w-0 flex-1 truncate text-left font-mono text-primary transition-colors hover:text-primary/80 hover:underline"
           >
             {title}
           </button>
@@ -66,13 +75,16 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
+          {/* Same shrink rule as the button variant above. */}
           {toolName && (
-            <span className="flex-shrink-0 font-medium">{toolName}</span>
+            <span className="min-w-0 max-w-[40%] shrink overflow-hidden text-ellipsis whitespace-nowrap font-medium">
+              {toolName}
+            </span>
           )}
           {toolName && (
             <span className="flex-shrink-0 text-[10px] text-muted-foreground/40">/</span>
           )}
-          <span className="flex-1 truncate text-left">{title}</span>
+          <span className="min-w-0 flex-1 truncate text-left">{title}</span>
           {badge && <span className="ml-auto flex-shrink-0">{badge}</span>}
           {action && <span className="ml-1 flex-shrink-0">{action}</span>}
         </CollapsibleTrigger>

@@ -77,9 +77,16 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
   const shouldInline = !forceBlock && !/[\r\n]/.test(raw);
 
   if (shouldInline) {
+    // box-decoration-clone + overflow-wrap:anywhere: this is an INLINE box with
+    // horizontal padding and a border, so when its text filled the line the
+    // padding and border kept painting past the container's right edge
+    // (measured: ~6px past the list item on a 390px phone). `clone` makes each
+    // wrapped line fragment carry its own padding/border instead of stretching
+    // one box across the break, and `anywhere` lets a long unbroken token (a
+    // path, a flag, an identifier) break before it has to overflow at all.
     return (
       <code
-        className={`whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[0.875em] text-foreground ${className || ''
+        className={`whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted box-decoration-clone px-1.5 py-0.5 font-mono text-[0.875em] text-foreground [overflow-wrap:anywhere] ${className || ''
           }`}
         {...props}
       >
