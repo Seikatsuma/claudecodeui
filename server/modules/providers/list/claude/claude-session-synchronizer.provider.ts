@@ -1,5 +1,6 @@
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import readline from 'node:readline';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import {
@@ -236,16 +237,15 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    *  - `ai-title` -> 'ai' (a genuine LLM-generated summary title)
    *  - `last-prompt` -> 'naive' (just the raw last user message, no summary)
    *
-   * Scans backwards so the first hit of each kind is the newest one, and
-   * deliberately does NOT stop at the first title-bearing entry of any kind.
-   * The CLI appends a `last-prompt` on every single user message but refreshes
-   * `ai-title` only now and then, so in an active chat the last such entry is
-   * almost always `last-prompt` - returning early there made the sidebar show
-   * the raw text of whatever was typed most recently ("есть", "продолжай")
-   * instead of the real title, and made it change with every message. Measured
-   * on the owner's own machine: 30 of the 40 most recent chats ended in
-   * `last-prompt`, and 90 chats had a real title on disk that never surfaced.
-   * A `custom-title` outranks everything, so that one can still return early.
+   * Keeps the last occurrence of each kind rather than stopping at the first
+   * title-bearing entry found. The CLI appends a `last-prompt` on every single
+   * user message but refreshes `ai-title` only now and then, so the newest
+   * title-bearing entry in an active chat is almost always `last-prompt` -
+   * taking it made the sidebar show the raw text of whatever was typed most
+   * recently ("есть", "продолжай") instead of the real title, and rewrote that
+   * title on every message. Measured on the owner's own machine: 30 of the 40
+   * most recent chats ended in `last-prompt`, and 90 chats had a real title on
+   * disk that never surfaced.
    */
   private async extractSessionTitleCandidates(
     filePath: string,
@@ -254,43 +254,67 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     const candidates: { customTitle?: string; aiTitle?: string; lastPrompt?: string } = {};
 
     try {
-      const content = await readFile(filePath, 'utf8');
-      const lines = content.split(/\r?\n/);
+      // Streamed line by line, and forwards, on purpose. Transcripts here reach
+      // 71 MB (1.6 GB across one owner's project directory), so reading one into
+      // a string and splitting it into an array of lines needs hundreds of MB
+      // for a single chat - enough to hit the Node heap limit and take the whole
+      // server down mid-scan. Reading forwards keeps the *latest* occurrence of
+      // each event, which is what a backwards scan was looking for anyway, and
+      // costs one line of memory at a time.
+      const lineReader = readline.createInterface({
+        input: createReadStream(filePath),
+        crlfDelay: Infinity,
+      });
 
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line) {
-          continue;
-        }
+      try {
+        for await (const rawLine of lineReader) {
+          // Substring test before JSON.parse: title events are a fraction of a
+          // percent of the lines, and parsing every message of a 71 MB
+          // transcript to find them is both slow and pure garbage-collector
+          // pressure.
+          if (
+            !rawLine.includes('"ai-title"')
+            && !rawLine.includes('"last-prompt"')
+            && !rawLine.includes('"custom-title"')
+          ) {
+            continue;
+          }
 
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
+          const line = rawLine.trim();
+          if (!line) {
+            continue;
+          }
 
-        const data = parsed as Record<string, unknown>;
-        const eventType = typeof data.type === 'string' ? data.type : undefined;
-        const eventSessionId = typeof data.sessionId === 'string' ? data.sessionId : undefined;
-        if (eventSessionId !== sessionId) {
-          continue;
-        }
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            continue;
+          }
 
-        const aiTitle = typeof data.aiTitle === 'string' ? data.aiTitle : undefined;
-        const lastPrompt = typeof data.lastPrompt === 'string' ? data.lastPrompt : undefined;
-        const claudeRenamedTitle = typeof data.customTitle === 'string' ? data.customTitle : undefined;
+          const data = parsed as Record<string, unknown>;
+          const eventType = typeof data.type === 'string' ? data.type : undefined;
+          const eventSessionId = typeof data.sessionId === 'string' ? data.sessionId : undefined;
+          if (eventSessionId !== sessionId) {
+            continue;
+          }
 
-        if (eventType === 'custom-title' && claudeRenamedTitle?.trim()) {
-          candidates.customTitle = claudeRenamedTitle;
-          return candidates;
+          const aiTitle = typeof data.aiTitle === 'string' ? data.aiTitle : undefined;
+          const lastPrompt = typeof data.lastPrompt === 'string' ? data.lastPrompt : undefined;
+          const claudeRenamedTitle = typeof data.customTitle === 'string' ? data.customTitle : undefined;
+
+          if (eventType === 'custom-title' && claudeRenamedTitle?.trim()) {
+            candidates.customTitle = claudeRenamedTitle;
+          }
+          if (eventType === 'ai-title' && aiTitle?.trim()) {
+            candidates.aiTitle = aiTitle;
+          }
+          if (eventType === 'last-prompt' && lastPrompt?.trim()) {
+            candidates.lastPrompt = lastPrompt;
+          }
         }
-        if (eventType === 'ai-title' && aiTitle?.trim() && !candidates.aiTitle) {
-          candidates.aiTitle = aiTitle;
-        }
-        if (eventType === 'last-prompt' && lastPrompt?.trim() && !candidates.lastPrompt) {
-          candidates.lastPrompt = lastPrompt;
-        }
+      } finally {
+        lineReader.close();
       }
     } catch {
       // Ignore missing/unreadable files so sync can continue.
