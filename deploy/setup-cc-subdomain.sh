@@ -21,7 +21,11 @@ set -euo pipefail
 
 DOMAIN="cc.sobsila.ru"
 CONF="/etc/nginx/conf.d/claudecodeui-shared-server.conf"
-BACKUP="${CONF}.bak-$(date +%Y%m%d-%H%M%S)"
+# Копия кладётся ВНЕ /etc/nginx/conf.d: каталог подключается маской *.conf, и
+# держать там файлы, отличающиеся от рабочих одним суффиксом, — приглашение к
+# случайной беде при следующем переименовании.
+BACKUP_DIR="/var/backups/claudecodeui-nginx"
+BACKUP="${BACKUP_DIR}/$(basename "$CONF").bak-$(date +%Y%m%d-%H%M%S)"
 WEBROOT="/var/www/html"
 APP_PORT="3003"
 
@@ -31,6 +35,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo "==> Резервная копия текущей конфигурации: $BACKUP"
+mkdir -p "$BACKUP_DIR"
 cp -a "$CONF" "$BACKUP"
 
 # Откат к исходному состоянию при любой ошибке ниже. nginx при этом продолжает
@@ -111,8 +116,9 @@ else
     cat >> "$CONF" <<NGINX
 
 server {
-    listen 443 ssl;
-    http2 on;
+    # Синтаксис под nginx 1.24 (версия на этом сервере): отдельная директива
+    # "http2 on;" появилась только в 1.25.1 и здесь роняет проверку конфигурации.
+    listen 443 ssl http2;
     server_name $DOMAIN;
 
     ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
