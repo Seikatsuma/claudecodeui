@@ -88,6 +88,16 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
     <div
       ref={messageRef}
       data-message-timestamp={message.timestamp || undefined}
+      // Read by ChatRequestBar to label the answer you are currently looking at
+      // with the request that produced it. Carried on the node itself (rather
+      // than plumbed through props) so the bar can find the right one purely by
+      // scroll position, without the message list re-rendering on every scroll.
+      // Truncated here because the bar only ever shows one clipped line.
+      data-user-request={
+        message.type === 'user' && userCopyContent.trim()
+          ? userCopyContent.trim().replace(/\s+/g, ' ').slice(0, 300)
+          : undefined
+      }
       className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${message.type === 'user' ? 'flex justify-end px-3 sm:px-0' : 'px-3 sm:px-0'}`}
     >
       {message.type === 'user' ? (
