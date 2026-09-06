@@ -219,18 +219,11 @@ test(
     await withIsolatedClaudeHome(async (claudeHome) => {
       const sessionId = 'sess-ai-title-with-image-noise';
       // No history.jsonl entry for this id at all, so the synchronizer must
-      // fall through to the end-of-transcript AI title extraction - which,
-      // per real on-disk data, can itself carry the same kind of
-      // CLI-inserted "[Image #N]" noise via a `lastPrompt` event.
+      // fall through to the transcript itself - which, per real on-disk data,
+      // carries the same kind of CLI-inserted "[Image #N]" noise.
       await writeHistoryJsonl(claudeHome, []);
       const filePath = await writeSessionTranscript(claudeHome, sessionId, {
-        trailingLines: [
-          JSON.stringify({
-            type: 'last-prompt',
-            sessionId,
-            lastPrompt: 'исправь проблему [Image #1]🖼 Фото сохранено:',
-          }),
-        ],
+        firstMessageText: 'исправь проблему [Image #1]🖼 Фото сохранено:',
       });
 
       await new ClaudeSessionSynchronizer().synchronizeFile(filePath);
@@ -290,6 +283,32 @@ test(
 
       const row = sessionsDb.getSessionById(sessionId);
       assert.equal(row?.custom_name, 'Бот не отвечает, помоги разобраться');
+    });
+  },
+);
+
+test(
+  'with no AI title and no history entry, the transcript\'s own opening message names the chat',
+  { concurrency: false },
+  async () => {
+    await withIsolatedClaudeHome(async (claudeHome) => {
+      const sessionId = 'sess-opening-message-only';
+      // history.jsonl rotates; on the owner's machine most older chats have no
+      // entry left in it at all, which used to leave them titled by their last
+      // message. The transcript still holds the message that opened the chat.
+      await writeHistoryJsonl(claudeHome, []);
+      const filePath = await writeSessionTranscript(claudeHome, sessionId, {
+        firstMessageText: 'Разберись, почему падает выгрузка отчётов',
+        trailingLines: [
+          JSON.stringify({ type: 'last-prompt', sessionId, lastPrompt: 'продолжай' }),
+        ],
+      });
+
+      await new ClaudeSessionSynchronizer().synchronizeFile(filePath);
+
+      const row = sessionsDb.getSessionById(sessionId);
+      assert.equal(row?.custom_name, 'Разберись, почему падает выгрузка отчётов');
+      assert.equal(row?.title_source, 'naive');
     });
   },
 );

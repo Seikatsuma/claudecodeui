@@ -52,6 +52,48 @@ function stripPastePlaceholders(candidate: string): string | undefined {
   return stripped || undefined;
 }
 
+type TitleCandidates = {
+  customTitle?: string;
+  aiTitle?: string;
+  /** Text of the first thing the person typed, straight from the transcript. */
+  firstUserText?: string;
+  lastPrompt?: string;
+};
+
+/**
+ * Plain text of one `role: user` transcript turn, or undefined when it carries
+ * none - which is the normal case for the tool-result turns the CLI writes with
+ * the same role.
+ */
+function extractUserMessageText(data: Record<string, unknown>): string | undefined {
+  const message = data.message as { role?: unknown; content?: unknown } | undefined;
+  if (!message || message.role !== 'user') {
+    return undefined;
+  }
+
+  const { content } = message;
+  if (typeof content === 'string') {
+    return content.trim() || undefined;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const text = content
+    .map((block) => {
+      if (typeof block !== 'object' || block === null) {
+        return '';
+      }
+      const { type, text: blockText } = block as { type?: unknown; text?: unknown };
+      return type === 'text' && typeof blockText === 'string' ? blockText : '';
+    })
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+
+  return text || undefined;
+}
+
 /**
  * Session indexer for Claude transcript artifacts.
  */
@@ -213,12 +255,18 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
 
     // No ai-title/custom-title entry (yet): fall back to raw prompt text, tagged
     // 'naive' - the same tier as the web's own placeholder - so it is replaced
-    // the moment a real title shows up. The CLI's history.jsonl display text
-    // comes first because `buildLookupMap` keeps the *first* entry per session,
-    // i.e. the message that opened the chat and usually names its subject;
-    // `last-prompt` is the latest message instead, which for an ongoing chat is
-    // as likely to be "продолжай"/"yes" as anything descriptive.
-    let sessionName = nameMap.get(parsed.sessionId) ?? candidates.lastPrompt;
+    // the moment a real title shows up. Ordered by how well each names the chat:
+    //  1. history.jsonl display - `buildLookupMap` keeps the *first* entry per
+    //     session, i.e. the message that opened the chat, and it is the shortest
+    //     form of it (the CLI collapses a big paste to a placeholder there).
+    //  2. the transcript's own first user message - the same opening message,
+    //     available even after history.jsonl has rotated, which on this owner's
+    //     machine is the case for most older chats.
+    //  3. `last-prompt` - the *latest* message, as likely to be "продолжай" as
+    //     anything descriptive, so it is the last resort rather than the first.
+    let sessionName = nameMap.get(parsed.sessionId)
+      ?? candidates.firstUserText
+      ?? candidates.lastPrompt;
     if (sessionName) {
       sessionName = stripPastePlaceholders(sessionName);
     }
@@ -250,8 +298,8 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
   private async extractSessionTitleCandidates(
     filePath: string,
     sessionId: string
-  ): Promise<{ customTitle?: string; aiTitle?: string; lastPrompt?: string }> {
-    const candidates: { customTitle?: string; aiTitle?: string; lastPrompt?: string } = {};
+  ): Promise<TitleCandidates> {
+    const candidates: TitleCandidates = {};
 
     try {
       // Streamed line by line, and forwards, on purpose. Transcripts here reach
@@ -271,12 +319,15 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
           // Substring test before JSON.parse: title events are a fraction of a
           // percent of the lines, and parsing every message of a 71 MB
           // transcript to find them is both slow and pure garbage-collector
-          // pressure.
-          if (
-            !rawLine.includes('"ai-title"')
-            && !rawLine.includes('"last-prompt"')
-            && !rawLine.includes('"custom-title"')
-          ) {
+          // pressure. The user-role test drops out of the filter as soon as the
+          // opening message is found, so it costs nothing for the rest of a
+          // long transcript.
+          const mayHoldTitle = rawLine.includes('"ai-title"')
+            || rawLine.includes('"last-prompt"')
+            || rawLine.includes('"custom-title"');
+          const mayOpenChat = candidates.firstUserText === undefined
+            && (rawLine.includes('"role":"user"') || rawLine.includes('"role": "user"'));
+          if (!mayHoldTitle && !mayOpenChat) {
             continue;
           }
 
@@ -297,6 +348,16 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
           const eventSessionId = typeof data.sessionId === 'string' ? data.sessionId : undefined;
           if (eventSessionId !== sessionId) {
             continue;
+          }
+
+          if (candidates.firstUserText === undefined && eventType === 'user') {
+            // Tool results are also written as role:user turns, and carry no
+            // text block - those are skipped, so this lands on the first thing
+            // the person actually typed.
+            const opening = extractUserMessageText(data);
+            if (opening) {
+              candidates.firstUserText = opening;
+            }
           }
 
           const aiTitle = typeof data.aiTitle === 'string' ? data.aiTitle : undefined;
