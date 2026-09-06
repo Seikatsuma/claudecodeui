@@ -1,13 +1,18 @@
 import { Readable } from 'node:stream';
 
+
 import express from 'express';
 
 import type { VoiceRequestOverrides, VoiceService, VoiceServiceResult } from '@/shared/types.js';
 import { asyncHandler } from '@/shared/utils.js';
 
+import type { AudioArchiveService } from './audio-archive.service.js';
+
 type VoiceRouterDependencies = {
   voiceService: VoiceService;
   parseAudioUpload: express.RequestHandler;
+  /** Необязательная: не задана — копии записей никуда не уходят. */
+  audioArchive?: AudioArchiveService;
 };
 
 function readHeaderValue(value: string | string[] | undefined): string | undefined {
@@ -80,6 +85,20 @@ export function createVoiceRouter(dependencies: VoiceRouterDependencies): expres
         }
 
         response.json(result.value);
+
+        // После ответа браузеру и намеренно без await: архив — побочная
+        // задача, и ни задержка Telegram, ни его отказ не должны стоить
+        // пользователю расшифровки, которая уже готова.
+        dependencies.audioArchive?.archive(
+          {
+            bytes: request.file.buffer,
+            mimeType: request.file.mimetype || 'audio/webm',
+            fileName: request.file.originalname || 'recording.webm',
+          },
+          typeof (result.value as { text?: unknown })?.text === 'string'
+            ? ((result.value as { text: string }).text)
+            : null,
+        );
       })().catch(next);
     });
   });
