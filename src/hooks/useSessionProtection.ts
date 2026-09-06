@@ -1,8 +1,30 @@
 import { useCallback, useState } from 'react';
 
+/**
+ * What the model is actually doing right now, as reported by the live stream
+ * rather than guessed.
+ *
+ *   thinking — reasoning tokens are arriving (`thinking_delta`)
+ *   writing  — answer tokens are arriving (`stream_delta`)
+ *   tool     — a tool call is in flight; `detail` carries its name
+ *   agents   — one or more sub-agents are running; `detail` carries how many
+ *   waiting  — a request is in flight but nothing has come back yet
+ *
+ * The point of the enum is that every value corresponds to an event that
+ * actually happened. The indicator used to rotate through invented words
+ * ("Thinking… / Processing… / Analyzing…") on a four-second timer, which
+ * looked identical whether the model was reasoning, stuck, or already
+ * finished - the exact complaint this replaces.
+ */
+export type ActivityPhase = 'thinking' | 'writing' | 'tool' | 'agents' | 'waiting';
+
 export interface SessionActivity {
-  /** Provider-supplied status line; null renders the default activity label. */
+  /** Provider-supplied status line; null renders the phase label instead. */
   statusText: string | null;
+  /** Live phase from the stream; null until the first event arrives. */
+  phase: ActivityPhase | null;
+  /** Tool name for `tool`, agent count for `agents`. */
+  detail: string | null;
   canInterrupt: boolean;
   /**
    * When this request was first marked as processing (client clock). Drives
@@ -16,13 +38,20 @@ export type SessionActivityMap = ReadonlyMap<string, SessionActivity>;
 export type SessionActivitySnapshot = {
   sessionId: string;
   statusText?: string | null;
+  phase?: ActivityPhase | null;
+  detail?: string | null;
   canInterrupt?: boolean;
   startedAt?: number;
 };
 
 export type MarkSessionProcessing = (
   sessionId?: string | null,
-  activity?: { statusText?: string | null; canInterrupt?: boolean },
+  activity?: {
+    statusText?: string | null;
+    phase?: ActivityPhase | null;
+    detail?: string | null;
+    canInterrupt?: boolean;
+  },
 ) => void;
 
 export type MarkSessionIdle = (
@@ -49,6 +78,8 @@ const sessionActivityMapsMatch = (
     if (
       !rightActivity
       || leftActivity.statusText !== rightActivity.statusText
+      || leftActivity.phase !== rightActivity.phase
+      || leftActivity.detail !== rightActivity.detail
       || leftActivity.canInterrupt !== rightActivity.canInterrupt
       || leftActivity.startedAt !== rightActivity.startedAt
     ) {
@@ -82,6 +113,8 @@ export function useSessionProtection() {
       const next: SessionActivity = {
         statusText:
           activity?.statusText !== undefined ? activity.statusText : existing?.statusText ?? null,
+        phase: activity?.phase !== undefined ? activity.phase : existing?.phase ?? null,
+        detail: activity?.detail !== undefined ? activity.detail : existing?.detail ?? null,
         canInterrupt: activity?.canInterrupt ?? existing?.canInterrupt ?? true,
         startedAt: existing?.startedAt ?? Date.now(),
       };
@@ -89,6 +122,8 @@ export function useSessionProtection() {
       if (
         existing
         && existing.statusText === next.statusText
+        && existing.phase === next.phase
+        && existing.detail === next.detail
         && existing.canInterrupt === next.canInterrupt
       ) {
         return prev;
@@ -148,6 +183,11 @@ export function useSessionProtection() {
         updated.set(sessionId, {
           statusText:
             snapshot.statusText !== undefined ? snapshot.statusText : existing?.statusText ?? null,
+          // A server snapshot knows a run is in flight but not what the model
+          // is doing inside it - only the live stream does. Keep whatever the
+          // stream last reported instead of blanking it on every sync.
+          phase: snapshot.phase !== undefined ? snapshot.phase : existing?.phase ?? null,
+          detail: snapshot.detail !== undefined ? snapshot.detail : existing?.detail ?? null,
           canInterrupt: snapshot.canInterrupt ?? existing?.canInterrupt ?? true,
           startedAt: snapshotStartedAt ?? existing?.startedAt ?? now,
         });
