@@ -20,7 +20,8 @@
     "runClaudeCli": "Run Claude CLI in a project directory to get started",
     "chatsAndFolders": "Chats and folders",
     "mainChats": "Main chats",
-    "otherFolders": "Other folders"
+    "otherFolders": "Other folders",
+    "backToMain": "Back to main project"
   },
   "app": {
     "title": "CloudCLI",
@@ -41,7 +42,10 @@
     "organizing": "Organizing…",
     "organizedByTopic": "{{count}} sessions grouped",
     "noTopicsFound": "No clear topics found",
-    "organizeFailed": "Could not organize sessions"
+    "organizeFailed": "Could not organize sessions",
+    "sessionCount_one": "session",
+    "sessionCount_other": "sessions",
+    "loadMore": "Load more sessions"
   },
   "tooltips": {
     "viewEnvironments": "View Environments",
@@ -60,7 +64,8 @@
     "cancel": "Cancel",
     "clearSearch": "Clear search",
     "openCommandPalette": "Open command palette",
-    "attentionRequiredIndicator": "Session needs attention"
+    "attentionRequiredIndicator": "Session needs attention",
+    "processingSessionIndicator": "Processing session"
   },
   "navigation": {
     "chat": "Chat",
@@ -141,7 +146,9 @@
     "matches_one": "{{count}} match",
     "matches_other": "{{count}} matches",
     "projectsScanned_one": "{{count}} project scanned",
-    "projectsScanned_other": "{{count}} projects scanned"
+    "projectsScanned_other": "{{count}} projects scanned",
+    "modePulse": "Pulse",
+    "pulseTooltip": "Sessions currently running or waiting on you"
   },
   "recent": {
     "title": "Recent conversations",
@@ -161,5 +168,14 @@
     "deleteAllData": "Delete all data permanently",
     "allConversationsDeleted": "The project will be removed from the sidebar. Your files, memories, and session data will be preserved.",
     "cannotUndo": "You can re-add the project later."
+  },
+  "tabs": {
+    "views": "Workspace views"
+  },
+  "pulse": {
+    "title": "Active now",
+    "emptyTitle": "No active sessions right now",
+    "emptyDescription": "Sessions that are running or waiting on you will show up here.",
+    "noMatchingSessions": "No active sessions match this search."
   }
 }

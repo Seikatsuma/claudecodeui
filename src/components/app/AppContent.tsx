@@ -15,6 +15,7 @@ import { useProjectsState } from '../../hooks/useProjectsState';
 import { useOpenSessionTabs } from '../../hooks/useOpenSessionTabs';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
 import { useBrowserUseEnabled } from '../../hooks/useBrowserUseEnabled';
+import { ensureLatestBuild, watchServiceWorkerUpdates } from '../../lib/appUpdate';
 import { api } from '../../utils/api';
 import type { AppTab } from '../../types/app';
 
@@ -192,6 +193,19 @@ function AppContentInner() {
     refreshProjects: refreshProjectsSilently,
   });
 
+  // Открытая страница не должна оставаться на старой сборке (см. appUpdate).
+  useEffect(() => {
+    watchServiceWorkerUpdates();
+    void ensureLatestBuild();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void ensureLatestBuild();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
       return undefined;
@@ -238,12 +252,39 @@ function AppContentInner() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+
+    // Installed on the home screen, iOS reports a visual viewport that is
+    // permanently shorter than `innerHeight` (the home-indicator strip), with
+    // no keyboard anywhere. Read as keyboard height, that lifted the whole
+    // shell and left a dead band under the chat - and the composer already
+    // keeps clear of the indicator with its own bottom padding, so the gap was
+    // pure duplication. In a browser tab the same difference is the toolbars,
+    // which genuinely do cover the bottom, so nothing changes there.
+    const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches === true
+      || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+
+    // Whatever gap exists while nothing is focused is the device's own, not a
+    // keyboard. Measured rather than assumed: the strip differs by model and
+    // orientation, and iOS has changed what it reports between versions.
+    let restingGap = 0;
+    const isTyping = () => {
+      const active = document.activeElement;
+      return active instanceof HTMLElement
+        && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+    };
+    const calibrate = () => {
+      if (isStandalone && !isTyping()) {
+        restingGap = Math.max(0, window.innerHeight - vv.height);
+      }
+    };
+
     const update = () => {
       // Only resize matters — keyboard open/close changes vv.height.
       // Do NOT listen to scroll: on iOS Safari, scrolling content changes
       // vv.offsetTop which would make --keyboard-height fluctuate during
       // normal scrolling, causing the container to bounce up and down.
-      const kb = Math.max(0, window.innerHeight - vv.height);
+      const gap = Math.max(0, window.innerHeight - vv.height);
+      const kb = isStandalone ? Math.max(0, gap - restingGap) : gap;
       document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
     };
     // Run once on mount, not only on the next resize: if the browser's own
@@ -253,12 +294,82 @@ function AppContentInner() {
     // resize - leaving the composer's bottom row tucked under the toolbar with
     // no way to scroll to it, since the shell is fixed and the document does
     // not scroll.
+    calibrate();
     update();
+
+    // Отступ сверху не должен считаться дважды. Проверяем это замером, а не
+    // предположением: если окно уже короче экрана ровно на верхнюю безопасную
+    // зону, значит iOS её уже вычел, и прибавлять её в стилях нельзя.
+    const applySafeTopCorrection = () => {
+      const declared = parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--safe-area-inset-top'),
+      );
+      const missingFromViewport = window.screen.height - window.innerHeight;
+      const alreadyApplied = Number.isFinite(declared) && declared > 0
+        && missingFromViewport >= declared - 2;
+      document.documentElement.classList.toggle('viewport-excludes-safe-top', alreadyApplied);
+    };
+    applySafeTopCorrection();
+
+    // Разовый отчёт с установленного приложения: что именно сообщает iOS.
+    // Иначе причину пустой полосы приходится угадывать — на сервере этот
+    // режим не воспроизводится. Убрать вместе с /api/layout-probe.
+    if (isStandalone) {
+      window.setTimeout(() => {
+        const root = document.getElementById('root');
+        const shell = document.querySelector('.fixed.inset-0');
+        const styles = getComputedStyle(document.documentElement);
+        const composer = document.querySelector('.chat-composer-shell');
+        const composerRect = composer ? composer.getBoundingClientRect() : null;
+        // Последний видимый элемент внизу экрана — что бы там ни было
+        // открыто: подвал меню, поле ввода, карточка «С возвращением».
+        let lowestBottom = -1;
+        document.querySelectorAll('*').forEach((node) => {
+          const rect = node.getBoundingClientRect();
+          if (rect.width > 40 && rect.height > 8 && rect.bottom > lowestBottom
+              && rect.bottom <= window.innerHeight + 1) {
+            lowestBottom = rect.bottom;
+          }
+        });
+        const probe = new URLSearchParams({
+            innerH: String(window.innerHeight),
+            vvH: String(Math.round(vv.height)),
+            vvTop: String(Math.round(vv.offsetTop)),
+            dvh: String(Math.round(document.documentElement.clientHeight)),
+            screenH: String(window.screen.height),
+            restingGap: String(restingGap),
+            kbVar: styles.getPropertyValue('--keyboard-height').trim(),
+            safeTop: styles.getPropertyValue('--safe-area-inset-top').trim(),
+            safeBottom: styles.getPropertyValue('--safe-area-inset-bottom').trim(),
+            rootH: String(root ? Math.round(root.getBoundingClientRect().height) : -1),
+            shellTop: String(shell ? Math.round(shell.getBoundingClientRect().top) : -1),
+            shellBottom: String(shell ? Math.round(shell.getBoundingClientRect().bottom) : -1),
+            composerBottom: String(composerRect ? Math.round(composerRect.bottom) : -1),
+            composerTop: String(composerRect ? Math.round(composerRect.top) : -1),
+            lowestBottom: String(Math.round(lowestBottom)),
+            bodyH: String(Math.round(document.body.getBoundingClientRect().height)),
+            rootTop: String(root ? Math.round(root.getBoundingClientRect().top) : -1),
+            rootBottom: String(root ? Math.round(root.getBoundingClientRect().bottom) : -1),
+            availH: String(window.screen.availHeight),
+            headerPad: styles.getPropertyValue('--header-total-padding').trim(),
+            dpr: String(window.devicePixelRatio),
+        });
+        void fetch(`/api/layout-probe?${probe.toString()}`).catch(() => {});
+      }, 2500);
+    }
     vv.addEventListener('resize', update);
-    window.addEventListener('orientationchange', update);
+    // Re-measure the device's own gap only at moments when a keyboard cannot
+    // be the cause: a turned phone, and coming back to the app.
+    const recalibrate = () => {
+      calibrate();
+      update();
+    };
+    window.addEventListener('orientationchange', recalibrate);
+    document.addEventListener('visibilitychange', recalibrate);
     return () => {
       vv.removeEventListener('resize', update);
-      window.removeEventListener('orientationchange', update);
+      window.removeEventListener('orientationchange', recalibrate);
+      document.removeEventListener('visibilitychange', recalibrate);
     };
   }, []);
 

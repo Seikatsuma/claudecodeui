@@ -705,6 +705,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   // The client is told the turn is over as soon as `result` lands, even though
   // the process lingers, so the UI never waits out the idle hold.
   let turnCompleteSent = false;
+  // Объявлен здесь, чтобы finally мог его остановить при любом выходе.
+  let stallTimer = null;
   // Set when a turn starts background work, cleared when the next `result`
   // arrives — only turns with work still outstanding hold their process open.
   let backgroundWorkPending = false;
@@ -892,7 +894,63 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
     // Process streaming messages
     console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
+
+    // Сторож молчания.
+    //
+    // Если процесс Клода умирает, ожидание ответа ниже не заканчивается
+    // никогда: перебор сообщений просто зависает, поэтому не срабатывает ни
+    // уборка, ни отправка «ответ завершён». Для пользователя это выглядит как
+    // «думает и ничего не делает» — до бесконечности. В журнале это видно
+    // прямо: запуск в 21:32, и только через 52 минуты, когда пришло следующее
+    // сообщение, попытка прервать его вернула «запрос уже закрыт».
+    //
+    // Порог намеренно большой: длинные инструменты могут молчать минутами, и
+    // оборвать живую работу хуже, чем подождать. Сообщение об обрыве —
+    // явное, чтобы человек видел причину, а не пустой экран.
+    const STALL_SILENCE_MS = Number(process.env.CHAT_STALL_TIMEOUT_MS || 15 * 60 * 1000);
+    let lastMessageAt = Date.now();
+    stallTimer = setInterval(() => {
+      if (turnCompleteSent || Date.now() - lastMessageAt < STALL_SILENCE_MS) {
+        return;
+      }
+      clearInterval(stallTimer);
+      const silentMinutes = Math.round((Date.now() - lastMessageAt) / 60000);
+      console.error(`Chat run went silent for ${silentMinutes} min, closing: ${sessionKey() || 'NEW'}`);
+      Promise.resolve().then(() => queryInstance.interrupt?.()).catch(() => {});
+      try {
+        queryInstance.close?.();
+      } catch {
+        // Уже закрыт — ровно тот случай, ради которого этот сторож и нужен.
+      }
+      if (sessionKey() && getSession(sessionKey())?.instance === queryInstance) {
+        removeSession(sessionKey());
+      }
+      if (!turnCompleteSent && !supersededInstances.has(queryInstance)) {
+        turnCompleteSent = true;
+        ws.send(createNormalizedMessage({
+          kind: 'error',
+          content: `Ответ оборвался: ${silentMinutes} мин без единого сообщения от Claude — похоже, процесс умер. Отправьте сообщение заново.`,
+          sessionId: capturedSessionId || sessionId || null,
+          provider: 'claude',
+        }));
+        ws.send(createCompleteMessage({
+          provider: 'claude',
+          sessionId: capturedSessionId || sessionId || null,
+          exitCode: 1,
+        }));
+        notifyRunFailed({
+          userId: ws?.userId || null,
+          provider: 'claude',
+          sessionId: sessionId || capturedSessionId || null,
+          sessionName: sessionSummary,
+          error: new Error(`no output for ${silentMinutes} min`),
+        });
+      }
+    }, 30_000);
+    stallTimer.unref?.();
+
     for await (const message of queryInstance) {
+      lastMessageAt = Date.now();
       // Capture session ID from first message
       if (message.session_id && !capturedSessionId) {
 
@@ -1065,6 +1123,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   } finally {
     // Always close stdin — otherwise an aborted or failed run leaves the CLI
     // process (and its MCP servers) alive until the server exits.
+    if (stallTimer) {
+      clearInterval(stallTimer);
+    }
     if (idleReleaseTimer) {
       clearTimeout(idleReleaseTimer);
       idleReleaseTimer = null;

@@ -23,7 +23,7 @@
     "files": "Файлы",
     "git": "Система контроля версий",
     "tasks": "Задачи",
-    "browser": "Browser",
+    "browser": "Браузер",
     "computer": "Компьютер"
   },
   "status": {
@@ -140,7 +140,8 @@
       "refresh": "Обновить",
       "menuLabel": "Контекстное меню файла",
       "loading": "Загрузка..."
-    }
+    },
+    "loadFailed": "Не удалось загрузить файлы"
   },
   "projectWizard": {
     "title": "Создать новый проект",
@@ -243,6 +244,36 @@
       "settings": "Настройки",
       "updateAvailable": "Доступно обновление",
       "closeSidebar": "Закрыть боковую панель"
+    }
+  },
+  "notifications": {
+    "genericTool": "инструмент",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "Уведомление"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "Нужно ваше решение",
+          "body": "{{toolName}} ждёт вашего решения."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "Выполнение остановлено",
+          "body": "Причина: {{reason}}"
+        },
+        "failed": {
+          "title": "Выполнение не удалось"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "Сообщение от агента"
+        }
+      }
     }
   }
 }
