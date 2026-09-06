@@ -20,7 +20,8 @@
     "runClaudeCli": "Запустите Claude CLI в каталоге проекта для начала работы",
     "chatsAndFolders": "Чаты и папки",
     "mainChats": "Основные чаты",
-    "otherFolders": "Другие папки"
+    "otherFolders": "Другие папки",
+    "backToMain": "Вернуться к основным чатам"
   },
   "app": {
     "title": "CloudCLI",
@@ -35,7 +36,15 @@
     "loadingSessions": "Загрузка сеансов...",
     "unnamed": "Без имени",
     "loading": "Загрузка...",
-    "showMore": "Показать больше сеансов"
+    "showMore": "Показать больше сеансов",
+    "organizeByTopic": "Сгруппировать по темам",
+    "organizeByTopicHint": "Разложить чаты по темам с помощью ИИ",
+    "organizing": "Группирую…",
+    "organizedByTopic": "Сгруппировано чатов: {{count}}",
+    "noTopicsFound": "Явных тем не нашлось",
+    "organizeFailed": "Не удалось сгруппировать чаты",
+    "sessionCount_one": "чат",
+    "sessionCount_other": "чатов"
   },
   "tooltips": {
     "viewEnvironments": "Просмотр окружений",
@@ -54,7 +63,8 @@
     "cancel": "Отмена",
     "clearSearch": "Очистить поиск",
     "openCommandPalette": "Открыть палитру команд",
-    "attentionRequiredIndicator": "Сессия требует внимания"
+    "attentionRequiredIndicator": "Сессия требует внимания",
+    "processingSessionIndicator": "Чат сейчас работает"
   },
   "navigation": {
     "chat": "Чат",
@@ -139,7 +149,9 @@
     "projectsScanned_one": "{{count}} проект просканирован",
     "projectsScanned_few": "{{count}} проекта просканировано",
     "projectsScanned_many": "{{count}} проектов просканировано",
-    "projectsScanned_other": "{{count}} проектов просканировано"
+    "projectsScanned_other": "{{count}} проектов просканировано",
+    "modePulse": "Активные",
+    "pulseTooltip": "Чаты, которые сейчас работают или ждут вашего ответа"
   },
   "deleteConfirmation": {
     "deleteProject": "Убрать проект",
@@ -153,5 +165,22 @@
     "deleteAllData": "Удалить все данные навсегда",
     "allConversationsDeleted": "Проект будет убран из боковой панели. Ваши файлы, воспоминания и данные сеансов сохранятся.",
     "cannotUndo": "Вы сможете добавить проект позже."
+  },
+  "recent": {
+    "title": "Недавние чаты",
+    "emptyTitle": "Чатов пока нет",
+    "emptyDescription": "Здесь появятся чаты, в которых вы писали последними.",
+    "loadFailed": "Не удалось загрузить недавние чаты",
+    "loadMore": "Показать более ранние",
+    "loadingMore": "Загружаю…"
+  },
+  "tabs": {
+    "views": "Разделы"
+  },
+  "pulse": {
+    "title": "Сейчас активны",
+    "emptyTitle": "Сейчас ничего не выполняется",
+    "emptyDescription": "Здесь появятся чаты, которые работают или ждут вашего ответа.",
+    "noMatchingSessions": "По этому запросу активных чатов нет."
   }
 }

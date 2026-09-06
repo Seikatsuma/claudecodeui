@@ -117,6 +117,12 @@ import zhTWTasks from './locales/zh-TW/tasks.json';
 import { languages } from './languages.js';
 
 // Get saved language preference from localStorage
+// Language used when this browser has never chosen one. Russian, because this
+// fork is run for a Russian-speaking owner: an English interface is the single
+// biggest thing standing between him and the app. An explicit choice in
+// Settings still wins and is remembered, so switching back is one click.
+const DEFAULT_LANGUAGE = 'ru';
+
 const getSavedLanguage = () => {
   try {
     const saved = localStorage.getItem('userLanguage');
@@ -124,9 +130,9 @@ const getSavedLanguage = () => {
     if (saved && languages.some(lang => lang.value === saved)) {
       return saved;
     }
-    return 'en';
+    return DEFAULT_LANGUAGE;
   } catch {
-    return 'en';
+    return DEFAULT_LANGUAGE;
   }
 };
 
@@ -242,7 +248,9 @@ i18n
     lng: getSavedLanguage(),
 
     // Fallback language when a translation is missing
-    fallbackLng: 'en',
+    // Russian first, English as the safety net: a key that has no Russian text
+    // yet must show English words, not a bare key like "sidebar.pulse.title".
+    fallbackLng: [DEFAULT_LANGUAGE, 'en'],
 
     // Enable debug mode in development (logs missing keys to console)
     debug: false,
