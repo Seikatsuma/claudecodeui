@@ -291,6 +291,10 @@ function AppContentInner() {
         const root = document.getElementById('root');
         const shell = document.querySelector('.fixed.inset-0');
         const styles = getComputedStyle(document.documentElement);
+        const composer = document.querySelector('.chat-composer-shell');
+        const composerRect = composer ? composer.getBoundingClientRect() : null;
+        const footer = document.querySelector('.sidebar-footer, [data-sidebar-footer]');
+        const footerRect = footer ? footer.getBoundingClientRect() : null;
         const probe = new URLSearchParams({
             innerH: String(window.innerHeight),
             vvH: String(Math.round(vv.height)),
@@ -304,6 +308,14 @@ function AppContentInner() {
             rootH: String(root ? Math.round(root.getBoundingClientRect().height) : -1),
             shellTop: String(shell ? Math.round(shell.getBoundingClientRect().top) : -1),
             shellBottom: String(shell ? Math.round(shell.getBoundingClientRect().bottom) : -1),
+            composerBottom: String(composerRect ? Math.round(composerRect.bottom) : -1),
+            composerTop: String(composerRect ? Math.round(composerRect.top) : -1),
+            footerBottom: String(footerRect ? Math.round(footerRect.bottom) : -1),
+            bodyH: String(Math.round(document.body.getBoundingClientRect().height)),
+            rootTop: String(root ? Math.round(root.getBoundingClientRect().top) : -1),
+            rootBottom: String(root ? Math.round(root.getBoundingClientRect().bottom) : -1),
+            availH: String(window.screen.availHeight),
+            headerPad: styles.getPropertyValue('--header-total-padding').trim(),
             dpr: String(window.devicePixelRatio),
         });
         void fetch(`/api/layout-probe?${probe.toString()}`).catch(() => {});
