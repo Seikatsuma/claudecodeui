@@ -669,11 +669,8 @@ export const sessionsDb = {
    * before that classification existed are already sitting in the active
    * list. This is the one-off catch-up for them.
    *
-   * Two guards make it a genuine one-off rather than a rule:
-   *   - it does nothing until every one of this account's sessions has been
-   *     classified, so a partial scan cannot archive a half-known list;
-   *   - it records that it ran, so a session the user later takes back OUT of
-   *     the archive is never quietly re-archived behind them.
+   * It records that it ran, so a session the user later takes back OUT of the
+   * archive is never quietly re-archived behind them.
    */
   archiveAutomatedSessionsOnce(accountDir: string): number {
     const db = getConnection();
@@ -682,14 +679,21 @@ export const sessionsDb = {
       return 0;
     }
 
-    const unclassified = db
+    // Guard against acting on a scan that never ran: without at least one
+    // classified session there is nothing to judge the rest against.
+    //
+    // Deliberately NOT "every session is classified". Rows whose transcript
+    // has since been deleted can never be classified - 14 such orphans exist
+    // on this instance - so that stricter condition is unreachable and would
+    // block the catch-up forever.
+    const classified = db
       .prepare(
         `SELECT COUNT(*) AS count FROM sessions
-         WHERE account_dir = ? AND origin IS NULL`
+         WHERE account_dir = ? AND origin IS NOT NULL`
       )
       .get(accountDir) as { count: number } | undefined;
 
-    if (Number(unclassified?.count ?? 0) > 0) {
+    if (Number(classified?.count ?? 0) === 0) {
       return 0;
     }
 
