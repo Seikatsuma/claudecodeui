@@ -44,7 +44,8 @@
     "noTopicsFound": "No clear topics found",
     "organizeFailed": "Could not organize sessions",
     "sessionCount_one": "session",
-    "sessionCount_other": "sessions"
+    "sessionCount_other": "sessions",
+    "loadMore": "Load more sessions"
   },
   "tooltips": {
     "viewEnvironments": "View Environments",
