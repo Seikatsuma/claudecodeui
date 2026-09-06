@@ -283,6 +283,16 @@ app.get('/manifest.json', (req, res, next) => {
     }
 });
 
+// Временный замер раскладки с телефона владельца: установленное на экран
+// «Домой» приложение нельзя воспроизвести ни в одном браузере на сервере, а
+// пустая полоса под чатом видна только там. Страница присылает сюда, что
+// сообщает сам iOS, — цифры уходят в журнал службы и ничего не меняют в
+// ответе. Убрать, как только причина найдена.
+app.get('/api/layout-probe', (req, res) => {
+    console.log('[LayoutProbe]', JSON.stringify(req.query));
+    res.status(204).end();
+});
+
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(APP_ROOT, 'public')));
 

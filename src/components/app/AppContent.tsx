@@ -282,6 +282,33 @@ function AppContentInner() {
     // not scroll.
     calibrate();
     update();
+
+    // Разовый отчёт с установленного приложения: что именно сообщает iOS.
+    // Иначе причину пустой полосы приходится угадывать — на сервере этот
+    // режим не воспроизводится. Убрать вместе с /api/layout-probe.
+    if (isStandalone) {
+      window.setTimeout(() => {
+        const root = document.getElementById('root');
+        const shell = document.querySelector('.fixed.inset-0');
+        const styles = getComputedStyle(document.documentElement);
+        const probe = new URLSearchParams({
+            innerH: String(window.innerHeight),
+            vvH: String(Math.round(vv.height)),
+            vvTop: String(Math.round(vv.offsetTop)),
+            dvh: String(Math.round(document.documentElement.clientHeight)),
+            screenH: String(window.screen.height),
+            restingGap: String(restingGap),
+            kbVar: styles.getPropertyValue('--keyboard-height').trim(),
+            safeTop: styles.getPropertyValue('--safe-area-inset-top').trim(),
+            safeBottom: styles.getPropertyValue('--safe-area-inset-bottom').trim(),
+            rootH: String(root ? Math.round(root.getBoundingClientRect().height) : -1),
+            shellTop: String(shell ? Math.round(shell.getBoundingClientRect().top) : -1),
+            shellBottom: String(shell ? Math.round(shell.getBoundingClientRect().bottom) : -1),
+            dpr: String(window.devicePixelRatio),
+        });
+        void fetch(`/api/layout-probe?${probe.toString()}`).catch(() => {});
+      }, 2500);
+    }
     vv.addEventListener('resize', update);
     // Re-measure the device's own gap only at moments when a keyboard cannot
     // be the cause: a turned phone, and coming back to the app.
