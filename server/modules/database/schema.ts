@@ -156,6 +156,24 @@ CREATE TABLE IF NOT EXISTS scan_state (
 );
 `;
 
+/**
+ * Incremental-scan boundary, one row per Claude account directory.
+ *
+ * The single-row `scan_state` above cannot serve a multi-account instance:
+ * the boundary it stores is global, so the moment one account is scanned,
+ * every OTHER account's transcripts are already "older than the last scan"
+ * and are never indexed at all. That is not hypothetical - it is why the
+ * second account's chat list came up empty while the first account's chats
+ * appeared under it. Keyed by the canonical (symlink-resolved) account
+ * directory so `~/.claude` and `~/.claude-webuser-1` are one key, not two.
+ */
+export const ACCOUNT_SCAN_STATE_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS account_scan_state (
+  account_dir TEXT PRIMARY KEY NOT NULL,
+  last_scanned_at TIMESTAMP NULL
+);
+`;
+
 export const APP_CONFIG_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
