@@ -238,12 +238,39 @@ function AppContentInner() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+
+    // Installed on the home screen, iOS reports a visual viewport that is
+    // permanently shorter than `innerHeight` (the home-indicator strip), with
+    // no keyboard anywhere. Read as keyboard height, that lifted the whole
+    // shell and left a dead band under the chat - and the composer already
+    // keeps clear of the indicator with its own bottom padding, so the gap was
+    // pure duplication. In a browser tab the same difference is the toolbars,
+    // which genuinely do cover the bottom, so nothing changes there.
+    const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches === true
+      || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+
+    // Whatever gap exists while nothing is focused is the device's own, not a
+    // keyboard. Measured rather than assumed: the strip differs by model and
+    // orientation, and iOS has changed what it reports between versions.
+    let restingGap = 0;
+    const isTyping = () => {
+      const active = document.activeElement;
+      return active instanceof HTMLElement
+        && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+    };
+    const calibrate = () => {
+      if (isStandalone && !isTyping()) {
+        restingGap = Math.max(0, window.innerHeight - vv.height);
+      }
+    };
+
     const update = () => {
       // Only resize matters — keyboard open/close changes vv.height.
       // Do NOT listen to scroll: on iOS Safari, scrolling content changes
       // vv.offsetTop which would make --keyboard-height fluctuate during
       // normal scrolling, causing the container to bounce up and down.
-      const kb = Math.max(0, window.innerHeight - vv.height);
+      const gap = Math.max(0, window.innerHeight - vv.height);
+      const kb = isStandalone ? Math.max(0, gap - restingGap) : gap;
       document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
     };
     // Run once on mount, not only on the next resize: if the browser's own
@@ -253,12 +280,21 @@ function AppContentInner() {
     // resize - leaving the composer's bottom row tucked under the toolbar with
     // no way to scroll to it, since the shell is fixed and the document does
     // not scroll.
+    calibrate();
     update();
     vv.addEventListener('resize', update);
-    window.addEventListener('orientationchange', update);
+    // Re-measure the device's own gap only at moments when a keyboard cannot
+    // be the cause: a turned phone, and coming back to the app.
+    const recalibrate = () => {
+      calibrate();
+      update();
+    };
+    window.addEventListener('orientationchange', recalibrate);
+    document.addEventListener('visibilitychange', recalibrate);
     return () => {
       vv.removeEventListener('resize', update);
-      window.removeEventListener('orientationchange', update);
+      window.removeEventListener('orientationchange', recalibrate);
+      document.removeEventListener('visibilitychange', recalibrate);
     };
   }, []);
 
