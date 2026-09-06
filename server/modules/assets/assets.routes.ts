@@ -26,6 +26,23 @@ const storage = multer.diskStorage({
   },
 });
 
+// Пределы вложений. 5 МБ на снимок были меньше обычного фото с телефона
+// (замер: 8,4 МБ), и до правки client_max_body_size в nginx это вообще не
+// доходило до сюда — nginx обрывал тело, и наружу шло «Unexpected end of
+// form» вместо внятного «файл великоват». Теперь ошибка честная, а сам
+// потолок поднят до размера, на котором реальные фотографии проходят.
+// Настраивается окружением, чтобы не пересобирать ради числа.
+const DEFAULT_IMAGE_UPLOAD_BYTES = 25 * 1024 * 1024;
+const DEFAULT_ATTACHMENT_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+function envBytes(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const imageUploadBytes = envBytes('ASSETS_MAX_IMAGE_BYTES', DEFAULT_IMAGE_UPLOAD_BYTES);
+const attachmentUploadBytes = envBytes('ASSETS_MAX_ATTACHMENT_BYTES', DEFAULT_ATTACHMENT_UPLOAD_BYTES);
+
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
@@ -36,7 +53,7 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
+    fileSize: imageUploadBytes,
     files: 5,
   },
 });
@@ -44,7 +61,7 @@ const upload = multer({
 const attachmentUpload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024,
+    fileSize: attachmentUploadBytes,
     files: 10,
   },
 });
@@ -72,7 +89,8 @@ router.post('/images', (req, res) => {
 /**
  * Stores provider-neutral chat attachments. Files of any MIME type are
  * accepted because providers inspect them as data through their file-reading
- * tools; uploads are capped at 10 files and 10MB per file.
+ * tools; uploads are capped at 10 files; the per-file ceiling is
+ * ASSETS_MAX_ATTACHMENT_BYTES (see the limits block above).
  */
 router.post('/files', (req, res) => {
   attachmentUpload.array('files', 10)(req, res, (err: unknown) => {
