@@ -9,7 +9,8 @@ import {
   isValidRefreshedToken,
   storeAuthToken,
 } from '../../../utils/api';
-import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
+import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY, LOGIN_LINK_TOKEN_STORAGE_KEY } from '../constants';
+import { installLoginLinkManifest } from '../loginLinkManifest';
 import type {
   AuthContextValue,
   AuthProviderProps,
@@ -37,6 +38,17 @@ const LOGIN_LINK_PATH_PATTERN = /\/enter\/([^/]+)\/?$/;
 const INVITE_LINK_PATH_PATTERN = /\/invite\/([^/]+)\/?$/;
 
 const readStoredToken = (): string | null => localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+
+const readStoredLoginLinkToken = (): string | null =>
+  localStorage.getItem(LOGIN_LINK_TOKEN_STORAGE_KEY);
+
+const storeLoginLinkToken = (loginToken: string) => {
+  localStorage.setItem(LOGIN_LINK_TOKEN_STORAGE_KEY, loginToken);
+};
+
+const clearStoredLoginLinkToken = () => {
+  localStorage.removeItem(LOGIN_LINK_TOKEN_STORAGE_KEY);
+};
 
 /**
  * Builds the shareable `/enter/<token>` login link. Deliberately origin-only
@@ -110,6 +122,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
     await checkOnboardingStatus();
   }, [checkOnboardingStatus]);
 
+  /**
+   * Exchanges an `/enter/<token>` magic-link token for a session, and
+   * remembers the token so a later expiry can repeat this without the user
+   * having to find the link again. Returns whether the exchange succeeded;
+   * callers decide what to show when it did not.
+   */
+  const enterWithLoginLinkToken = useCallback(async (loginToken: string): Promise<boolean> => {
+    try {
+      const enterResponse = await api.auth.enter(loginToken);
+      const enterPayload = await parseJsonSafely<AuthSessionPayload>(enterResponse);
+
+      if (!enterResponse.ok || !enterPayload?.token || !enterPayload.user) {
+        return false;
+      }
+
+      setSession(enterPayload.user, enterPayload.token);
+      storeLoginLinkToken(loginToken);
+      // From here on, "Add to Home Screen" produces an icon that opens this
+      // link rather than a logged-out "/".
+      installLoginLinkManifest(loginToken);
+      setNeedsSetup(false);
+      setOpenRegistration(true);
+      setError(null);
+      await checkOnboardingStatus();
+      return true;
+    } catch (caughtError) {
+      // A network blip must not look like a rejected link: keep the remembered
+      // token and let the next attempt (reload, focus, expiry) try again.
+      console.warn('[Auth] Login-link sign-in failed:', caughtError);
+      return false;
+    }
+  }, [checkOnboardingStatus, setSession]);
+
   const refreshSession = useCallback(async () => {
     if (IS_PLATFORM || !token || !user) {
       return;
@@ -142,7 +187,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
     const handleSessionExpired = () => {
       clearSession();
-      setError(AUTH_ERROR_MESSAGES.sessionExpired);
+      // The session lasts a week; the login link does not expire at all. If
+      // this browser came in through one, sign back in with it instead of
+      // showing a dead end - this is what made the phone's home-screen icon
+      // show "invitation only" every few days.
+      const rememberedLoginToken = readStoredLoginLinkToken();
+      if (!rememberedLoginToken) {
+        setError(AUTH_ERROR_MESSAGES.sessionExpired);
+        return;
+      }
+      void enterWithLoginLinkToken(rememberedLoginToken).then((signedIn) => {
+        if (!signedIn) {
+          setError(AUTH_ERROR_MESSAGES.sessionExpired);
+        }
+      });
     };
 
     window.addEventListener(AUTH_TOKEN_REFRESHED_EVENT, handleTokenRefreshed);
@@ -151,7 +209,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.removeEventListener(AUTH_TOKEN_REFRESHED_EVENT, handleTokenRefreshed);
       window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
     };
-  }, [clearSession]);
+  }, [clearSession, enterWithLoginLinkToken]);
 
   const checkAuthStatus = useCallback(async () => {
     try {
@@ -177,14 +235,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const loginLinkMatch = window.location.pathname.match(LOGIN_LINK_PATH_PATTERN);
       if (loginLinkMatch) {
         const loginToken = decodeURIComponent(loginLinkMatch[1]);
-        const enterResponse = await api.auth.enter(loginToken);
-        const enterPayload = await parseJsonSafely<AuthSessionPayload>(enterResponse);
-
-        if (enterResponse.ok && enterPayload?.token && enterPayload.user) {
-          setSession(enterPayload.user, enterPayload.token);
-          setNeedsSetup(false);
-          setOpenRegistration(true);
-          await checkOnboardingStatus();
+        if (await enterWithLoginLinkToken(loginToken)) {
           return;
         }
 
@@ -238,19 +289,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       setNeedsSetup(false);
 
+      // Opened without a usable session - typically the home-screen icon,
+      // which starts at "/" (the manifest's start_url), or a session that
+      // quietly aged out of its week. If this browser ever came in through a
+      // login link, use it: the link stays valid until its owner regenerates
+      // it, so there is nothing for the user to do here.
+      const signInWithRememberedLink = async (): Promise<boolean> => {
+        const rememberedLoginToken = readStoredLoginLinkToken();
+        return rememberedLoginToken ? enterWithLoginLinkToken(rememberedLoginToken) : false;
+      };
+
       if (!token) {
+        await signInWithRememberedLink();
         return;
       }
 
       const userResponse = await api.auth.user();
       if (!userResponse.ok) {
         clearSession();
+        await signInWithRememberedLink();
         return;
       }
 
       const userPayload = await parseJsonSafely<AuthUserPayload>(userResponse);
       if (!userPayload?.user) {
         clearSession();
+        await signInWithRememberedLink();
         return;
       }
 
@@ -262,7 +326,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [checkOnboardingStatus, clearSession, setSession, token]);
+  }, [checkOnboardingStatus, clearSession, enterWithLoginLinkToken, setSession, token]);
 
   useEffect(() => {
     if (IS_PLATFORM) {
@@ -422,6 +486,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = useCallback(() => {
     // JWT logout is client-side: the server endpoint does not maintain a
     // revocation list, so clearing the session is the complete operation.
+    // The remembered login link goes too - leaving it would sign the user
+    // straight back in on the next load, which is not what "log out" means.
+    clearStoredLoginLinkToken();
     clearSession();
   }, [clearSession]);
 

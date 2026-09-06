@@ -15,6 +15,7 @@ import {
     initializeSessionsWatcher,
     providerRuntimeService,
 } from '@/modules/providers/index.js';
+import { userDb } from '@/modules/database/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
@@ -237,6 +238,50 @@ app.use('/api/providers', withUserRuntimeContext, providerRoutes);
 app.use('/api/agent', agentRoutes);
 
 app.use('/api/voice', withUserRuntimeContext, voiceRoutes);
+
+// Per-user PWA manifest, ahead of the static handler below that would
+// otherwise serve the fixed public/manifest.json.
+//
+// On the shared instance each person's "app" is their own /enter/<token>
+// login link, not one fixed account, so a manifest whose start_url is a bare
+// "/" is actively wrong: iOS launches the home-screen icon at start_url from
+// then on, discarding the link the icon was created from. The icon then opens
+// a logged-out "/" - and a standalone web app has its own storage, separate
+// from Safari's, so the session saved in the browser is not there either.
+// That is the "invitation only" dead end, and it repeated on every launch.
+//
+// With `?enter=<token>` the manifest names that link as start_url, so the icon
+// opens the app already signed in. The token is checked here rather than
+// echoed blindly: an unknown one falls through to the plain manifest instead
+// of minting an installable app pointing at a dead link. `scope` stays "/" so
+// the whole app still counts as in-app navigation once launched.
+app.get('/manifest.json', (req, res, next) => {
+    const requestedToken = typeof req.query.enter === 'string' ? req.query.enter.trim() : '';
+    if (!requestedToken) {
+        next();
+        return;
+    }
+
+    try {
+        const manifestPath = path.join(APP_ROOT, 'public', 'manifest.json');
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+        const owner = userDb.getUserByLoginToken(requestedToken);
+        if (!owner) {
+            next();
+            return;
+        }
+
+        manifest.start_url = `/enter/${encodeURIComponent(requestedToken)}`;
+        manifest.scope = '/';
+        res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+        // Private: this manifest embeds one person's login link.
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.send(JSON.stringify(manifest));
+    } catch (error) {
+        console.warn('[Manifest] Falling back to the static manifest:', error);
+        next();
+    }
+});
 
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(APP_ROOT, 'public')));
