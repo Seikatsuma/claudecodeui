@@ -1,7 +1,10 @@
 // Service Worker for CloudCLI PWA
 // Cache only manifest (needed for PWA install). HTML and JS are never pre-cached
 // so a rebuild + refresh always picks up the latest assets.
-const CACHE_NAME = 'claude-ui-v2';
+// Имя меняется вместе с любым изменением этого файла: браузер переустанавливает
+// служебный кэш только когда сам файл стал другим побайтово. Установленное на
+// экран «Домой» приложение месяц отдавало старую сборку именно поэтому.
+const CACHE_NAME = 'claude-ui-v3';
 const urlsToCache = [
   '/manifest.json'
 ];
@@ -68,7 +71,13 @@ self.addEventListener('activate', event => {
       )
     )
   );
-  self.clients.claim();
+  event.waitUntil(self.clients.claim().then(() =>
+    self.clients.matchAll({ type: 'window' }).then(clients => {
+      // Страница, оставшаяся от прошлой сборки, сама себя перезагрузит:
+      // на телефоне закрыть и открыть приложение бывает недостаточно.
+      clients.forEach(client => client.postMessage({ type: 'sw:updated' }));
+    })
+  ));
 });
 
 // Push notification event

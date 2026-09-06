@@ -15,6 +15,7 @@ import { useProjectsState } from '../../hooks/useProjectsState';
 import { useOpenSessionTabs } from '../../hooks/useOpenSessionTabs';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
 import { useBrowserUseEnabled } from '../../hooks/useBrowserUseEnabled';
+import { ensureLatestBuild, watchServiceWorkerUpdates } from '../../lib/appUpdate';
 import { api } from '../../utils/api';
 import type { AppTab } from '../../types/app';
 
@@ -191,6 +192,19 @@ function AppContentInner() {
     openSettings,
     refreshProjects: refreshProjectsSilently,
   });
+
+  // Открытая страница не должна оставаться на старой сборке (см. appUpdate).
+  useEffect(() => {
+    watchServiceWorkerUpdates();
+    void ensureLatestBuild();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void ensureLatestBuild();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
