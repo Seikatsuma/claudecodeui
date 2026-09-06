@@ -43,14 +43,20 @@ function ChatInterface({
   const { t } = useTranslation('chat');
 
   const sessionStore = useSessionStore();
-  const streamTimerRef = useRef<number | null>(null);
-  const accumulatedStreamRef = useRef('');
+  // Keyed by session id, NOT one buffer for the whole component. A client can
+  // receive live deltas for more than one session at a time — watching a run
+  // started elsewhere (another device, the CLI) while typing in your own is
+  // the ordinary case, not an edge case. With a single shared buffer those
+  // two streams concatenate into each other and both sessions render text
+  // that belongs to the other one.
+  const streamTimerRef = useRef(new Map<string, number>());
+  const accumulatedStreamRef = useRef(new Map<string, string>());
   // Mirrors streamTimerRef/accumulatedStreamRef for the live thinking block —
   // a separate accumulator because thinking and reply text are independent
   // live rows within one turn (see useChatRealtimeHandlers' flushThinking).
-  const thinkingStreamTimerRef = useRef<number | null>(null);
-  const accumulatedThinkingRef = useRef('');
-  const thinkingStartedAtRef = useRef<number | null>(null);
+  const thinkingStreamTimerRef = useRef(new Map<string, number>());
+  const accumulatedThinkingRef = useRef(new Map<string, string>());
+  const thinkingStartedAtRef = useRef(new Map<string, number>());
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
@@ -60,17 +66,13 @@ function ChatInterface({
   const lastSeqRef = useRef(new Map<string, number>());
 
   const resetStreamingState = useCallback(() => {
-    if (streamTimerRef.current) {
-      clearTimeout(streamTimerRef.current);
-      streamTimerRef.current = null;
-    }
-    accumulatedStreamRef.current = '';
-    if (thinkingStreamTimerRef.current) {
-      clearTimeout(thinkingStreamTimerRef.current);
-      thinkingStreamTimerRef.current = null;
-    }
-    accumulatedThinkingRef.current = '';
-    thinkingStartedAtRef.current = null;
+    for (const timer of streamTimerRef.current.values()) clearTimeout(timer);
+    for (const timer of thinkingStreamTimerRef.current.values()) clearTimeout(timer);
+    streamTimerRef.current.clear();
+    thinkingStreamTimerRef.current.clear();
+    accumulatedStreamRef.current.clear();
+    accumulatedThinkingRef.current.clear();
+    thinkingStartedAtRef.current.clear();
   }, []);
 
   const {
