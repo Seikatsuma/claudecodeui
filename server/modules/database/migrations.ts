@@ -3,6 +3,7 @@ import { Database } from 'better-sqlite3';
 import {
   APP_CONFIG_TABLE_SCHEMA_SQL,
   INVITE_TOKENS_TABLE_SCHEMA_SQL,
+  ACCOUNT_SCAN_STATE_TABLE_SCHEMA_SQL,
   LAST_SCANNED_AT_SQL,
   NOTIFICATION_CHANNEL_ENDPOINTS_TABLE_SCHEMA_SQL,
   PROJECTS_TABLE_SCHEMA_SQL,
@@ -12,6 +13,7 @@ import {
   USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL,
   VAPID_KEYS_TABLE_SCHEMA_SQL,
 } from '@/modules/database/schema.js';
+import { canonicalizeAccountDir } from '@/shared/session-scope.js';
 
 const SQLITE_UUID_SQL = `
 lower(hex(randomblob(4))) || '-' ||
@@ -499,6 +501,57 @@ const addSessionGroupColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'group_label', 'TEXT');
 };
 
+/**
+ * Adds `account_dir` (which Claude account a transcript belongs to) and
+ * `origin` (terminal / web / auto — see server/shared/session-scope.ts).
+ *
+ * `account_dir` is backfilled here because it is already implicit in every
+ * existing row: `jsonl_path` starts with the account directory the file was
+ * found under. It is canonicalised in Node rather than in SQL because the
+ * owner's `~/.claude-webuser-<id>` is a symlink to `~/.claude`, and rows
+ * written by different code paths stored different spellings of the same
+ * account — comparing them as plain strings would split one account in two.
+ *
+ * `origin` is deliberately left NULL: it cannot be derived from the database
+ * alone, only by reading the transcripts. The synchronizer fills it in on the
+ * next scan, which the per-account scan table forces to be a full one.
+ */
+const addSessionAccountAndOriginColumns = (db: Database): void => {
+  if (!tableExists(db, 'sessions')) {
+    return;
+  }
+
+  const columnNames = getTableInfo(db, 'sessions').map((column) => column.name);
+  const hadAccountDir = columnNames.includes('account_dir');
+
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'account_dir', 'TEXT');
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'origin', 'TEXT');
+
+  if (hadAccountDir) {
+    return;
+  }
+
+  const prefixes = db
+    .prepare(
+      `SELECT DISTINCT substr(jsonl_path, 1, instr(jsonl_path, '/projects/') - 1) AS raw
+       FROM sessions
+       WHERE jsonl_path LIKE '%/projects/%'`
+    )
+    .all() as Array<{ raw: string | null }>;
+
+  const assign = db.prepare(
+    `UPDATE sessions
+     SET account_dir = ?
+     WHERE account_dir IS NULL AND jsonl_path LIKE ? || '/projects/%'`
+  );
+
+  for (const { raw } of prefixes) {
+    if (raw) {
+      assign.run(canonicalizeAccountDir(raw), raw);
+    }
+  }
+};
+
 const ensureProjectsForSessionPaths = (db: Database): void => {
   if (!tableExists(db, 'sessions')) {
     return;
@@ -566,12 +619,14 @@ export const runMigrations = (db: Database) => {
     addSessionEffortColumn(db);
     addSessionTitleSourceColumn(db);
     addSessionGroupColumns(db);
+    addSessionAccountAndOriginColumns(db);
     ensureProjectsForSessionPaths(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_provider_session_id ON sessions(provider_session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_project_path ON sessions(project_path)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_is_archived ON sessions(isArchived)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_account_scope ON sessions(project_path, account_dir, isArchived)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_projects_is_starred ON projects(isStarred)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_projects_is_archived ON projects(isArchived)');
 
@@ -586,6 +641,7 @@ export const runMigrations = (db: Database) => {
     }
 
     db.exec(LAST_SCANNED_AT_SQL);
+    db.exec(ACCOUNT_SCAN_STATE_TABLE_SCHEMA_SQL);
     console.log('Database migrations completed successfully');
   } catch (error: any) {
     console.error('Error running migrations:', error.message);

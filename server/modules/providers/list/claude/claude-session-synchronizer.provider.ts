@@ -4,6 +4,10 @@ import readline from 'node:readline';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import {
+  accountDirFromTranscriptPath,
+  classifySessionOrigin,
+} from '@/shared/session-scope.js';
+import {
   buildLookupMap,
   extractFirstValidJsonlData,
   findFilesRecursivelyCreatedAfter,
@@ -129,7 +133,11 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    */
   async synchronize(since?: Date): Promise<number> {
     const claudeHome = getClaudeConfigDir();
+    // history.jsonl holds one entry per prompt a human typed at the terminal,
+    // and nothing else - so its id set is exactly "what `claude --resume`
+    // offers". Doubles as the title source below.
     const nameMap = await buildLookupMap(path.join(claudeHome, 'history.jsonl'), 'sessionId', 'display');
+    const terminalSessionIds = new Set(nameMap.keys());
     const files = await findFilesRecursivelyCreatedAfter(
       path.join(claudeHome, 'projects'),
       '.jsonl',
@@ -156,7 +164,11 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
         timestamps.createdAt,
         timestamps.updatedAt,
         filePath,
-        parsed.titleSource
+        parsed.titleSource,
+        {
+          accountDir: accountDirFromTranscriptPath(filePath),
+          origin: await classifySessionOrigin(filePath, parsed.sessionId, terminalSessionIds),
+        }
       );
       processed += 1;
     }
@@ -175,7 +187,12 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    const nameMap = await buildLookupMap(path.join(getClaudeConfigDir(), 'history.jsonl'), 'sessionId', 'display');
+    // Resolved from the file's own path, NOT from getClaudeConfigDir(): the
+    // file watcher calls this outside any request context, where that helper
+    // falls back to the process default and would file another account's
+    // transcript - and its history.jsonl lookup - under the wrong account.
+    const accountDir = accountDirFromTranscriptPath(filePath) ?? getClaudeConfigDir();
+    const nameMap = await buildLookupMap(path.join(accountDir, 'history.jsonl'), 'sessionId', 'display');
     const parsed = await this.processSessionFile(filePath, nameMap);
     if (!parsed) {
       return null;
@@ -190,7 +207,11 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       timestamps.createdAt,
       timestamps.updatedAt,
       filePath,
-      parsed.titleSource
+      parsed.titleSource,
+      {
+        accountDir: accountDirFromTranscriptPath(filePath),
+        origin: await classifySessionOrigin(filePath, parsed.sessionId, new Set(nameMap.keys())),
+      }
     );
   }
 

@@ -117,6 +117,20 @@ export default function App() {
                       <Route path="/" element={<AppContent />} />
                       <Route path="/session/:sessionId" element={<AppContent />} />
                       {/*
+                        `/enter/<token>` is a real route, not a stray path.
+                        AuthContext deliberately leaves the magic-link token in
+                        the address bar (it is reusable, and iOS "Add to Home
+                        Screen" bookmarks whatever URL is on screen - see the
+                        manifest-stripping plugin in vite.config.js), but the
+                        catch-all below used to rewrite it to "/" within a
+                        second of the app mounting. The home-screen icon then
+                        pointed at a logged-out root and showed the
+                        invitation-only screen. Renders the same app as "/":
+                        the token has already been exchanged for a session by
+                        the time any of this mounts.
+                      */}
+                      <Route path="/enter/:loginToken" element={<AppContent />} />
+                      {/*
                         Catch-all: redirect any unmatched path back to the app
                         root instead of rendering nothing. <Routes> with no
                         matching Route renders null, which - combined with the

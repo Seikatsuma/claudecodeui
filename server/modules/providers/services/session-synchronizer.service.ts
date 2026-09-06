@@ -1,4 +1,5 @@
-import { scanStateDb } from '@/modules/database/index.js';
+import { scanStateDb, sessionsDb } from '@/modules/database/index.js';
+import { getActiveAccountDir } from '@/shared/session-scope.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { LLMProvider } from '@/shared/types.js';
 
@@ -12,10 +13,17 @@ type SessionSynchronizeResult = {
  */
 export const sessionSynchronizerService = {
   /**
-   * Runs all provider synchronizers and updates scan_state.last_scanned_at.
+   * Runs all provider synchronizers and advances this account's scan cursor.
+   *
+   * The cursor is per Claude account, not global. With one shared cursor the
+   * first account scanned pushed it to "now", and every other account's
+   * transcripts — all older than that — were skipped as already-scanned, so
+   * a second account's chat list stayed permanently empty. See
+   * ACCOUNT_SCAN_STATE_TABLE_SCHEMA_SQL.
    */
   async synchronizeSessions(): Promise<SessionSynchronizeResult> {
-    const lastScanAt = scanStateDb.getLastScannedAt();
+    const accountDir = getActiveAccountDir();
+    const lastScanAt = scanStateDb.getLastScannedAtForAccount(accountDir);
     const scanBoundary = new Date();
     const processedByProvider: Record<LLMProvider, number> = {
       claude: 0,
@@ -43,10 +51,16 @@ export const sessionSynchronizerService = {
     }
 
     if (failures.length === 0) {
-      scanStateDb.updateLastScannedAt(scanBoundary);
+      scanStateDb.updateLastScannedAtForAccount(accountDir, scanBoundary);
+      // Only meaningful right after this account's first full scan, which is
+      // the first moment every session has an origin to judge it by.
+      const tidied = sessionsDb.archiveAutomatedSessionsOnce(accountDir);
+      if (tidied > 0) {
+        console.log(`[Sessions] Archived ${tidied} script-launched session(s) for ${accountDir}.`);
+      }
     } else {
       console.warn(
-        `[Sessions] Skipping scan_state cursor advance because ${failures.length} provider sync(s) failed.`,
+        `[Sessions] Skipping scan cursor advance for ${accountDir} because ${failures.length} provider sync(s) failed.`,
       );
     }
 

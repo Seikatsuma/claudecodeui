@@ -26,13 +26,15 @@ interface UseChatRealtimeHandlersArgs {
   setTokenBudget: (budget: Record<string, unknown> | null) => void;
   pendingPermissionRequests: PendingPermissionRequest[];
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
-  streamTimerRef: MutableRefObject<number | null>;
-  accumulatedStreamRef: MutableRefObject<string>;
+  /** All five are keyed by session id — see the comment on their declaration
+   *  in ChatInterface: one client can stream two sessions at once. */
+  streamTimerRef: MutableRefObject<Map<string, number>>;
+  accumulatedStreamRef: MutableRefObject<Map<string, string>>;
   /** Mirrors streamTimerRef/accumulatedStreamRef for the live thinking block. */
-  thinkingStreamTimerRef: MutableRefObject<number | null>;
-  accumulatedThinkingRef: MutableRefObject<string>;
+  thinkingStreamTimerRef: MutableRefObject<Map<string, number>>;
+  accumulatedThinkingRef: MutableRefObject<Map<string, string>>;
   /** When the current thinking block's first delta arrived; drives the measured "Thought for Ns". */
-  thinkingStartedAtRef: MutableRefObject<number | null>;
+  thinkingStartedAtRef: MutableRefObject<Map<string, number>>;
   /**
    * Highest live `seq` observed per session. Essential for reconnect catch-up:
    * `chat.subscribe` sends this value as `lastSeq` so the server replays only
@@ -219,61 +221,65 @@ export function useChatRealtimeHandlers({
       // (safety net for a turn that ends without content_block_stop reaching
       // here first) — a no-op when nothing thinking has accumulated.
       const flushThinking = () => {
-        if (thinkingStreamTimerRef.current) {
-          clearTimeout(thinkingStreamTimerRef.current);
-          thinkingStreamTimerRef.current = null;
+        if (!sid) return;
+        const timer = thinkingStreamTimerRef.current.get(sid);
+        if (timer) {
+          clearTimeout(timer);
+          thinkingStreamTimerRef.current.delete(sid);
         }
-        if (sid && accumulatedThinkingRef.current) {
-          const startedAt = thinkingStartedAtRef.current;
-          const durationSeconds = startedAt !== null
+        const accumulated = accumulatedThinkingRef.current.get(sid);
+        if (accumulated) {
+          const startedAt = thinkingStartedAtRef.current.get(sid);
+          const durationSeconds = startedAt !== undefined
             ? Math.max(0, Math.round((Date.now() - startedAt) / 1000))
             : undefined;
-          sessionStore.updateThinkingStreaming(sid, accumulatedThinkingRef.current, provider);
+          sessionStore.updateThinkingStreaming(sid, accumulated, provider);
           sessionStore.finalizeThinkingStreaming(sid, durationSeconds);
         }
-        accumulatedThinkingRef.current = '';
-        thinkingStartedAtRef.current = null;
+        accumulatedThinkingRef.current.delete(sid);
+        thinkingStartedAtRef.current.delete(sid);
       };
 
       // --- Streaming: buffer for performance ---
       if (msg.kind === 'thinking_delta') {
         const text = (msg.content as string) || '';
-        if (!text) return;
-        if (!accumulatedThinkingRef.current) {
-          thinkingStartedAtRef.current = Date.now();
+        if (!text || !sid) return;
+        if (!accumulatedThinkingRef.current.has(sid)) {
+          thinkingStartedAtRef.current.set(sid, Date.now());
         }
-        accumulatedThinkingRef.current += text;
-        if (!thinkingStreamTimerRef.current) {
-          thinkingStreamTimerRef.current = window.setTimeout(() => {
-            thinkingStreamTimerRef.current = null;
-            if (sid) {
-              sessionStore.updateThinkingStreaming(sid, accumulatedThinkingRef.current, provider);
+        accumulatedThinkingRef.current.set(sid, (accumulatedThinkingRef.current.get(sid) ?? '') + text);
+        if (!thinkingStreamTimerRef.current.has(sid)) {
+          thinkingStreamTimerRef.current.set(sid, window.setTimeout(() => {
+            thinkingStreamTimerRef.current.delete(sid);
+            const buffered = accumulatedThinkingRef.current.get(sid);
+            if (buffered) {
+              sessionStore.updateThinkingStreaming(sid, buffered, provider);
             }
-          }, 100);
+          }, 100));
         }
-        // Also route to store for non-active sessions
-        if (sid && sid !== activeViewSessionId) {
-          sessionStore.appendRealtime(sid, msg as unknown as NormalizedMessage);
-        }
+        // Deltas are NOT appended to the transcript, for any session, active
+        // or not. `appendRealtime` stores one message per call, so routing raw
+        // deltas through it turned a single sentence into a column of
+        // fragments ("Наш" / "ёл подозрительное место" / "самом деле."), each
+        // with its own copy and read-aloud controls. The live row is what
+        // shows streaming text; the finished message arrives on its own.
         return;
       }
 
       if (msg.kind === 'stream_delta') {
         const text = (msg.content as string) || '';
-        if (!text) return;
-        accumulatedStreamRef.current += text;
-        if (!streamTimerRef.current) {
-          streamTimerRef.current = window.setTimeout(() => {
-            streamTimerRef.current = null;
-            if (sid) {
-              sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
+        if (!text || !sid) return;
+        accumulatedStreamRef.current.set(sid, (accumulatedStreamRef.current.get(sid) ?? '') + text);
+        if (!streamTimerRef.current.has(sid)) {
+          streamTimerRef.current.set(sid, window.setTimeout(() => {
+            streamTimerRef.current.delete(sid);
+            const buffered = accumulatedStreamRef.current.get(sid);
+            if (buffered) {
+              sessionStore.updateStreaming(sid, buffered, provider);
             }
-          }, 100);
+          }, 100));
         }
-        // Also route to store for non-active sessions
-        if (sid && sid !== activeViewSessionId) {
-          sessionStore.appendRealtime(sid, msg as unknown as NormalizedMessage);
-        }
+        // Not appended to the transcript — see the thinking_delta comment.
         return;
       }
 
@@ -282,17 +288,19 @@ export function useChatRealtimeHandlers({
         // just closed (thinking or text) — flush both accumulators, only
         // the one actually holding content does anything (see flushThinking
         // and the backend's stream_end comment for why that's safe).
-        if (streamTimerRef.current) {
-          clearTimeout(streamTimerRef.current);
-          streamTimerRef.current = null;
-        }
         if (sid) {
-          if (accumulatedStreamRef.current) {
-            sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
+          const timer = streamTimerRef.current.get(sid);
+          if (timer) {
+            clearTimeout(timer);
+            streamTimerRef.current.delete(sid);
+          }
+          const buffered = accumulatedStreamRef.current.get(sid);
+          if (buffered) {
+            sessionStore.updateStreaming(sid, buffered, provider);
           }
           sessionStore.finalizeStreaming(sid);
+          accumulatedStreamRef.current.delete(sid);
         }
-        accumulatedStreamRef.current = '';
         flushThinking();
         return;
       }
@@ -312,15 +320,19 @@ export function useChatRealtimeHandlers({
       switch (msg.kind) {
         case 'complete': {
           // Flush any remaining streaming state
-          if (streamTimerRef.current) {
-            clearTimeout(streamTimerRef.current);
-            streamTimerRef.current = null;
+          if (sid) {
+            const timer = streamTimerRef.current.get(sid);
+            if (timer) {
+              clearTimeout(timer);
+              streamTimerRef.current.delete(sid);
+            }
+            const buffered = accumulatedStreamRef.current.get(sid);
+            if (buffered) {
+              sessionStore.updateStreaming(sid, buffered, provider);
+              sessionStore.finalizeStreaming(sid);
+            }
+            accumulatedStreamRef.current.delete(sid);
           }
-          if (sid && accumulatedStreamRef.current) {
-            sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
-            sessionStore.finalizeStreaming(sid);
-          }
-          accumulatedStreamRef.current = '';
           flushThinking();
 
           // `complete` is the unified terminal event — every provider run ends

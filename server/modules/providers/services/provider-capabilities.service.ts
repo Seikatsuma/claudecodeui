@@ -1,4 +1,6 @@
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type { LLMProvider } from '@/shared/types.js';
+import { OPEN_REGISTRATION, isPlatformOwnerWebUser } from '@/shared/utils.js';
 
 /**
  * Static, backend-owned description of what one provider integration supports.
@@ -84,14 +86,53 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
 };
 
 /**
+ * Overrides the starting permission mode from DEFAULT_PERMISSION_MODE.
+ *
+ * The composer only falls back to this when the visitor has made no explicit
+ * choice of their own (see useChatProviderState: a stored per-session or
+ * per-provider pick always wins), so this sets the opening position, never
+ * overrules a decision someone already made.
+ *
+ * On a multi-tenant (OPEN_REGISTRATION) instance it applies to the platform
+ * owner ALONE. Everyone else keeps the cautious built-in default: permission
+ * prompts are the only thing standing between an invited guest and arbitrary
+ * commands on this machine, and handing that away by configuration - to
+ * people the setting was never about - is not something the host would
+ * expect from a preference they set for themselves.
+ *
+ * An unset or unrecognised value leaves the built-in default untouched, so a
+ * typo degrades to safe rather than to something arbitrary.
+ */
+function resolveDefaultPermissionMode(capabilities: ProviderCapabilities): string {
+  const configured = process.env.DEFAULT_PERMISSION_MODE?.trim();
+  if (!configured || !capabilities.permissionModes.includes(configured)) {
+    return capabilities.defaultPermissionMode;
+  }
+
+  if (!OPEN_REGISTRATION) {
+    return configured;
+  }
+
+  const userId = getRequestRuntimeContext()?.userId;
+  const numericUserId = userId === undefined || userId === null ? NaN : Number(userId);
+  return Number.isFinite(numericUserId) && isPlatformOwnerWebUser(numericUserId)
+    ? configured
+    : capabilities.defaultPermissionMode;
+}
+
+function withResolvedDefault(capabilities: ProviderCapabilities): ProviderCapabilities {
+  return { ...capabilities, defaultPermissionMode: resolveDefaultPermissionMode(capabilities) };
+}
+
+/**
  * Application service exposing the provider capability matrix.
  */
 export const providerCapabilitiesService = {
   getProviderCapabilities(provider: LLMProvider): ProviderCapabilities {
-    return PROVIDER_CAPABILITIES[provider];
+    return withResolvedDefault(PROVIDER_CAPABILITIES[provider]);
   },
 
   listAllProviderCapabilities(): ProviderCapabilities[] {
-    return Object.values(PROVIDER_CAPABILITIES);
+    return Object.values(PROVIDER_CAPABILITIES).map(withResolvedDefault);
   },
 };

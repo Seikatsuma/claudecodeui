@@ -1,4 +1,6 @@
 import { getConnection } from '@/modules/database/connection.js';
+import { appConfigDb } from '@/modules/database/repositories/app-config.js';
+import { getActiveAccountDir, type SessionOrigin } from '@/shared/session-scope.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import type { SessionTitleSource } from '@/shared/types.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
@@ -119,6 +121,19 @@ function normalizeProjectPathForProvider(provider: string, projectPath: string):
   return normalizeProjectPath(projectPath);
 }
 
+/**
+ * SQL fragment scoping a session query to the Claude account the current
+ * request represents.
+ *
+ * `account_dir IS NULL` is deliberately let through. A chat started in the web
+ * UI gets its row before any transcript exists, and rows that predate this
+ * column are only backfilled once their transcript is seen - excluding NULLs
+ * would make a brand-new chat vanish from the sidebar the moment it is
+ * created. Every row that HAS a transcript carries its account, which is the
+ * case that actually caused one account's history to show up under another.
+ */
+const ACCOUNT_SCOPE_SQL = ' AND (account_dir IS NULL OR account_dir = ?)';
+
 export const sessionsDb = {
   /**
    * Upserts one session row discovered on disk by a provider synchronizer.
@@ -146,7 +161,8 @@ export const sessionsDb = {
     createdAt?: string,
     updatedAt?: string,
     jsonlPath?: string | null,
-    titleSource?: SessionTitleSource
+    titleSource?: SessionTitleSource,
+    scope?: { accountDir?: string | null; origin?: SessionOrigin | null }
   ): string {
     const db = getConnection();
     const createdAtValue = normalizeTimestamp(createdAt);
@@ -176,7 +192,8 @@ export const sessionsDb = {
              updated_at = COALESCE(?, CURRENT_TIMESTAMP),
              project_path = ?,
              jsonl_path = ?,
-             isArchived = 0,
+             account_dir = COALESCE(?, account_dir),
+             origin = COALESCE(origin, ?),
              custom_name = COALESCE(?, custom_name),
              title_source = COALESCE(?, title_source)
            WHERE session_id = ?`
@@ -185,6 +202,8 @@ export const sessionsDb = {
           updatedAtValue,
           normalizedProjectPath,
           jsonlPath ?? null,
+          scope?.accountDir ?? null,
+          scope?.origin ?? null,
           resolved.name ?? null,
           resolved.source ?? null,
           existing.session_id
@@ -196,7 +215,8 @@ export const sessionsDb = {
              updated_at = COALESCE(?, CURRENT_TIMESTAMP),
              project_path = ?,
              jsonl_path = ?,
-             isArchived = 0,
+             account_dir = COALESCE(?, account_dir),
+             origin = COALESCE(origin, ?),
              custom_name = CASE
                WHEN session_id <> provider_session_id AND custom_name IS NOT NULL THEN custom_name
                ELSE COALESCE(?, custom_name)
@@ -207,6 +227,8 @@ export const sessionsDb = {
           updatedAtValue,
           normalizedProjectPath,
           jsonlPath ?? null,
+          scope?.accountDir ?? null,
+          scope?.origin ?? null,
           customName ?? null,
           existing.session_id
         );
@@ -219,15 +241,16 @@ export const sessionsDb = {
     // keyed by the provider-native id for both columns. The ON CONFLICT path
     // covers legacy rows that predate the provider_session_id mapping.
     db.prepare(
-      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, title_source, project_path, jsonl_path, isArchived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, title_source, project_path, jsonl_path, account_dir, origin, isArchived, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
        ON CONFLICT(session_id) DO UPDATE SET
          provider = excluded.provider,
          provider_session_id = excluded.provider_session_id,
          updated_at = excluded.updated_at,
          project_path = excluded.project_path,
          jsonl_path = excluded.jsonl_path,
-         isArchived = 0,
+         account_dir = COALESCE(excluded.account_dir, sessions.account_dir),
+         origin = COALESCE(sessions.origin, excluded.origin),
          custom_name = CASE
            WHEN sessions.session_id <> sessions.provider_session_id AND sessions.custom_name IS NOT NULL
              THEN sessions.custom_name
@@ -242,6 +265,9 @@ export const sessionsDb = {
       titleSource ?? 'naive',
       normalizedProjectPath,
       jsonlPath ?? null,
+      scope?.accountDir ?? null,
+      scope?.origin ?? null,
+      scope?.origin === 'auto' ? 1 : 0,
       createdAtValue,
       updatedAtValue
     );
@@ -270,9 +296,9 @@ export const sessionsDb = {
     projectsDb.createProjectPath(normalizedProjectPath);
 
     db.prepare(
-      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, title_source, project_path, jsonl_path, isArchived, created_at, updated_at)
-       VALUES (?, ?, NULL, ?, 'naive', ?, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(sessionId, provider, customName ?? null, normalizedProjectPath);
+      `INSERT INTO sessions (session_id, provider, provider_session_id, custom_name, title_source, project_path, jsonl_path, account_dir, origin, isArchived, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, 'naive', ?, NULL, ?, 'web', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    ).run(sessionId, provider, customName ?? null, normalizedProjectPath, getActiveAccountDir());
 
     return sessionId;
   },
@@ -519,9 +545,9 @@ export const sessionsDb = {
       .prepare(
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
-         WHERE isArchived = 0`
+         WHERE isArchived = 0` + ACCOUNT_SCOPE_SQL
       )
-      .all() as SessionRow[];
+      .all(getActiveAccountDir()) as SessionRow[];
 
     return normalizeSessionRows(rows);
   },
@@ -539,7 +565,9 @@ export const sessionsDb = {
     const visibilityClause = `
       sessions.isArchived = 0
       AND (projects.isArchived IS NULL OR projects.isArchived = 0)
+      AND (sessions.account_dir IS NULL OR sessions.account_dir = ?)
     `;
+    const accountDir = getActiveAccountDir();
     const rows = db
       .prepare(
         `SELECT sessions.*
@@ -550,7 +578,7 @@ export const sessionsDb = {
                   sessions.session_id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(limit, offset) as SessionRow[];
+      .all(accountDir, limit, offset) as SessionRow[];
     const countRow = db
       .prepare(
         `SELECT COUNT(*) AS count
@@ -558,7 +586,7 @@ export const sessionsDb = {
          LEFT JOIN projects ON projects.project_path = sessions.project_path
          WHERE ${visibilityClause}`
       )
-      .get() as { count: number } | undefined;
+      .get(accountDir) as { count: number } | undefined;
 
     return {
       sessions: normalizeSessionRows(rows),
@@ -576,10 +604,10 @@ export const sessionsDb = {
       .prepare(
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
-         WHERE isArchived = 1
+         WHERE isArchived = 1` + ACCOUNT_SCOPE_SQL + `
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
       )
-      .all() as SessionRow[];
+      .all(getActiveAccountDir()) as SessionRow[];
 
     return normalizeSessionRows(rows);
   },
@@ -592,9 +620,9 @@ export const sessionsDb = {
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0`
+           AND isArchived = 0` + ACCOUNT_SCOPE_SQL
       )
-      .all(normalizedProjectPath) as SessionRow[];
+      .all(normalizedProjectPath, getActiveAccountDir()) as SessionRow[];
 
     return normalizeSessionRows(rows);
   },
@@ -625,13 +653,59 @@ export const sessionsDb = {
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0
+           AND isArchived = 0` + ACCOUNT_SCOPE_SQL + `
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(normalizedProjectPath, limit, offset) as SessionRow[];
+      .all(normalizedProjectPath, getActiveAccountDir(), limit, offset) as SessionRow[];
 
     return normalizeSessionRows(rows);
+  },
+
+  /**
+   * Moves this account's script-launched sessions into the archive - once.
+   *
+   * New `auto` sessions are archived as they are inserted, but rows indexed
+   * before that classification existed are already sitting in the active
+   * list. This is the one-off catch-up for them.
+   *
+   * It records that it ran, so a session the user later takes back OUT of the
+   * archive is never quietly re-archived behind them.
+   */
+  archiveAutomatedSessionsOnce(accountDir: string): number {
+    const db = getConnection();
+    const flagKey = `auto_sessions_tidied:${accountDir}`;
+    if (appConfigDb.get(flagKey)) {
+      return 0;
+    }
+
+    // Guard against acting on a scan that never ran: without at least one
+    // classified session there is nothing to judge the rest against.
+    //
+    // Deliberately NOT "every session is classified". Rows whose transcript
+    // has since been deleted can never be classified - 14 such orphans exist
+    // on this instance - so that stricter condition is unreachable and would
+    // block the catch-up forever.
+    const classified = db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM sessions
+         WHERE account_dir = ? AND origin IS NOT NULL`
+      )
+      .get(accountDir) as { count: number } | undefined;
+
+    if (Number(classified?.count ?? 0) === 0) {
+      return 0;
+    }
+
+    const result = db
+      .prepare(
+        `UPDATE sessions SET isArchived = 1
+         WHERE account_dir = ? AND origin = 'auto' AND isArchived = 0`
+      )
+      .run(accountDir);
+
+    appConfigDb.set(flagKey, new Date().toISOString());
+    return result.changes;
   },
 
   countSessionsByProjectPath(projectPath: string): number {
@@ -642,9 +716,9 @@ export const sessionsDb = {
         `SELECT COUNT(*) AS count
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0`
+           AND isArchived = 0` + ACCOUNT_SCOPE_SQL
       )
-      .get(normalizedProjectPath) as { count: number } | undefined;
+      .get(normalizedProjectPath, getActiveAccountDir()) as { count: number } | undefined;
 
     return Number(row?.count ?? 0);
   },
