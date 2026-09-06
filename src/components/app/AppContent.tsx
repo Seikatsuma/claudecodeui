@@ -283,6 +283,20 @@ function AppContentInner() {
     calibrate();
     update();
 
+    // Отступ сверху не должен считаться дважды. Проверяем это замером, а не
+    // предположением: если окно уже короче экрана ровно на верхнюю безопасную
+    // зону, значит iOS её уже вычел, и прибавлять её в стилях нельзя.
+    const applySafeTopCorrection = () => {
+      const declared = parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--safe-area-inset-top'),
+      );
+      const missingFromViewport = window.screen.height - window.innerHeight;
+      const alreadyApplied = Number.isFinite(declared) && declared > 0
+        && missingFromViewport >= declared - 2;
+      document.documentElement.classList.toggle('viewport-excludes-safe-top', alreadyApplied);
+    };
+    applySafeTopCorrection();
+
     // Разовый отчёт с установленного приложения: что именно сообщает iOS.
     // Иначе причину пустой полосы приходится угадывать — на сервере этот
     // режим не воспроизводится. Убрать вместе с /api/layout-probe.
@@ -293,8 +307,16 @@ function AppContentInner() {
         const styles = getComputedStyle(document.documentElement);
         const composer = document.querySelector('.chat-composer-shell');
         const composerRect = composer ? composer.getBoundingClientRect() : null;
-        const footer = document.querySelector('.sidebar-footer, [data-sidebar-footer]');
-        const footerRect = footer ? footer.getBoundingClientRect() : null;
+        // Последний видимый элемент внизу экрана — что бы там ни было
+        // открыто: подвал меню, поле ввода, карточка «С возвращением».
+        let lowestBottom = -1;
+        document.querySelectorAll('*').forEach((node) => {
+          const rect = node.getBoundingClientRect();
+          if (rect.width > 40 && rect.height > 8 && rect.bottom > lowestBottom
+              && rect.bottom <= window.innerHeight + 1) {
+            lowestBottom = rect.bottom;
+          }
+        });
         const probe = new URLSearchParams({
             innerH: String(window.innerHeight),
             vvH: String(Math.round(vv.height)),
@@ -310,7 +332,7 @@ function AppContentInner() {
             shellBottom: String(shell ? Math.round(shell.getBoundingClientRect().bottom) : -1),
             composerBottom: String(composerRect ? Math.round(composerRect.bottom) : -1),
             composerTop: String(composerRect ? Math.round(composerRect.top) : -1),
-            footerBottom: String(footerRect ? Math.round(footerRect.bottom) : -1),
+            lowestBottom: String(Math.round(lowestBottom)),
             bodyH: String(Math.round(document.body.getBoundingClientRect().height)),
             rootTop: String(root ? Math.round(root.getBoundingClientRect().top) : -1),
             rootBottom: String(root ? Math.round(root.getBoundingClientRect().bottom) : -1),
