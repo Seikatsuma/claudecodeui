@@ -127,7 +127,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
             )}
             {userCopyContent.trim().length > 0 || (!message.images?.length && !message.files?.length) ? (
               <div className="group max-w-full rounded-2xl rounded-br-md border border-border/60 bg-muted/60 px-3 py-2 text-foreground shadow-sm dark:bg-gray-800/60 sm:px-4">
-                <div dir="auto" className="break-words font-serif text-sm">
+                <div dir="auto" className="break-words text-[13px] leading-[1.55]">
                   <Markdown
                     breaks
                     className="prose prose-sm max-w-none text-[13px] leading-[1.55] [&_h1]:mt-5 [&_h2]:mt-5 [&_p]:my-0 [&_li]:my-0 dark:prose-invert"
