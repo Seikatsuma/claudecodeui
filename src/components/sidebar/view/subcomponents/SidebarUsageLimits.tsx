@@ -77,7 +77,15 @@ export default function SidebarUsageLimits() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  const rows = (payload?.limits ?? []).filter((limit) => !limit.expired);
+  // Показываем только два окна: пятичасовое и недельное.
+  //
+  // Лимит конкретной модели Егору не нужен — «лимиты fable не нужно
+  // показывать, а вот 7 дней и 5 часов нужны». Сервер продолжает отдавать все
+  // окна: отбор — дело показа, а не источника данных.
+  const VISIBLE_KINDS = ['session', 'weekly_all'];
+  const rows = (payload?.limits ?? []).filter(
+    (limit) => !limit.expired && VISIBLE_KINDS.includes(limit.kind),
+  );
   if (rows.length === 0) {
     return null;
   }
@@ -92,9 +100,6 @@ export default function SidebarUsageLimits() {
     }
     if (limit.kind === 'weekly_all') {
       return t('usage.weekly', { defaultValue: 'Неделя (7 дней)' });
-    }
-    if (limit.modelName) {
-      return t('usage.model', { defaultValue: 'Лимит {{model}}', model: limit.modelName });
     }
     return t('usage.other', { defaultValue: 'Прочий лимит' });
   };
