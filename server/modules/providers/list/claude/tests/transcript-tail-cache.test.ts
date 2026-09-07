@@ -67,3 +67,19 @@ test('переписанный файл читается заново, а не �
   assert.equal(again.total, 1);
   assert.deepEqual(again.lines.map((l) => JSON.parse(l).n), [9]);
 });
+
+test('запрос «всю историю» после подрезки читает файл заново, а не отдаёт хвост', async () => {
+  forgetTranscriptTail();
+  // Строки нарочно большие, чтобы кэш пришлось подрезать по объёму.
+  const big = 'я'.repeat(1024 * 1024);
+  const rows = Array.from({ length: 60 }, (_, i) =>
+    JSON.stringify({ sessionId: SESSION, n: i, text: big }));
+  const file = await makeFile(rows);
+
+  const first = await readSessionLines(file, SESSION, null);
+  assert.equal(first.total, 60, 'вся история должна прийти целиком');
+  assert.equal(first.complete, true);
+
+  const second = await readSessionLines(file, SESSION, null);
+  assert.equal(second.total, 60, 'и во второй раз тоже');
+});
