@@ -111,6 +111,65 @@ export function createUserService(dependencies: UserDependencies) {
      * every non-owner user and whenever the field cannot be read, rather
      * than surfacing a read error.
      */
+    /**
+     * Полосы расхода подписки — те же три, что показывает панель Клода в
+     * VS Code: пятичасовое окно, недельное и лимит конкретной модели.
+     *
+     * Читаются из ~/.claude.json (`cachedUsageUtilization`), который ведёт сам
+     * CLI: там уже готовые проценты, время сброса и подпись модели. Своего
+     * запроса к API мы не делаем сознательно — он расходует ту самую квоту,
+     * которую показывает.
+     *
+     * Возвращается и возраст кэша: окно могло провернуться, и тогда старые
+     * проценты — неправда. Решает клиент, что с этим показать; молча выдавать
+     * протухшее число нельзя.
+     */
+    async getUsageLimits() {
+      try {
+        const raw = await readFile(getClaudeJsonPath(), 'utf-8');
+        const parsed = JSON.parse(raw) as {
+          cachedUsageUtilization?: {
+            fetchedAtMs?: number;
+            utilization?: {
+              limits?: Array<{
+                kind?: string;
+                percent?: number;
+                severity?: string;
+                resets_at?: string;
+                scope?: { model?: { display_name?: string | null } };
+              }>;
+            };
+          };
+        };
+
+        const cached = parsed.cachedUsageUtilization;
+        const rows = cached?.utilization?.limits ?? [];
+        const now = Date.now();
+
+        return {
+          success: true,
+          fetchedAtMs: cached?.fetchedAtMs ?? null,
+          limits: rows
+            .filter((row) => typeof row.percent === 'number')
+            .map((row) => {
+              const resetsAt = row.resets_at ?? null;
+              const resetsAtMs = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+              return {
+                kind: row.kind ?? 'unknown',
+                percent: Math.max(0, Math.min(100, Math.round(row.percent as number))),
+                severity: row.severity ?? 'normal',
+                resetsAt,
+                modelName: row.scope?.model?.display_name ?? null,
+                // Окно уже сбросилось: показывать его прежний процент нельзя.
+                expired: Number.isFinite(resetsAtMs) ? resetsAtMs <= now : false,
+              };
+            }),
+        };
+      } catch {
+        return { success: true, fetchedAtMs: null, limits: [] };
+      }
+    },
+
     async getOwnerAccountEmail(userId: number) {
       if (!isPlatformOwnerWebUser(userId)) {
         return { success: true, email: null };

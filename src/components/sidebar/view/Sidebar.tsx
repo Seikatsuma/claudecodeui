@@ -15,6 +15,7 @@ import type { MCPServerStatus, SidebarProps } from '../types/types';
 
 import SidebarCollapsed from './subcomponents/SidebarCollapsed';
 import SidebarContent from './subcomponents/SidebarContent';
+import SidebarUsageLimits from './subcomponents/SidebarUsageLimits';
 import SidebarModals from './subcomponents/SidebarModals';
 import type { SidebarProjectListProps } from './subcomponents/SidebarProjectList';
 
@@ -288,6 +289,7 @@ function Sidebar({
         />
       ) : (
         <>
+        <SidebarUsageLimits />
         <SidebarContent
             isPWA={isPWA}
             isMobile={isMobile}

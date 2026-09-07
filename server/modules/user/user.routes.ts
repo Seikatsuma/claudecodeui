@@ -46,6 +46,14 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
     }
   });
 
+  router.get('/usage-limits', async (req, res, next) => {
+    try {
+      res.json(await service.getUsageLimits());
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/owner-account-info', async (req, res, next) => {
     try {
       res.json(await service.getOwnerAccountEmail(readUserId(req)));
