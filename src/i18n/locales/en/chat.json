@@ -213,14 +213,6 @@
     "defaultCommand": "command"
   },
   "claudeStatus": {
-    "actions": {
-      "thinking": "Thinking",
-      "processing": "Processing",
-      "analyzing": "Analyzing",
-      "working": "Working",
-      "computing": "Computing",
-      "reasoning": "Reasoning"
-    },
     "state": {
       "live": "Live",
       "paused": "Paused"
@@ -238,6 +230,16 @@
     },
     "providers": {
       "assistant": "Assistant"
+    },
+    "phase": {
+      "thinking": "Thinking",
+      "writing": "Writing",
+      "tool": "Working",
+      "toolNamed": "Running {{tool}}",
+      "agents": "Agents running",
+      "agentsCount_one": "{{count}} agent running",
+      "agentsCount_other": "{{count}} agents running",
+      "waiting": "Waiting for the model"
     }
   },
   "projectSelection": {

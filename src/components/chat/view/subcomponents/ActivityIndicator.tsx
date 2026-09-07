@@ -10,16 +10,24 @@ type ActivityIndicatorProps = {
   isInputFocused?: boolean;
 };
 
-const ACTION_KEYS = [
-  'claudeStatus.actions.thinking',
-  'claudeStatus.actions.processing',
-  'claudeStatus.actions.analyzing',
-  'claudeStatus.actions.working',
-  'claudeStatus.actions.computing',
-  'claudeStatus.actions.reasoning',
-];
-const DEFAULT_ACTION_WORDS = ['Thinking', 'Processing', 'Analyzing', 'Working', 'Computing', 'Reasoning'];
 const EXIT_ANIMATION_MS = 220;
+
+/**
+ * Подписи фаз. Каждая соответствует событию, которое действительно пришло по
+ * потоку (см. ActivityPhase в useSessionProtection), поэтому по индикатору
+ * можно судить о происходящем, а не гадать.
+ *
+ * Прежняя версия перебирала шесть выдуманных слов по таймеру каждые 4
+ * секунды. Выглядело живо, но означало ровно ничего: «Analyzing…» появлялось
+ * и когда модель рассуждала, и когда запрос молча завис.
+ */
+const PHASE_LABELS: Record<string, { key: string; fallback: string }> = {
+  thinking: { key: 'claudeStatus.phase.thinking', fallback: 'Думает' },
+  writing: { key: 'claudeStatus.phase.writing', fallback: 'Пишет ответ' },
+  tool: { key: 'claudeStatus.phase.tool', fallback: 'Работает' },
+  agents: { key: 'claudeStatus.phase.agents', fallback: 'Работают агенты' },
+  waiting: { key: 'claudeStatus.phase.waiting', fallback: 'Ожидает модель' },
+};
 
 /**
  * Minimal response-in-progress indicator, in the spirit of the inline status
@@ -63,9 +71,23 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
 
   if (!renderedActivity) return null;
 
-  const actionWords = ACTION_KEYS.map((key, i) => t(key, { defaultValue: DEFAULT_ACTION_WORDS[i] }));
-  const label = (renderedActivity.statusText || actionWords[Math.floor(elapsedSeconds / 4) % actionWords.length])
-    .replace(/\.+$/, '');
+  // Приоритет: строка статуса от провайдера → живая фаза потока → честное
+  // «ожидает», пока не пришло ни одного события. Ничего не выдумывается.
+  const phase = renderedActivity.phase;
+  const detail = renderedActivity.detail;
+  let phaseLabel: string;
+  if (phase === 'tool' && detail) {
+    phaseLabel = t('claudeStatus.phase.toolNamed', { tool: detail, defaultValue: `Работает: ${detail}` });
+  } else if (phase === 'agents' && detail) {
+    phaseLabel = t('claudeStatus.phase.agentsCount', {
+      count: Number(detail) || 1,
+      defaultValue: `Работают агенты: ${detail}`,
+    });
+  } else {
+    const entry = PHASE_LABELS[phase ?? 'waiting'] ?? PHASE_LABELS.waiting;
+    phaseLabel = t(entry.key, { defaultValue: entry.fallback });
+  }
+  const label = (renderedActivity.statusText || phaseLabel).replace(/\.+$/, '');
 
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = elapsedSeconds % 60;

@@ -90,6 +90,12 @@ export function useChatRealtimeHandlers({
   // to rebind the websocket listener. Read the visible session id from a ref
   // so a fast `chat_subscribed` ack is matched against the current view, not
   // the previous render's closed-over selection.
+  // Идентификаторы незавершённых запусков суб-агентов (инструмент Task) на
+  // сессию. Живёт в ref, а не в состоянии: обновляется на каждом событии
+  // потока и не должен вызывать перерисовку сам по себе — подпись меняет
+  // onSessionProcessing.
+  const activeAgentsRef = useRef<Map<string, Set<string>>>(new Map());
+
   const activeViewSessionIdRef = useRef<string | null>(selectedSession?.id || currentSessionId || null);
   activeViewSessionIdRef.current = selectedSession?.id || currentSessionId || null;
   const isActiveRef = useRef(isActive);
@@ -244,6 +250,10 @@ export function useChatRealtimeHandlers({
       if (msg.kind === 'thinking_delta') {
         const text = (msg.content as string) || '';
         if (!text || !sid) return;
+        // Каждый delta размышления — прямое доказательство, что модель думает
+        // прямо сейчас. Раньше индикатор об этом не знал и крутил выдуманные
+        // слова по таймеру, из-за чего «думает» и «завис» выглядели одинаково.
+        onSessionProcessing?.(sid, { phase: 'thinking', detail: null, canInterrupt: true });
         if (!accumulatedThinkingRef.current.has(sid)) {
           thinkingStartedAtRef.current.set(sid, Date.now());
         }
@@ -269,6 +279,7 @@ export function useChatRealtimeHandlers({
       if (msg.kind === 'stream_delta') {
         const text = (msg.content as string) || '';
         if (!text || !sid) return;
+        onSessionProcessing?.(sid, { phase: 'writing', detail: null, canInterrupt: true });
         accumulatedStreamRef.current.set(sid, (accumulatedStreamRef.current.get(sid) ?? '') + text);
         if (!streamTimerRef.current.has(sid)) {
           streamTimerRef.current.set(sid, window.setTimeout(() => {
@@ -314,6 +325,40 @@ export function useChatRealtimeHandlers({
 
       if (sid && shouldPersist) {
         sessionStore.appendRealtime(sid, msg as unknown as NormalizedMessage);
+      }
+
+      // --- Живая фаза: инструменты и суб-агенты ---
+      // Task — это запуск суб-агента, поэтому он считается отдельно: их может
+      // идти несколько одновременно, и «работают 3 агента» — единственная
+      // подпись, по которой видно, что происходит именно это.
+      if (sid && msg.kind === 'tool_use') {
+        const toolName = typeof msg.toolName === 'string' ? msg.toolName : '';
+        const toolId = typeof msg.toolId === 'string' ? msg.toolId : '';
+        if (toolName === 'Task' && toolId) {
+          const running = activeAgentsRef.current.get(sid) ?? new Set<string>();
+          running.add(toolId);
+          activeAgentsRef.current.set(sid, running);
+          onSessionProcessing?.(sid, { phase: 'agents', detail: String(running.size), canInterrupt: true });
+        } else if (toolName) {
+          onSessionProcessing?.(sid, { phase: 'tool', detail: toolName, canInterrupt: true });
+        }
+      }
+
+      if (sid && msg.kind === 'tool_result') {
+        const toolId = typeof msg.toolId === 'string' ? msg.toolId : '';
+        const running = activeAgentsRef.current.get(sid);
+        if (running && toolId && running.delete(toolId)) {
+          if (running.size > 0) {
+            onSessionProcessing?.(sid, { phase: 'agents', detail: String(running.size), canInterrupt: true });
+          } else {
+            activeAgentsRef.current.delete(sid);
+            onSessionProcessing?.(sid, { phase: 'waiting', detail: null, canInterrupt: true });
+          }
+        } else if (!running || running.size === 0) {
+          // Инструмент отработал, ответа модели ещё нет — это честное
+          // «ждём», а не «думает».
+          onSessionProcessing?.(sid, { phase: 'waiting', detail: null, canInterrupt: true });
+        }
       }
 
       // --- UI side effects for specific kinds ---

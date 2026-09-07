@@ -197,14 +197,6 @@
     "defaultCommand": "команда"
   },
   "claudeStatus": {
-    "actions": {
-      "thinking": "Думает",
-      "processing": "Обрабатывает",
-      "analyzing": "Анализирует",
-      "working": "Работает",
-      "computing": "Вычисляет",
-      "reasoning": "Рассуждает"
-    },
     "state": {
       "live": "В сети",
       "paused": "Приостановлен"
@@ -222,7 +214,18 @@
     "providers": {
       "assistant": "Ассистент"
     },
-    "stop": "Остановить"
+    "stop": "Остановить",
+    "phase": {
+      "thinking": "Думает",
+      "writing": "Пишет ответ",
+      "tool": "Работает",
+      "toolNamed": "Работает: {{tool}}",
+      "agents": "Работают агенты",
+      "agentsCount_one": "Работает {{count}} агент",
+      "agentsCount_few": "Работают {{count}} агента",
+      "agentsCount_many": "Работают {{count}} агентов",
+      "waiting": "Ожидает модель"
+    }
   },
   "projectSelection": {
     "startChatWithProvider": "Выберите проект для начала чата с {{provider}}"
