@@ -340,6 +340,10 @@ function AppContentInner() {
             availH: String(window.screen.availHeight),
             headerPad: styles.getPropertyValue('--header-total-padding').trim(),
             dpr: String(window.devicePixelRatio),
+            // Решающее число: где окно приложения стоит на экране.
+            // 0 — значит пустая полоса снизу, 62 — значит сверху.
+            screenY: String(window.screenY),
+            outerH: String(window.outerHeight),
         });
         void fetch(`/api/layout-probe?${probe.toString()}`).catch(() => {});
       }, 2500);

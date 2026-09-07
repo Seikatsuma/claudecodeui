@@ -13,11 +13,79 @@ export const formatCompactAge = (
   if (Number.isNaN(date.getTime())) return '';
 
   const minutes = Math.floor(Math.max(0, currentTime.getTime() - date.getTime()) / 60000);
-  if (minutes < 1) return '<1m';
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1) return 'только что';
+  if (minutes < 60) return `${minutes} мин`;
 
   const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}hr` : `${Math.floor(hours / 24)}d`;
+  return hours < 24 ? `${hours} ч` : `${Math.floor(hours / 24)} дн`;
+};
+
+/**
+ * Раскладка списка бесед по дням — «Сегодня», «Вчера», «7 дней» и так далее.
+ *
+ * Плоский список из полусотни строк читается плохо: все они выглядят
+ * одинаково, и чтобы понять, где вчерашняя работа, приходится вглядываться в
+ * возраст у каждой. Заголовок со счётчиком отвечает на это сразу. Так же
+ * устроены списки в панели Клода для VS Code и на claude.ai.
+ */
+export type RecencyBucketKey = 'today' | 'yesterday' | 'week' | 'month' | 'older' | 'undated';
+
+export const RECENCY_BUCKET_TITLES: Record<RecencyBucketKey, string> = {
+  today: 'Сегодня',
+  yesterday: 'Вчера',
+  week: 'Последние 7 дней',
+  month: 'Последние 30 дней',
+  older: 'Раньше',
+  undated: 'Без даты',
+};
+
+const BUCKET_ORDER: RecencyBucketKey[] = ['today', 'yesterday', 'week', 'month', 'older', 'undated'];
+
+/** В какую корзину попадает дата. Считаем по календарным суткам, не по часам:
+ *  беседа в 23:50 вчера — это «Вчера», а не «7 часов назад». */
+export const recencyBucketOf = (
+  dateString: string | null | undefined,
+  currentTime: Date,
+): RecencyBucketKey => {
+  if (!dateString) return 'undated';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return 'undated';
+
+  const startOfToday = new Date(
+    currentTime.getFullYear(),
+    currentTime.getMonth(),
+    currentTime.getDate(),
+  ).getTime();
+  const days = Math.floor((startOfToday - date.getTime()) / 86400000);
+
+  if (days < 0) return 'today';
+  if (days < 1) return 'yesterday';
+  if (days < 7) return 'week';
+  if (days < 30) return 'month';
+  return 'older';
+};
+
+/** Группы в естественном порядке; пустые не возвращаются. */
+export const groupByRecency = <T,>(
+  items: T[],
+  currentTime: Date,
+  dateOf: (item: T) => string | null | undefined,
+): { key: RecencyBucketKey; title: string; items: T[] }[] => {
+  const buckets = new Map<RecencyBucketKey, T[]>();
+  for (const item of items) {
+    const key = recencyBucketOf(dateOf(item), currentTime);
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      buckets.set(key, [item]);
+    }
+  }
+  return BUCKET_ORDER.filter((key) => buckets.get(key)?.length).map((key) => ({
+    key,
+    title: RECENCY_BUCKET_TITLES[key],
+    items: buckets.get(key) as T[],
+  }));
 };
 
 export const readProjectSortOrder = (): ProjectSortOrder => {

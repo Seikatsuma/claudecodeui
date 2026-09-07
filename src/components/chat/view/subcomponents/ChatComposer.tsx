@@ -77,7 +77,6 @@ interface ChatComposerProps {
   modelsLoading: boolean;
   tokenBudget: Record<string, unknown> | null;
   onShowTokenUsage: () => void;
-  hasInput: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   queuedDraft: QueuedDraft | null;
@@ -138,7 +137,6 @@ export default function ChatComposer({
   modelsLoading,
   tokenBudget,
   onShowTokenUsage,
-  hasInput,
   onSubmit,
   isDragActive,
   queuedDraft,
@@ -441,7 +439,7 @@ export default function ChatComposer({
         </PromptInputBody>
 
         <PromptInputFooter className="gap-2">
-          <PromptInputTools className="scrollbar-hide min-w-0 overflow-x-auto">
+          <PromptInputTools className="scrollbar-hide min-w-0 overflow-x-auto [&>*]:shrink-0">
             <PromptInputButton
               tooltip={{ content: t('input.attachFiles') }}
               onClick={openAttachmentPicker}

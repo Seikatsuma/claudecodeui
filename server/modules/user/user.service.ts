@@ -167,11 +167,13 @@ export function createUserService(dependencies: UserDependencies) {
           continue;
         }
         const now = Date.now();
+        // Отметка свежести должна относиться к тем числам, которые в итоге
+        // показаны. Иначе выходит несуразица: значения только что пришли из
+        // потока, а подпись говорит «данные не свежие», потому что файл CLI
+        // переписывался час назад.
+        let usedLive = false;
 
-        return {
-          success: true,
-          fetchedAtMs: cached?.fetchedAtMs ?? null,
-          limits: rows
+        const limits = rows
             .filter((row) => typeof row.percent === 'number')
             .map((row) => {
               const resetsAt = row.resets_at ?? null;
@@ -181,6 +183,7 @@ export function createUserService(dependencies: UserDependencies) {
               const live = liveWindows[LIVE_WINDOW_BY_KIND[row.kind ?? ''] ?? ''];
               const liveResetsAtMs = live?.resetsAt ? live.resetsAt * 1000 : Number.NaN;
               const useLive = Boolean(live) && (!Number.isFinite(resetsAtMs) || liveResetsAtMs >= resetsAtMs);
+              usedLive = usedLive || useLive;
               const percent = useLive && live
                 ? Math.round(live.utilization * 100)
                 : (row.percent as number);
@@ -200,7 +203,14 @@ export function createUserService(dependencies: UserDependencies) {
                 // Окно уже сбросилось: показывать его прежний процент нельзя.
                 expired: Number.isFinite(effectiveResetsAtMs) ? effectiveResetsAtMs <= now : false,
               };
-            }),
+            });
+
+        return {
+          success: true,
+          fetchedAtMs: usedLive && live
+            ? Math.max(live.capturedAtMs, cached?.fetchedAtMs ?? 0)
+            : (cached?.fetchedAtMs ?? null),
+          limits,
         };
       } catch {
         // Файла нет или он битый — пробуем следующий кандидат.

@@ -270,7 +270,7 @@ export default function SidebarSessionItem({
 
             <button
               type="button"
-              aria-label={`Session options for ${sessionView.sessionName}`}
+              aria-label={t('tooltips.sessionOptions', { name: sessionView.sessionName, defaultValue: `Действия с чатом «${sessionView.sessionName}»` })}
               aria-haspopup="dialog"
               aria-expanded={isMobileOptionsOpen}
               className="ml-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted active:scale-95"
@@ -530,7 +530,7 @@ export default function SidebarSessionItem({
             ) : (
               <ActionMenu
                 label="Session options"
-                ariaLabel={`Session options for ${sessionView.sessionName}`}
+                ariaLabel={t('tooltips.sessionOptions', { name: sessionView.sessionName, defaultValue: `Действия с чатом «${sessionView.sessionName}»` })}
                 icon={MoreHorizontal}
                 iconOnly
                 portal

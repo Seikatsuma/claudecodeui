@@ -29,9 +29,12 @@ export default function QuickSettingsContent({
   onPreferenceChange,
 }: QuickSettingsContentProps) {
   const { t } = useTranslation('settings');
-  const inputSettingToggles = preferences.voiceEnabled
-    ? INPUT_SETTING_TOGGLES
-    : INPUT_SETTING_TOGGLES.filter(({ key }) => key !== 'voiceEnabled');
+  // Переключатель голоса показывается всегда.
+  //
+  // Раньше он прятался, как только голос выключали, — и включить его обратно
+  // отсюда становилось нечем: дверь в одну сторону. Найти его можно было
+  // только в полных настройках, во вкладке «Голос», о чём догадаться неоткуда.
+  const inputSettingToggles = INPUT_SETTING_TOGGLES;
 
   const renderToggleRows = (items: PreferenceToggleItem[]) => (
     items.map(({ key, labelKey, icon }) => (
