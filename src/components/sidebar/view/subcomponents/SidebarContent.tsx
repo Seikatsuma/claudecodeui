@@ -13,6 +13,7 @@ import { getSessionTitle } from '../../../../utils/pageTitle';
 
 import SidebarFooter from './SidebarFooter';
 import SidebarHeader from './SidebarHeader';
+import SidebarUsageLimits from './SidebarUsageLimits';
 import SidebarProjectList, { type SidebarProjectListProps } from './SidebarProjectList';
 import SidebarProjectPickerTrigger from './SidebarProjectPickerTrigger';
 import SidebarProjectSessions from './SidebarProjectSessions';
@@ -308,6 +309,8 @@ export default function SidebarContent({
           </div>
         </div>
       )}
+
+      <SidebarUsageLimits />
 
       <ScrollArea className="flex-1 overflow-y-auto overscroll-contain md:px-1.5 md:py-2">
         {showConversationSearch ? (
