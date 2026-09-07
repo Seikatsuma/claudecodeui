@@ -11,8 +11,12 @@ type SidebarProjectPickerTriggerProps = {
   selectedProjectId: string | null;
   isProjectStarred: (projectId: string) => boolean;
   onProjectSelect: (project: Project) => void;
-  /** Controls sizing/spacing to match the desktop vs. mobile icon row it sits in. */
-  variant: 'desktop' | 'mobile';
+  /**
+   * Controls sizing/spacing to match the row it sits in: the desktop or mobile
+   * icon row, or - as 'tab' - the search-mode segmented control, where it took
+   * over the slot the Conversations tab used to occupy.
+   */
+  variant: 'desktop' | 'mobile' | 'tab';
   t: TFunction;
 };
 
@@ -88,6 +92,7 @@ export default function SidebarProjectPickerTrigger({
   }, [isOpen]);
 
   const isDesktop = variant === 'desktop';
+  const isTab = variant === 'tab';
   const label = t('projects.chatsAndFolders', { defaultValue: 'Chats and folders' });
   const mainLabel = t('projects.mainChats', { defaultValue: 'Main chats' });
   const otherLabel = t('projects.otherFolders', { defaultValue: 'Other folders' });
@@ -177,15 +182,25 @@ export default function SidebarProjectPickerTrigger({
         aria-label={label}
         title={label}
         className={cn(
-          'relative flex flex-shrink-0 items-center justify-center rounded-lg transition-all',
-          isDesktop
+          'relative flex flex-shrink-0 items-center justify-center transition-all',
+          // В полосе вкладок кнопка должна выглядеть как её соседи (архив),
+          // иначе она читается как посторонний элемент, случайно попавший внутрь.
+          isTab
+            ? 'rounded-md px-2.5 py-1.5 text-xs font-normal'
+            : 'rounded-lg',
+          !isTab && (isDesktop
             ? 'h-7 w-7 text-muted-foreground hover:bg-accent/80 hover:text-foreground'
-            : 'h-8 w-8 bg-muted/50 active:scale-95',
-          isOpen && (isDesktop ? 'bg-accent/80 text-foreground' : 'bg-accent'),
+            : 'h-8 w-8 bg-muted/50 active:scale-95'),
+          isTab && (isOpen
+            ? 'bg-background text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'),
+          !isTab && isOpen && (isDesktop ? 'bg-accent/80 text-foreground' : 'bg-accent'),
         )}
       >
         <Layers
-          className={cn(isDesktop ? 'h-3.5 w-3.5' : 'h-4 w-4 text-muted-foreground')}
+          className={cn(
+            isTab ? 'h-3 w-3' : isDesktop ? 'h-3.5 w-3.5' : 'h-4 w-4 text-muted-foreground',
+          )}
         />
       </button>
 

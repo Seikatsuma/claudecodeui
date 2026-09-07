@@ -2,7 +2,10 @@ import type { AppTab, LoadingProgress, Project, ProjectSession, LLMProvider } fr
 import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
 
 export type ProjectSortOrder = 'name' | 'date';
-export type SidebarSearchMode = 'projects' | 'conversations' | 'archived';
+// Режим «conversations» убран: после того как чаты избранной папки стали
+// показываться прямо в режиме «projects», отдельная вкладка была дублем, а её
+// место в полосе занял выбор папки.
+export type SidebarSearchMode = 'projects' | 'archived';
 export type ArchivedProjectListItem = Project & { isArchived: true };
 
 export type SessionWithProvider = ProjectSession & {
