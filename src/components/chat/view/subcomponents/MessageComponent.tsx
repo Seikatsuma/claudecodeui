@@ -130,7 +130,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 <div dir="auto" className="break-words font-serif text-sm">
                   <Markdown
                     breaks
-                    className="prose prose-sm max-w-none font-serif dark:prose-invert"
+                    className="prose prose-sm max-w-none text-[13px] leading-[1.55] [&_h1]:mt-5 [&_h2]:mt-5 [&_p]:my-0 [&_li]:my-0 dark:prose-invert"
                   >
                     {message.content}
                   </Markdown>
@@ -203,7 +203,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               <>
                 <div className="flex flex-col">
                   <div className="flex flex-col">
-                    <Markdown className="prose prose-sm max-w-none font-serif dark:prose-invert">
+                    <Markdown className="prose prose-sm max-w-none text-[13px] leading-[1.55] [&_h1]:mt-5 [&_h2]:mt-5 [&_p]:my-0 [&_li]:my-0 dark:prose-invert">
                       {String(message.displayText || '')}
                     </Markdown>
                   </div>
@@ -349,7 +349,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               >
                 <ReasoningTrigger />
                 <ReasoningContent>
-                  <Markdown className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert">
+                  <Markdown className="prose prose-sm prose-gray max-w-none text-[13px] leading-[1.55] [&_h1]:mt-5 [&_h2]:mt-5 [&_p]:my-0 [&_li]:my-0 dark:prose-invert">
                     {message.content}
                   </Markdown>
                   <div className="mt-3 flex items-center text-[11px]">
@@ -406,7 +406,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
 
                   // Normal rendering for non-JSON content
                   return message.type === 'assistant' ? (
-                    <Markdown className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert">
+                    <Markdown className="prose prose-sm prose-gray max-w-none text-[13px] leading-[1.55] [&_h1]:mt-5 [&_h2]:mt-5 [&_p]:my-0 [&_li]:my-0 dark:prose-invert">
                       {content}
                     </Markdown>
                   ) : (

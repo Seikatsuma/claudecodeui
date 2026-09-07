@@ -27,7 +27,7 @@ import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/pris
 import { useTranslation } from 'react-i18next';
 
 import MermaidDiagram from '../../../code-editor/view/subcomponents/markdown/MermaidDiagram';
-import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
+import { normalizeInlineCodeFences, separateMarkdownBlocks } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
 import { useTheme } from '../../../../contexts/ThemeContext';
@@ -69,7 +69,8 @@ SyntaxHighlighter.registerLanguage('yaml', lang_yaml);
 type MarkdownProps = {
   children: React.ReactNode;
   className?: string;
-  /** Render single newlines as hard line breaks (for user-typed messages). */
+  /** Оставлен для совместимости вызовов: переносы строк теперь значимы
+   *  всегда, и отдельный признак ни на что не влияет. */
   breaks?: boolean;
 };
 
@@ -247,14 +248,32 @@ const markdownComponents = {
     </blockquote>
   ),
   hr: () => <hr className="my-4 border-t border-border" />,
-  p: ({ children }: { children?: React.ReactNode }) => <div className="mb-2 last:mb-0">{children}</div>,
+
+  // Заголовки: заметный отрыв сверху, минимальный снизу — чтобы заголовок
+  // читался как начало блока, а не висел между двумя одинаковыми пробелами.
+  h1: ({ children }: { children?: React.ReactNode }) => (
+    <h2 className="mb-2 mt-5 text-[17px] font-semibold leading-snug text-foreground first:mt-0">{children}</h2>
+  ),
+  h2: ({ children }: { children?: React.ReactNode }) => (
+    <h3 className="mb-2 mt-5 text-[15px] font-semibold leading-snug text-foreground first:mt-0">{children}</h3>
+  ),
+  h3: ({ children }: { children?: React.ReactNode }) => (
+    <h4 className="mb-1.5 mt-4 text-[14px] font-semibold leading-snug text-foreground first:mt-0">{children}</h4>
+  ),
+  h4: ({ children }: { children?: React.ReactNode }) => (
+    <h5 className="mb-1.5 mt-4 text-[13px] font-semibold leading-snug text-foreground first:mt-0">{children}</h5>
+  ),
+
+  p: ({ children }: { children?: React.ReactNode }) => <div className="mb-2.5 last:mb-0">{children}</div>,
   ul: ({ children }: { children?: React.ReactNode }) => (
-    <ul className="mb-2 list-outside list-disc space-y-1 pl-5 marker:text-current last:mb-0">{children}</ul>
+    <ul className="mb-2.5 list-outside list-disc space-y-1 pl-5 marker:text-muted-foreground last:mb-0">{children}</ul>
   ),
   ol: ({ children }: { children?: React.ReactNode }) => (
-    <ol className="mb-2 list-outside list-decimal space-y-1 pl-5 marker:text-current last:mb-0">{children}</ol>
+    <ol className="mb-2.5 list-outside list-decimal space-y-1 pl-6 marker:text-muted-foreground marker:tabular-nums last:mb-0">{children}</ol>
   ),
-  li: ({ children }: { children?: React.ReactNode }) => <li className="[&>div:last-child]:mb-0 [&>div]:mb-1">{children}</li>,
+  li: ({ children }: { children?: React.ReactNode }) => (
+    <li className="pl-0.5 [&>div:last-child]:mb-0 [&>div]:mb-1">{children}</li>
+  ),
   table: ({ children }: { children?: React.ReactNode }) => (
     <div className="my-3 overflow-x-auto rounded-lg border border-border">
       {/* my-0 cancels Tailwind Typography's table margin, which would show as blank bands inside the border */}
@@ -273,14 +292,12 @@ const markdownComponents = {
   ),
 };
 
-export function Markdown({ children, className, breaks = false }: MarkdownProps) {
-  const content = normalizeInlineCodeFences(String(children ?? ''));
-  const remarkPlugins = useMemo(
-    () => (breaks
-      ? [remarkGfm, remarkBreaks]
-      : [remarkGfm]) as any,
-    [breaks],
-  );
+export function Markdown({ children, className }: MarkdownProps) {
+  const content = separateMarkdownBlocks(normalizeInlineCodeFences(String(children ?? '')));
+  // Перенос строки теперь значим везде, а не только в репликах человека.
+  // Модель разбивает мысль на строки осмысленно; склеивать их обратно в
+  // сплошной абзац — ровно то, на что было больно смотреть.
+  const remarkPlugins = useMemo(() => [remarkGfm, remarkBreaks] as any, []);
   const { openFileInEditor } = usePaletteOps();
 
   const components = useMemo(
