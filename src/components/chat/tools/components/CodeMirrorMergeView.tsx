@@ -1,9 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { EditorView, lineNumbers } from '@codemirror/view';
 import { EditorState, type Extension } from '@codemirror/state';
 import { MergeView } from '@codemirror/merge';
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 import { oneDark } from '@codemirror/theme-one-dark';
+
+import { getLanguageExtensions } from '../../../code-editor/utils/editorExtensions';
 
 // One-time stylesheet for the split diff view — injected lazily into
 // <head> the first time a MergeView mounts, rather than per-instance
@@ -47,8 +49,11 @@ interface CodeMirrorMergeViewProps {
   oldContent: string;
   /** Content of the "after" (right) pane. */
   newContent: string;
-  /** Language extensions for syntax highlighting, shared by both panes. */
-  languageExtensions: Extension[];
+  /** Путь к файлу — по нему подбирается подсветка для обеих половин.
+   *  Раньше расширения языка вычислялись снаружи, и из-за этого весь
+   *  CodeMirror оказывался в стартовой загрузке даже у тех, кто ни одной
+   *  правки файла в чате не открывал. */
+  filePath: string;
   isDarkMode: boolean;
 }
 
@@ -65,10 +70,11 @@ interface CodeMirrorMergeViewProps {
 export const CodeMirrorMergeView: React.FC<CodeMirrorMergeViewProps> = ({
   oldContent,
   newContent,
-  languageExtensions,
+  filePath,
   isDarkMode,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const languageExtensions = useMemo(() => getLanguageExtensions(filePath || ''), [filePath]);
 
   useEffect(() => {
     ensureMergeViewStylesInjected();
@@ -105,3 +111,5 @@ export const CodeMirrorMergeView: React.FC<CodeMirrorMergeViewProps> = ({
 
   return <div ref={containerRef} className="cm-tool-diff-merge-view" />;
 };
+
+export default CodeMirrorMergeView;
