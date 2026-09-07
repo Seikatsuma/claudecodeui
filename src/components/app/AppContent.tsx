@@ -298,10 +298,14 @@ function AppContentInner() {
     update();
 
 
-    // Разовый отчёт с установленного приложения: что именно сообщает iOS.
-    // Иначе причину пустой полосы приходится угадывать — на сервере этот
-    // режим не воспроизводится. Убрать вместе с /api/layout-probe.
-    if (isStandalone) {
+    // Разовый отчёт с устройства: что именно сообщает браузер.
+    //
+    // Раньше отчёт слался только из приложения с экрана «Домой». Но пустая
+    // полоса снизу видна и в обычном браузере телефона, а на сервере ни то,
+    // ни другое не воспроизводится: в отладочном браузере поле ввода
+    // упирается в низ, просвет 4 точки. Поэтому шлём отовсюду — и указываем,
+    // откуда именно. Убрать вместе с /api/layout-probe.
+    {
       window.setTimeout(() => {
         const root = document.getElementById('root');
         const shell = document.querySelector('.fixed.inset-0');
@@ -340,6 +344,8 @@ function AppContentInner() {
             availH: String(window.screen.availHeight),
             headerPad: styles.getPropertyValue('--header-total-padding').trim(),
             dpr: String(window.devicePixelRatio),
+            изПриложения: String(isStandalone),
+            браузер: navigator.userAgent.slice(0, 60),
             // Решающее число: где окно приложения стоит на экране.
             // 0 — значит пустая полоса снизу, 62 — значит сверху.
             screenY: String(window.screenY),
