@@ -109,9 +109,12 @@ export default function ToolGroupContainer({
           {icon}
         </span>
         <span className="min-w-0 flex-shrink-0 text-xs font-medium text-foreground">{label}</span>
-        <span className="flex-shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-          x{group.messages.length}
-        </span>
+        {/* «x1» не пишем: счётчик нужен, только когда вызовов правда несколько. */}
+        {group.messages.length > 1 && (
+          <span className="flex-shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            x{group.messages.length}
+          </span>
+        )}
         {preview && (
           <>
             <span className="text-[10px] text-muted-foreground/40">/</span>
