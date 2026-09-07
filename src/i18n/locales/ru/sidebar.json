@@ -45,7 +45,16 @@
     "organizeFailed": "Не удалось сгруппировать чаты",
     "sessionCount_one": "чат",
     "sessionCount_other": "чатов",
-    "loadMore": "Показать ещё чаты"
+    "loadMore": "Показать ещё чаты",
+    "group": {
+      "running": "Сейчас работает",
+      "today": "Сегодня",
+      "yesterday": "Вчера",
+      "week": "Последние 7 дней",
+      "month": "Последние 30 дней",
+      "older": "Раньше",
+      "undated": "Без даты"
+    }
   },
   "tooltips": {
     "viewEnvironments": "Просмотр окружений",
