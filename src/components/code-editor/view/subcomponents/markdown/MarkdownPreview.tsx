@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
-import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
+
 import MarkdownCodeBlock from './MarkdownCodeBlock';
 
 type MarkdownPreviewProps = {
@@ -40,13 +39,11 @@ const markdownPreviewComponents: Components = {
 };
 
 export default function MarkdownPreview({ content }: MarkdownPreviewProps) {
-  const remarkPlugins = useMemo(() => [remarkGfm, [remarkMath, { singleDollarTextMath: false }]] as any, []);
-  const rehypePlugins = useMemo(() => [rehypeKatex], []);
+  const remarkPlugins = useMemo(() => [remarkGfm] as any, []);
 
   return (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
-      rehypePlugins={rehypePlugins}
       components={markdownPreviewComponents}
     >
       {content}

@@ -2,9 +2,27 @@ import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
+import lang_bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
+import lang_css from 'react-syntax-highlighter/dist/esm/languages/prism/css';
+import lang_diff from 'react-syntax-highlighter/dist/esm/languages/prism/diff';
+import lang_docker from 'react-syntax-highlighter/dist/esm/languages/prism/docker';
+import lang_go from 'react-syntax-highlighter/dist/esm/languages/prism/go';
+import lang_ini from 'react-syntax-highlighter/dist/esm/languages/prism/ini';
+import lang_java from 'react-syntax-highlighter/dist/esm/languages/prism/java';
+import lang_javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
+import lang_json from 'react-syntax-highlighter/dist/esm/languages/prism/json';
+import lang_jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx';
+import lang_markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown';
+import lang_markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup';
+import lang_nginx from 'react-syntax-highlighter/dist/esm/languages/prism/nginx';
+import lang_php from 'react-syntax-highlighter/dist/esm/languages/prism/php';
+import lang_python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import lang_rust from 'react-syntax-highlighter/dist/esm/languages/prism/rust';
+import lang_sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
+import lang_tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx';
+import lang_typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
+import lang_yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTranslation } from 'react-i18next';
 
@@ -13,6 +31,40 @@ import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
 import { useTheme } from '../../../../contexts/ThemeContext';
+
+/**
+ * Подсветка кода — только те языки, которые встречаются в этих чатах.
+ *
+ * Обычный `Prism` из react-syntax-highlighter тянет грамматики трёхсот языков
+ * — почти шесть мегабайт исходника, и всё это разбирается браузером при
+ * старте, включая ассемблер PL/I и язык разметки Wolfram. Здесь их два
+ * десятка, зарегистрированных вручную: если попадётся незнакомый, блок
+ * покажется без раскраски, но читаемым.
+ */
+SyntaxHighlighter.registerLanguage('bash', lang_bash);
+SyntaxHighlighter.registerLanguage('css', lang_css);
+SyntaxHighlighter.registerLanguage('diff', lang_diff);
+SyntaxHighlighter.registerLanguage('docker', lang_docker);
+SyntaxHighlighter.registerLanguage('go', lang_go);
+SyntaxHighlighter.registerLanguage('ini', lang_ini);
+SyntaxHighlighter.registerLanguage('java', lang_java);
+SyntaxHighlighter.registerLanguage('javascript', lang_javascript);
+SyntaxHighlighter.registerLanguage('json', lang_json);
+SyntaxHighlighter.registerLanguage('jsx', lang_jsx);
+SyntaxHighlighter.registerLanguage('markdown', lang_markdown);
+SyntaxHighlighter.registerLanguage('markup', lang_markup);
+SyntaxHighlighter.registerLanguage('nginx', lang_nginx);
+SyntaxHighlighter.registerLanguage('php', lang_php);
+SyntaxHighlighter.registerLanguage('python', lang_python);
+SyntaxHighlighter.registerLanguage('rust', lang_rust);
+SyntaxHighlighter.registerLanguage('sql', lang_sql);
+SyntaxHighlighter.registerLanguage('tsx', lang_tsx);
+SyntaxHighlighter.registerLanguage('typescript', lang_typescript);
+SyntaxHighlighter.registerLanguage('yaml', lang_yaml);
+
+/* Формулы KaTeX убраны: таблица стилей к ним никогда не подключалась, то
+   есть математика и так рисовалась неоформленной, а библиотека занимала
+   заметный кусок того, что грузится при старте. */
 
 type MarkdownProps = {
   children: React.ReactNode;
@@ -225,11 +277,10 @@ export function Markdown({ children, className, breaks = false }: MarkdownProps)
   const content = normalizeInlineCodeFences(String(children ?? ''));
   const remarkPlugins = useMemo(
     () => (breaks
-      ? [remarkGfm, [remarkMath, { singleDollarTextMath: false }], remarkBreaks]
-      : [remarkGfm, [remarkMath, { singleDollarTextMath: false }]]) as any,
+      ? [remarkGfm, remarkBreaks]
+      : [remarkGfm]) as any,
     [breaks],
   );
-  const rehypePlugins = useMemo(() => [rehypeKatex], []);
   const { openFileInEditor } = usePaletteOps();
 
   const components = useMemo(
@@ -273,7 +324,7 @@ export function Markdown({ children, className, breaks = false }: MarkdownProps)
 
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components as any}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={components as any}>
         {content}
       </ReactMarkdown>
     </div>
