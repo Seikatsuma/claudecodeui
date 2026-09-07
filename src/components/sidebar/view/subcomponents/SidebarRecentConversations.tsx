@@ -4,9 +4,10 @@ import type { TFunction } from 'i18next';
 
 import { Button } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
+import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { ProjectSession } from '../../../../types/app';
 import type { RecentConversationListItem } from '../../types/types';
-import { formatCompactAge } from '../../utils/utils';
+import { formatCompactAge, groupByRecency } from '../../utils/utils';
 import LLMProviderLogo from '../../../llm-provider-logo/LLMProviderLogo';
 
 type SidebarRecentConversationsProps = {
@@ -17,6 +18,7 @@ type SidebarRecentConversationsProps = {
   isLoadingMore: boolean;
   hasError: boolean;
   selectedSession: ProjectSession | null;
+  activeSessions: SessionActivityMap;
   currentTime: Date;
   onConversationSelect: (
     projectId: string | null,
@@ -52,6 +54,7 @@ export default function SidebarRecentConversations({
   isLoadingMore,
   hasError,
   selectedSession,
+  activeSessions,
   currentTime,
   onConversationSelect,
   onLoadMore,
@@ -90,6 +93,22 @@ export default function SidebarRecentConversations({
     );
   }
 
+  // Беседы разложены по дням: заголовок со счётчиком отвечает на вопрос
+  // «где вчерашняя работа» сразу, без вглядывания в возраст каждой строки.
+  //
+  // Отдельно и первым — то, что Клод обдумывает прямо сейчас. Это главное, за
+  // чем возвращаются в список: с телефона ответ ждут не глядя в экран, и найти
+  // работающую беседу нужно одним движением, а не поиском зелёной точки по
+  // всему списку.
+  const running = conversations.filter((item) => activeSessions.has(item.sessionId));
+  const idle = conversations.filter((item) => !activeSessions.has(item.sessionId));
+  const groups = [
+    ...(running.length > 0
+      ? [{ key: 'running' as const, title: 'Сейчас работает', items: running }]
+      : []),
+    ...groupByRecency(idle, currentTime, (item) => item.lastActivity),
+  ];
+
   return (
     <div className="px-1" data-testid="recent-conversations-list">
       <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
@@ -99,9 +118,19 @@ export default function SidebarRecentConversations({
         <span className="text-[10px] tabular-nums text-muted-foreground/70">{total}</span>
       </div>
 
-      <div className="space-y-0.5">
-        {conversations.map((conversation) => {
+      {groups.map((group) => (
+      <div key={group.key} className="space-y-0.5">
+        <div className="sticky top-0 z-10 flex items-baseline gap-1.5 bg-background/95 px-2 pb-1 pt-2 backdrop-blur-sm">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {group.title}
+          </span>
+          <span className="text-[10px] tabular-nums text-muted-foreground/50">
+            {group.items.length}
+          </span>
+        </div>
+        {group.items.map((conversation) => {
           const isSelected = String(selectedSession?.id ?? '') === conversation.sessionId;
+          const isRunning = activeSessions.has(conversation.sessionId);
           const age = formatCompactAge(conversation.lastActivity, currentTime);
 
           const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -136,6 +165,14 @@ export default function SidebarRecentConversations({
                 <LLMProviderLogo provider={conversation.provider} className="h-3.5 w-3.5" />
               </span>
 
+              {isRunning && (
+                <span
+                  role="status"
+                  aria-label={t('tooltips.activeSessionIndicator', { defaultValue: 'Клод работает' })}
+                  className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-green-500"
+                />
+              )}
+
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-normal leading-4">
                   {conversation.sessionTitle}
@@ -158,6 +195,7 @@ export default function SidebarRecentConversations({
           );
         })}
       </div>
+      ))}
 
       {hasMore && (
         <Button

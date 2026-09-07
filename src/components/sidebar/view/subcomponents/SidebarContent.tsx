@@ -487,6 +487,7 @@ export default function SidebarContent({
             isLoadingMore={isLoadingMoreRecentConversations}
             hasError={recentConversationsError}
             selectedSession={projectListProps.selectedSession}
+            activeSessions={projectListProps.activeSessions}
             currentTime={projectListProps.currentTime}
             onConversationSelect={onConversationResultClick}
             onLoadMore={onLoadMoreRecentConversations}
