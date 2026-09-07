@@ -122,7 +122,7 @@ export default function SidebarRecentConversations({
       <div key={group.key} className="space-y-0.5">
         <div className="sticky top-0 z-10 flex items-baseline gap-1.5 bg-background/95 px-2 pb-1 pt-2 backdrop-blur-sm">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {group.title}
+            {t(`recent.group.${group.key}`, { defaultValue: group.title })}
           </span>
           <span className="text-[10px] tabular-nums text-muted-foreground/50">
             {group.items.length}
@@ -168,7 +168,7 @@ export default function SidebarRecentConversations({
               {isRunning && (
                 <span
                   role="status"
-                  aria-label={t('tooltips.activeSessionIndicator', { defaultValue: 'Клод работает' })}
+                  aria-label={t('tooltips.runningNow', { defaultValue: 'Клод работает сейчас' })}
                   className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-green-500"
                 />
               )}

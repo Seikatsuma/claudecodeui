@@ -65,7 +65,8 @@
     "clearSearch": "Очистить поиск",
     "openCommandPalette": "Открыть палитру команд",
     "attentionRequiredIndicator": "Сессия требует внимания",
-    "processingSessionIndicator": "Чат сейчас работает"
+    "processingSessionIndicator": "Чат сейчас работает",
+    "runningNow": "Клод работает сейчас"
   },
   "navigation": {
     "chat": "Чат",
@@ -173,7 +174,16 @@
     "emptyDescription": "Здесь появятся чаты, в которых вы писали последними.",
     "loadFailed": "Не удалось загрузить недавние чаты",
     "loadMore": "Показать более ранние",
-    "loadingMore": "Загружаю…"
+    "loadingMore": "Загружаю…",
+    "group": {
+      "running": "Сейчас работает",
+      "today": "Сегодня",
+      "yesterday": "Вчера",
+      "week": "Последние 7 дней",
+      "month": "Последние 30 дней",
+      "older": "Раньше",
+      "undated": "Без даты"
+    }
   },
   "tabs": {
     "views": "Разделы"
@@ -183,5 +193,13 @@
     "emptyTitle": "Сейчас ничего не выполняется",
     "emptyDescription": "Здесь появятся чаты, которые работают или ждут вашего ответа.",
     "noMatchingSessions": "По этому запросу активных чатов нет."
+  },
+  "usage": {
+    "title": "Расход",
+    "session": "Сеанс (5 ч)",
+    "weekly": "Неделя (7 дней)",
+    "other": "Прочий лимит",
+    "resetsIn": "Обновится через {{time}}",
+    "stale": "данные не свежие"
   }
 }
