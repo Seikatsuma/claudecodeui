@@ -132,6 +132,8 @@ function resolveClaudeEffort(model, effort, modelsDefinition = CLAUDE_PREDEFINED
     : undefined;
 }
 
+import { recordRateLimitEvent } from '@/modules/providers/services/usage-limits.store.js';
+
 function createRequestId() {
   if (typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -951,6 +953,12 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
     for await (const message of queryInstance) {
       lastMessageAt = Date.now();
+
+      // Лимиты подписки приходят прямо в потоке — забираем их бесплатно,
+      // вместо отдельного прогона, который тратил бы ту же квоту.
+      if (message?.type === 'rate_limit_event' && message.rate_limit_info) {
+        recordRateLimitEvent(sdkOptions?.env?.CLAUDE_CONFIG_DIR || '', message.rate_limit_info);
+      }
       // Capture session ID from first message
       if (message.session_id && !capturedSessionId) {
 

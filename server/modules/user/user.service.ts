@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
@@ -125,8 +126,16 @@ export function createUserService(dependencies: UserDependencies) {
      * протухшее число нельзя.
      */
     async getUsageLimits() {
+      // CLI держит кэш расхода в ДОМАШНЕМ ~/.claude.json, а не в файле внутри
+      // каталога аккаунта: там лежат только настройки. Поэтому смотрим оба —
+      // сначала файл аккаунта, потом домашний, и берём тот, где кэш вообще
+      // есть. Замер на сервере: в ~/.claude-webuser-1/.claude.json раздела
+      // cachedUsageUtilization нет, в ~/.claude.json — есть.
+      const candidates = [getClaudeJsonPath(), path.join(os.homedir(), '.claude.json')];
+
+      for (const candidate of candidates) {
       try {
-        const raw = await readFile(getClaudeJsonPath(), 'utf-8');
+        const raw = await readFile(candidate, 'utf-8');
         const parsed = JSON.parse(raw) as {
           cachedUsageUtilization?: {
             fetchedAtMs?: number;
@@ -144,6 +153,9 @@ export function createUserService(dependencies: UserDependencies) {
 
         const cached = parsed.cachedUsageUtilization;
         const rows = cached?.utilization?.limits ?? [];
+        if (rows.length === 0) {
+          continue;
+        }
         const now = Date.now();
 
         return {
@@ -166,8 +178,11 @@ export function createUserService(dependencies: UserDependencies) {
             }),
         };
       } catch {
-        return { success: true, fetchedAtMs: null, limits: [] };
+        // Файла нет или он битый — пробуем следующий кандидат.
       }
+      }
+
+      return { success: true, fetchedAtMs: null, limits: [] };
     },
 
     async getOwnerAccountEmail(userId: number) {
