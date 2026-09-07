@@ -162,20 +162,6 @@
     box-sizing: border-box;
   }
   
-  /* Установленное приложение: iOS уже отдаёт окно НИЖЕ строки состояния —
-     замер на телефоне владельца: экран 874, окно 812, верхняя зона 62. При
-     этом env(safe-area-inset-top) продолжает сообщать те же 62, и правила
-     ниже прибавляли их второй раз: корень получал отступ 62, оболочка
-     начиналась с 70. Содержимое уезжало вниз, а под ним оставалась пустота.
-
-     Класс ставится из кода только когда это подтверждено замером (см.
-     AppContent), поэтому на устройствах, где окно занимает весь экран,
-     отступ работает как прежде. */
-  html.viewport-excludes-safe-top {
-    --safe-area-inset-top: 0px;
-    --header-safe-area-top: 0px;
-  }
-
   /* Apply safe area padding in standalone mode */
   @supports (padding-top: env(safe-area-inset-top)) {
     @media (display-mode: standalone) {
