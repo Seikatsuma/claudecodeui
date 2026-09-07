@@ -41,7 +41,11 @@ export const PromptInput = React.forwardRef<HTMLFormElement, PromptInputProps>(
           ref={ref}
           data-slot="prompt-input"
           className={cn(
-            'relative overflow-hidden rounded-xl border border-border/50 bg-card/80 shadow-sm backdrop-blur-sm transition-all duration-200 focus-within:border-primary/30 focus-within:shadow-md focus-within:ring-1 focus-within:ring-primary/15',
+            // Подсветка при наборе заметная, а не намёком: в эталонной панели поле
+            // ввода в фокусе обведено ярким контуром, и сразу видно, куда попадёт
+            // текст. Прежние 30% прозрачности рамки и кольцо в 15% на тёмном фоне
+            // телефона практически не читались.
+            'relative overflow-hidden rounded-xl border border-border/50 bg-card/80 shadow-sm backdrop-blur-sm transition-all duration-200 focus-within:border-primary focus-within:shadow-lg focus-within:ring-2 focus-within:ring-primary/40',
             className
           )}
           {...props}

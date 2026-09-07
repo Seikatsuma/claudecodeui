@@ -381,6 +381,7 @@ export const api = {
 
   // User endpoints
   user: {
+    usageLimits: () => authenticatedFetch('/api/user/usage-limits'),
     gitConfig: () => authenticatedFetch('/api/user/git-config'),
     updateGitConfig: (gitName, gitEmail) =>
       authenticatedFetch('/api/user/git-config', {

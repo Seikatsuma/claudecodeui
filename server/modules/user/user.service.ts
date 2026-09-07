@@ -1,8 +1,17 @@
+import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { AppError, getClaudeJsonPath, isPlatformOwnerWebUser } from '@/shared/utils.js';
+import { AppError, getClaudeConfigDir, getClaudeJsonPath, isPlatformOwnerWebUser } from '@/shared/utils.js';
+import { getLiveLimits } from '@/modules/providers/index.js';
 import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
+
+/** Как окна из потока называются в кэше CLI. */
+const LIVE_WINDOW_BY_KIND: Record<string, string> = {
+  session: 'five_hour',
+  weekly_all: 'seven_day',
+  weekly_scoped: 'seven_day_overage_included',
+};
 
 type GitConfig = {
   git_name: string | null;
@@ -111,6 +120,96 @@ export function createUserService(dependencies: UserDependencies) {
      * every non-owner user and whenever the field cannot be read, rather
      * than surfacing a read error.
      */
+    /**
+     * Полосы расхода подписки — те же три, что показывает панель Клода в
+     * VS Code: пятичасовое окно, недельное и лимит конкретной модели.
+     *
+     * Читаются из ~/.claude.json (`cachedUsageUtilization`), который ведёт сам
+     * CLI: там уже готовые проценты, время сброса и подпись модели. Своего
+     * запроса к API мы не делаем сознательно — он расходует ту самую квоту,
+     * которую показывает.
+     *
+     * Возвращается и возраст кэша: окно могло провернуться, и тогда старые
+     * проценты — неправда. Решает клиент, что с этим показать; молча выдавать
+     * протухшее число нельзя.
+     */
+    async getUsageLimits() {
+      // CLI держит кэш расхода в ДОМАШНЕМ ~/.claude.json, а не в файле внутри
+      // каталога аккаунта: там лежат только настройки. Поэтому смотрим оба —
+      // сначала файл аккаунта, потом домашний, и берём тот, где кэш вообще
+      // есть. Замер на сервере: в ~/.claude-webuser-1/.claude.json раздела
+      // cachedUsageUtilization нет, в ~/.claude.json — есть.
+      const candidates = [getClaudeJsonPath(), path.join(os.homedir(), '.claude.json')];
+      const live = getLiveLimits(getClaudeConfigDir());
+      const liveWindows = live?.windows ?? {};
+
+      for (const candidate of candidates) {
+      try {
+        const raw = await readFile(candidate, 'utf-8');
+        const parsed = JSON.parse(raw) as {
+          cachedUsageUtilization?: {
+            fetchedAtMs?: number;
+            utilization?: {
+              limits?: Array<{
+                kind?: string;
+                percent?: number;
+                severity?: string;
+                resets_at?: string;
+                scope?: { model?: { display_name?: string | null } };
+              }>;
+            };
+          };
+        };
+
+        const cached = parsed.cachedUsageUtilization;
+        const rows = cached?.utilization?.limits ?? [];
+        if (rows.length === 0) {
+          continue;
+        }
+        const now = Date.now();
+
+        return {
+          success: true,
+          fetchedAtMs: cached?.fetchedAtMs ?? null,
+          limits: rows
+            .filter((row) => typeof row.percent === 'number')
+            .map((row) => {
+              const resetsAt = row.resets_at ?? null;
+              const resetsAtMs = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+              // Живое значение из потока свежее файла: CLI переписывает файл
+              // не при каждом ответе, а событие приходит всегда.
+              const live = liveWindows[LIVE_WINDOW_BY_KIND[row.kind ?? ''] ?? ''];
+              const liveResetsAtMs = live?.resetsAt ? live.resetsAt * 1000 : Number.NaN;
+              const useLive = Boolean(live) && (!Number.isFinite(resetsAtMs) || liveResetsAtMs >= resetsAtMs);
+              const percent = useLive && live
+                ? Math.round(live.utilization * 100)
+                : (row.percent as number);
+              const effectiveResetsAt = useLive && Number.isFinite(liveResetsAtMs)
+                ? new Date(liveResetsAtMs).toISOString()
+                : resetsAt;
+              const effectiveResetsAtMs = useLive && Number.isFinite(liveResetsAtMs)
+                ? liveResetsAtMs
+                : resetsAtMs;
+
+              return {
+                kind: row.kind ?? 'unknown',
+                percent: Math.max(0, Math.min(100, Math.round(percent))),
+                severity: row.severity ?? 'normal',
+                resetsAt: effectiveResetsAt,
+                modelName: row.scope?.model?.display_name ?? null,
+                // Окно уже сбросилось: показывать его прежний процент нельзя.
+                expired: Number.isFinite(effectiveResetsAtMs) ? effectiveResetsAtMs <= now : false,
+              };
+            }),
+        };
+      } catch {
+        // Файла нет или он битый — пробуем следующий кандидат.
+      }
+      }
+
+      return { success: true, fetchedAtMs: null, limits: [] };
+    },
+
     async getOwnerAccountEmail(userId: number) {
       if (!isPlatformOwnerWebUser(userId)) {
         return { success: true, email: null };

@@ -446,10 +446,7 @@ function ChatInterface({
           modelsLoading={providerModelsLoading}
           tokenBudget={tokenBudget}
           onShowTokenUsage={showCostModal}
-          slashCommandsCount={slashCommandsCount}
-          onToggleCommandMenu={handleToggleCommandMenu}
           hasInput={Boolean(input.trim())}
-          onClearInput={handleClearInput}
           onSubmit={handleSubmit}
           isDragActive={isDragActive}
           queuedDraft={queuedDraft}

@@ -28,7 +28,6 @@ export const useReasoning = () => {
 
 /* ─── Reasoning (root) ───────────────────────────────────────────── */
 
-const AUTO_CLOSE_DELAY = 1000;
 const MS_IN_S = 1000;
 
 export interface ReasoningProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -50,8 +49,15 @@ export const Reasoning = React.memo<ReasoningProps>(
     children,
     ...props
   }) => {
-    const resolvedDefaultOpen = defaultOpen ?? isStreaming;
-    const isExplicitlyClosed = defaultOpen === false;
+    // Размышления по умолчанию свёрнуты — даже во время потока.
+    //
+    // Раньше блок раскрывался сам на время ответа и закрывался через секунду
+    // после. Из-за этого экран занимал текст, который читать не нужно, а
+    // настоящий ответ уезжал вниз. В панели Клода для VS Code это одна строка
+    // «Thinking», раскрывается по желанию, — так же и здесь. Строка со
+    // счётчиком времени остаётся видна всегда, поэтому «когда Клод думает»
+    // по-прежнему понятно с первого взгляда.
+    const resolvedDefaultOpen = defaultOpen ?? false;
 
     // Controllable open state
     const [internalOpen, setInternalOpen] = React.useState(resolvedDefaultOpen);
@@ -68,7 +74,6 @@ export const Reasoning = React.memo<ReasoningProps>(
     // Duration tracking
     const [duration, setDuration] = React.useState<number | undefined>(durationProp);
     const hasEverStreamedRef = React.useRef(isStreaming);
-    const [hasAutoClosed, setHasAutoClosed] = React.useState(false);
     const startTimeRef = React.useRef<number | null>(null);
 
     // Sync external duration prop
@@ -89,23 +94,9 @@ export const Reasoning = React.memo<ReasoningProps>(
       }
     }, [isStreaming]);
 
-    // Auto-open when streaming starts
-    React.useEffect(() => {
-      if (isStreaming && !isOpen && !isExplicitlyClosed) {
-        setIsOpen(true);
-      }
-    }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed]);
-
-    // Auto-close after streaming ends
-    React.useEffect(() => {
-      if (hasEverStreamedRef.current && !isStreaming && isOpen && !hasAutoClosed) {
-        const timer = setTimeout(() => {
-          setIsOpen(false);
-          setHasAutoClosed(true);
-        }, AUTO_CLOSE_DELAY);
-        return () => clearTimeout(timer);
-      }
-    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed]);
+    // Ни авто-раскрытия, ни авто-закрытия: блок открывает и закрывает человек.
+    // Раскрытое состояние, которое схлопывается само через секунду, читать
+    // невозможно, а закрыть раньше времени нельзя — оно откроется снова.
 
     const contextValue = React.useMemo(
       () => ({ duration, isOpen, isStreaming, setIsOpen }),
