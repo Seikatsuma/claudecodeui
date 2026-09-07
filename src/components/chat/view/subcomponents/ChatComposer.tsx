@@ -10,7 +10,7 @@ import type {
   RefObject,
   TouchEvent,
 } from 'react';
-import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon } from 'lucide-react';
+import { PaperclipIcon, Loader2, ArrowUpIcon } from 'lucide-react';
 
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { useVoiceAvailable } from '../../hooks/useVoiceAvailable';
@@ -77,10 +77,7 @@ interface ChatComposerProps {
   modelsLoading: boolean;
   tokenBudget: Record<string, unknown> | null;
   onShowTokenUsage: () => void;
-  slashCommandsCount: number;
-  onToggleCommandMenu: () => void;
   hasInput: boolean;
-  onClearInput: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   queuedDraft: QueuedDraft | null;
@@ -141,10 +138,7 @@ export default function ChatComposer({
   modelsLoading,
   tokenBudget,
   onShowTokenUsage,
-  slashCommandsCount,
-  onToggleCommandMenu,
   hasInput,
-  onClearInput,
   onSubmit,
   isDragActive,
   queuedDraft,
@@ -462,31 +456,14 @@ export default function ChatComposer({
 
             <TokenUsageSummary usage={tokenBudget} onClick={onShowTokenUsage} />
 
-            <PromptInputButton
-              tooltip={{ content: t('input.showAllCommands') }}
-              onClick={onToggleCommandMenu}
-              className="relative"
-            >
-              <MessageSquareIcon />
-              {slashCommandsCount > 0 && (
-                <span
-                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
-                >
-                  {slashCommandsCount}
-                </span>
-              )}
-            </PromptInputButton>
-
-            {hasInput && (
-              <PromptInputButton
-                tooltip={{ content: t('input.clearInput', { defaultValue: 'Clear input' }) }}
-                onClick={onClearInput}
-                className="hidden sm:flex"
-              >
-                <XIcon />
-              </PromptInputButton>
-            )}
-
+            {/* Кнопок в этом ряду намеренно меньше, чем было.
+                Убраны две: список команд и очистка поля.
+                Команды открываются набором «/» прямо в поле — кнопка со
+                счётчиком дублировала это и занимала место, которого на
+                телефоне и так нет. Очистка — то же самое, что выделить и
+                стереть, и на телефоне она была скрыта всегда. Осталось то,
+                что нельзя сделать иначе: вложение, голос, расход, модель,
+                режим доступа и отправка. */}
           </PromptInputTools>
 
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
