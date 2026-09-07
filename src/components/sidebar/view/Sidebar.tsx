@@ -297,8 +297,6 @@ function Sidebar({
             selectedSession={selectedSession}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
-            shouldShowTasksTab={shouldShowTasksTab}
-            shouldShowBrowserTab={shouldShowBrowserTab}
             pulseSessionsCount={pulseSessionsCount}
             archivedProjects={archivedProjects}
             archivedSessions={archivedSessions}

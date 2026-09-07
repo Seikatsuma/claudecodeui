@@ -225,9 +225,16 @@ function MainContent({
           {activeTab === 'shell' && (
             <div className="h-full w-full overflow-hidden">
               <Suspense fallback={<PanelFallback />}>
+                {/*
+                  Командная строка одна на весь сервер, а не своя у каждого
+                  чата: «не по каждому чату, а именно общую». Поэтому сеанс
+                  сюда не передаётся — открывается обычная оболочка в каталоге
+                  проекта, а не продолжение конкретной переписки.
+                */}
                 <StandaloneShell
                   project={selectedProject}
-                  session={selectedSession}
+                  session={null}
+                  isPlainShell
                   showHeader={false}
                   isActive={activeTab === 'shell'}
                 />
