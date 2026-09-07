@@ -1,9 +1,8 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { AlertTriangle, EyeOff, Trash2 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { Button } from '../../../../shared/view/ui';
-import Settings from '../../../settings/view/Settings';
 import VersionUpgradeModal from '../../../version-upgrade/view';
 import type { Project } from '../../../../types/app';
 import type { ReleaseInfo } from '../../../../shared/types';
@@ -42,10 +41,24 @@ type TypedSettingsProps = {
   initialTab: string;
 };
 
-const SettingsComponent = Settings as (props: TypedSettingsProps) => JSX.Element;
+/**
+ * Окно настроек — по требованию.
+ *
+ * Оно тянет за собой окно входа провайдера, а через него — терминал. Пока
+ * настройки были обычным импортом, весь этот хвост скачивался и разбирался
+ * при каждом открытии приложения, хотя настройки открывают несколько раз за
+ * всё время.
+ */
+const SettingsComponent = lazy(
+  () => import('../../../settings/view/Settings'),
+) as unknown as (props: TypedSettingsProps) => JSX.Element;
 
 function TypedSettings(props: TypedSettingsProps) {
-  return <SettingsComponent {...props} />;
+  return (
+    <Suspense fallback={null}>
+      <SettingsComponent {...props} />
+    </Suspense>
+  );
 }
 
 export default function SidebarModals({
