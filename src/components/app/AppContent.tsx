@@ -297,19 +297,6 @@ function AppContentInner() {
     calibrate();
     update();
 
-    // Отступ сверху не должен считаться дважды. Проверяем это замером, а не
-    // предположением: если окно уже короче экрана ровно на верхнюю безопасную
-    // зону, значит iOS её уже вычел, и прибавлять её в стилях нельзя.
-    const applySafeTopCorrection = () => {
-      const declared = parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue('--safe-area-inset-top'),
-      );
-      const missingFromViewport = window.screen.height - window.innerHeight;
-      const alreadyApplied = Number.isFinite(declared) && declared > 0
-        && missingFromViewport >= declared - 2;
-      document.documentElement.classList.toggle('viewport-excludes-safe-top', alreadyApplied);
-    };
-    applySafeTopCorrection();
 
     // Разовый отчёт с установленного приложения: что именно сообщает iOS.
     // Иначе причину пустой полосы приходится угадывать — на сервере этот
