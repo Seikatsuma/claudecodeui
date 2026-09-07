@@ -65,7 +65,8 @@
     "clearSearch": "Clear search",
     "openCommandPalette": "Open command palette",
     "attentionRequiredIndicator": "Session needs attention",
-    "processingSessionIndicator": "Processing session"
+    "processingSessionIndicator": "Processing session",
+    "sessionOptions": "Session options for {{name}}"
   },
   "navigation": {
     "chat": "Chat",
@@ -148,7 +149,8 @@
     "projectsScanned_one": "{{count}} project scanned",
     "projectsScanned_other": "{{count}} projects scanned",
     "modePulse": "Pulse",
-    "pulseTooltip": "Sessions currently running or waiting on you"
+    "pulseTooltip": "Sessions currently running or waiting on you",
+    "archiveOnlyTooltip": "Archive only"
   },
   "recent": {
     "title": "Recent conversations",
