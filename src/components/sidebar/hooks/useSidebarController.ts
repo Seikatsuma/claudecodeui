@@ -411,13 +411,7 @@ export function useSidebarController({
     void fetchArchivedSessions();
   }, [fetchArchivedSessions]);
 
-  useEffect(() => {
-    if (searchMode !== 'conversations' || debouncedSearchQuery.length >= 2) {
-      return;
-    }
 
-    reloadRecentConversations();
-  }, [debouncedSearchQuery, reloadRecentConversations, searchMode]);
 
   useEffect(() => {
     if (searchMode !== 'archived') {
@@ -475,116 +469,14 @@ export function useSidebarController({
       eventSourceRef.current = null;
     }
 
-    const query = debouncedSearchQuery;
-    if (searchMode !== 'conversations' || query.length < 2) {
-      searchSeqRef.current += 1;
-      setConversationResults(null);
-      setSearchProgress(null);
-      setIsSearching(false);
-      return;
-    }
-
-    setIsSearching(true);
+    // Поиск по чатам жил только в режиме «conversations», а его убрали вместе
+    // с вкладкой. Осталась чистка состояния, чтобы после переключения режима
+    // на экране не висели результаты прошлого запроса.
+    searchSeqRef.current += 1;
     setConversationResults(null);
     setSearchProgress(null);
-    const seq = ++searchSeqRef.current;
-
-    if (seq !== searchSeqRef.current) {
-      return;
-    }
-
-    const url = api.searchConversationsUrl(query);
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
-
-    const accumulated: ConversationProjectResult[] = [];
-    let titleResults: SessionTitleSearchResult[] = [];
-    let totalMatches = 0;
-
-    es.addEventListener('title-results', (evt) => {
-      if (seq !== searchSeqRef.current) { es.close(); return; }
-      try {
-        const data = JSON.parse(evt.data) as { titleResults: SessionTitleSearchResult[] };
-        titleResults = Array.isArray(data.titleResults) ? data.titleResults : [];
-        setConversationResults({
-          results: [...accumulated],
-          titleResults: [...titleResults],
-          totalMatches,
-          query,
-        });
-      } catch {
-        // Ignore malformed SSE data
-      }
-    });
-
-    es.addEventListener('result', (evt) => {
-      if (seq !== searchSeqRef.current) { es.close(); return; }
-      try {
-        const data = JSON.parse(evt.data) as {
-          projectResult: ConversationProjectResult;
-          totalMatches: number;
-          scannedProjects: number;
-          totalProjects: number;
-        };
-        accumulated.push(data.projectResult);
-        totalMatches = data.totalMatches;
-        setConversationResults({
-          results: [...accumulated],
-          titleResults: [...titleResults],
-          totalMatches,
-          query,
-        });
-        setSearchProgress({ scannedProjects: data.scannedProjects, totalProjects: data.totalProjects });
-      } catch {
-        // Ignore malformed SSE data
-      }
-    });
-
-    es.addEventListener('progress', (evt) => {
-      if (seq !== searchSeqRef.current) { es.close(); return; }
-      try {
-        const data = JSON.parse(evt.data) as { totalMatches: number; scannedProjects: number; totalProjects: number };
-        totalMatches = data.totalMatches;
-        setSearchProgress({ scannedProjects: data.scannedProjects, totalProjects: data.totalProjects });
-      } catch {
-        // Ignore malformed SSE data
-      }
-    });
-
-    es.addEventListener('done', () => {
-      if (seq !== searchSeqRef.current) { es.close(); return; }
-      es.close();
-      eventSourceRef.current = null;
-      setIsSearching(false);
-      setSearchProgress(null);
-      setConversationResults({
-        results: [...accumulated],
-        titleResults: [...titleResults],
-        totalMatches,
-        query,
-      });
-    });
-
-    es.addEventListener('error', () => {
-      if (seq !== searchSeqRef.current) { es.close(); return; }
-      es.close();
-      eventSourceRef.current = null;
-      setIsSearching(false);
-      setSearchProgress(null);
-      setConversationResults({
-        results: [...accumulated],
-        titleResults: [...titleResults],
-        totalMatches,
-        query,
-      });
-    });
-
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    };
+    setIsSearching(false);
+    return;
   }, [debouncedSearchQuery, searchMode]);
 
   // All sidebar state keys (expanded, starred, loading, etc.) use the DB
@@ -1016,9 +908,7 @@ export function useSidebarController({
       await Promise.all([
         Promise.resolve(onRefresh()),
         fetchArchivedSessions(),
-        searchMode === 'conversations'
-          ? fetchRecentConversationsPage(0, false)
-          : Promise.resolve(),
+
       ]);
     } finally {
       setIsRefreshing(false);

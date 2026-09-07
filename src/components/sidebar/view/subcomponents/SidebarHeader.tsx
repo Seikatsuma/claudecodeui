@@ -1,4 +1,4 @@
-import { Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { Archive, Folder, FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button, Input, Tooltip } from '../../../../shared/view/ui';
@@ -7,6 +7,7 @@ import { IS_PLATFORM } from '../../../../shared/utils';
 import { cn } from '../../../../lib/utils';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { Project, ProjectSession } from '../../../../types/app';
+import type { ReactNode } from 'react';
 import type { SessionWithProvider, SidebarSearchMode } from '../../types/types';
 
 import SidebarPulseTrigger from './SidebarPulseTrigger';
@@ -26,6 +27,13 @@ type SidebarHeaderProps = {
   onSearchFilterChange: (value: string) => void;
   onClearSearchFilter: () => void;
   searchMode: SidebarSearchMode;
+  /**
+   * Кнопка «все папки», занявшая место убранной вкладки Conversations.
+   * Приходит слотом, а не собирается здесь: ей нужен список проектов и
+   * обработчик выбора, которые живут в SidebarContent, — тянуть их через
+   * шапку значило бы протащить пяток пропсов ради одной кнопки.
+   */
+  projectPickerSlot?: ReactNode;
   onSearchModeChange: (mode: SidebarSearchMode) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
@@ -56,6 +64,7 @@ export default function SidebarHeader({
   onSearchFilterChange,
   onClearSearchFilter,
   searchMode,
+  projectPickerSlot,
   onSearchModeChange,
   onRefresh,
   isRefreshing,
@@ -72,11 +81,9 @@ export default function SidebarHeader({
   t,
 }: SidebarHeaderProps) {
   const showSearchTools = (projectsCount > 0 || pulseSessionsCount > 0 || archivedSessionsCount > 0 || isArchivedSessionsLoading) && !isLoading;
-  const searchPlaceholder = searchMode === 'conversations'
-    ? t('search.conversationsPlaceholder')
-    : searchMode === 'archived'
-      ? t('search.archivedPlaceholder', 'Search archived sessions...')
-      : t('projects.searchPlaceholder');
+  const searchPlaceholder = searchMode === 'archived'
+    ? t('search.archivedPlaceholder', 'Search archived sessions...')
+    : t('projects.searchPlaceholder');
 
   const LogoBlock = () => (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -185,19 +192,7 @@ export default function SidebarHeader({
                 <Folder className="h-3 w-3" />
                 {t('search.modeProjects')}
               </button>
-              <button
-                onClick={() => onSearchModeChange('conversations')}
-                aria-pressed={searchMode === 'conversations'}
-                className={cn(
-                  "flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-normal transition-all",
-                  searchMode === 'conversations'
-                    ? "bg-background shadow-sm text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <MessageSquare className="h-3 w-3" />
-                {t('search.modeConversations')}
-              </button>
+              {projectPickerSlot}
               <Tooltip content={t('search.archiveOnlyTooltip', 'Archive only')} position="top">
                 <button
                   onClick={() => onSearchModeChange('archived')}
@@ -315,19 +310,7 @@ export default function SidebarHeader({
                 <Folder className="h-3 w-3" />
                 {t('search.modeProjects')}
               </button>
-              <button
-                onClick={() => onSearchModeChange('conversations')}
-                aria-pressed={searchMode === 'conversations'}
-                className={cn(
-                  "flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-normal transition-all",
-                  searchMode === 'conversations'
-                    ? "bg-background shadow-sm text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <MessageSquare className="h-3 w-3" />
-                {t('search.modeConversations')}
-              </button>
+              {projectPickerSlot}
               <Tooltip content={t('search.archiveOnlyTooltip', 'Archive only')} position="top">
                 <button
                   onClick={() => onSearchModeChange('archived')}
