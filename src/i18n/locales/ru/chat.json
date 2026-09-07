@@ -105,7 +105,7 @@
     "technicalDetails": "Технические детали"
   },
   "input": {
-    "placeholder": "Введите / для команд, @ для файлов, или спросите {{provider}} что угодно...",
+    "placeholder": "Спросите {{provider}} — / команды, @ файлы",
     "placeholderDefault": "Введите ваше сообщение...",
     "disabled": "Ввод отключен",
     "attachFiles": "Прикрепить файлы",
