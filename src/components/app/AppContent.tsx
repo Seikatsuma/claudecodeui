@@ -298,10 +298,78 @@ function AppContentInner() {
     update();
 
 
-    // Разовый отчёт с установленного приложения: что именно сообщает iOS.
-    // Иначе причину пустой полосы приходится угадывать — на сервере этот
-    // режим не воспроизводится. Убрать вместе с /api/layout-probe.
-    if (isStandalone) {
+    // Меряем высоту НАСТОЯЩИМ элементом: значение из getComputedStyle для
+    // единиц вроде dvh WebKit отдаёт устаревшим, а offsetHeight заставляет
+    // пересчитать раскладку и говорит правду.
+    const measureCssHeight = (unit: string): number => {
+      const probeNode = document.createElement('div');
+      probeNode.style.cssText =
+        `position:fixed;top:0;left:0;width:0;height:${unit};visibility:hidden;pointer-events:none`;
+      document.body.appendChild(probeNode);
+      const value = probeNode.offsetHeight;
+      probeNode.remove();
+      return value;
+    };
+
+    // Временные метки границ страницы.
+    //
+    // Пустую полосу снизу не удаётся ни воспроизвести на сервере, ни объяснить
+    // числами: экран 874, окно 874, а страница 812. Непонятно главное — эти 62
+    // точки лежат выше страницы или ниже её. От ответа зависит, где чинить:
+    // в стилях приложения или в том, как iOS выдаёт окно.
+    //
+    // Поэтому рисуем две полоски по краям самой страницы: зелёная — где
+    // страница начинается, красная — где заканчивается. На снимке экрана сразу
+    // видно, совпадают ли они с краями экрана. Убрать вместе с /api/layout-probe.
+    const drawEdgeMarks = () => {
+      const make = (place: 'top' | 'bottom', color: string) => {
+        const node = document.createElement('div');
+        node.dataset.edgeMark = place;
+        node.style.cssText = [
+          'position:fixed',
+          'left:0',
+          'right:0',
+          `${place}:0`,
+          'height:4px',
+          `background:${color}`,
+          'z-index:2147483647',
+          'pointer-events:none',
+        ].join(';');
+        document.body.appendChild(node);
+      };
+      document.querySelectorAll('[data-edge-mark]').forEach((node) => node.remove());
+      make('top', '#34c759');
+      make('bottom', '#ff375f');
+
+      const label = document.createElement('div');
+      label.dataset.edgeMark = 'label';
+      label.style.cssText = [
+        'position:fixed',
+        'right:6px',
+        'bottom:8px',
+        'z-index:2147483647',
+        'pointer-events:none',
+        'font:11px/1.3 ui-monospace,monospace',
+        'color:#fff',
+        'background:rgba(0,0,0,.75)',
+        'padding:3px 6px',
+        'border-radius:5px',
+      ].join(';');
+      label.textContent =
+        `экран ${window.screen.height} · окно ${window.outerHeight} · страница ${window.innerHeight}`;
+      document.body.appendChild(label);
+    };
+    drawEdgeMarks();
+    window.addEventListener('orientationchange', () => window.setTimeout(drawEdgeMarks, 300));
+
+    // Разовый отчёт с устройства: что именно сообщает браузер.
+    //
+    // Раньше отчёт слался только из приложения с экрана «Домой». Но пустая
+    // полоса снизу видна и в обычном браузере телефона, а на сервере ни то,
+    // ни другое не воспроизводится: в отладочном браузере поле ввода
+    // упирается в низ, просвет 4 точки. Поэтому шлём отовсюду — и указываем,
+    // откуда именно. Убрать вместе с /api/layout-probe.
+    {
       window.setTimeout(() => {
         const root = document.getElementById('root');
         const shell = document.querySelector('.fixed.inset-0');
@@ -340,6 +408,12 @@ function AppContentInner() {
             availH: String(window.screen.availHeight),
             headerPad: styles.getPropertyValue('--header-total-padding').trim(),
             dpr: String(window.devicePixelRatio),
+            // Чему РЕАЛЬНО равны обе меры высоты на этом устройстве: именно
+            // расхождение между ними и оставляло пустую полосу.
+            vh100: String(measureCssHeight('100vh')),
+            dvh100: String(measureCssHeight('100dvh')),
+            изПриложения: String(isStandalone),
+            браузер: navigator.userAgent.slice(0, 60),
             // Решающее число: где окно приложения стоит на экране.
             // 0 — значит пустая полоса снизу, 62 — значит сверху.
             screenY: String(window.screenY),

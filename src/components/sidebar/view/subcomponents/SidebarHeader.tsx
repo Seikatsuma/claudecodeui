@@ -1,5 +1,6 @@
 import { Archive, Folder, FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
+import type { ReactNode } from 'react';
 
 import { Button, Input, Tooltip } from '../../../../shared/view/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../shared/constants';
@@ -7,7 +8,6 @@ import { IS_PLATFORM } from '../../../../shared/utils';
 import { cn } from '../../../../lib/utils';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { Project, ProjectSession } from '../../../../types/app';
-import type { ReactNode } from 'react';
 import type { SessionWithProvider, SidebarSearchMode } from '../../types/types';
 
 import SidebarPulseTrigger from './SidebarPulseTrigger';
@@ -34,6 +34,12 @@ type SidebarHeaderProps = {
    * шапку значило бы протащить пяток пропсов ради одной кнопки.
    */
   projectPickerSlot?: ReactNode;
+  /**
+   * Кнопка командной строки. Приходит слотом по той же причине, что и
+   * выбор папки: ей нужна текущая вкладка и её переключение, а они живут
+   * в SidebarContent.
+   */
+  terminalSlot?: ReactNode;
   onSearchModeChange: (mode: SidebarSearchMode) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
@@ -65,6 +71,7 @@ export default function SidebarHeader({
   onClearSearchFilter,
   searchMode,
   projectPickerSlot,
+  terminalSlot,
   onSearchModeChange,
   onRefresh,
   isRefreshing,
@@ -209,6 +216,7 @@ export default function SidebarHeader({
                   <Archive className="h-3 w-3" />
                 </button>
               </Tooltip>
+              {terminalSlot}
             </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
@@ -327,6 +335,7 @@ export default function SidebarHeader({
                   <Archive className="h-3 w-3" />
                 </button>
               </Tooltip>
+              {terminalSlot}
             </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />

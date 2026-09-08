@@ -117,3 +117,35 @@ test('shell output detects and normalizes a wrapped authentication URL', () => {
 
   pty.emitExit();
 });
+
+test('общая командная строка без команды запускает обычную оболочку, а не пустую', () => {
+  const pty = createFakePty();
+  const spawns: { file: string; args: string[] }[] = [];
+  const dependencies = {
+    resolveProviderSessionId: () => null,
+    spawnPty: ((file: string, args: string[]) => {
+      spawns.push({ file, args });
+      return pty as never;
+    }) as never,
+  };
+
+  const socket = createFakeSocket();
+  handleShellConnection(socket as never, dependencies);
+  socket.emit(
+    'message',
+    JSON.stringify({
+      type: 'init',
+      projectPath: process.cwd(),
+      sessionId: `plain-shell-${Date.now()}`,
+      hasSession: false,
+      provider: 'plain-shell',
+      isPlainShell: true,
+    })
+  );
+
+  assert.equal(spawns.length, 1);
+  assert.ok(
+    !spawns[0].args.includes('-c'),
+    'без команды оболочка не должна запускаться через -c: так она сразу выходит',
+  );
+});

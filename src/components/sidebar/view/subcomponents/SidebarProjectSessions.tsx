@@ -7,6 +7,7 @@ import { api } from '../../../../utils/api';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { SessionWithProvider } from '../../types/types';
+import { getSessionTime, groupByRecency } from '../../utils/utils';
 
 import SidebarSessionItem from './SidebarSessionItem';
 
@@ -136,6 +137,21 @@ export default function SidebarProjectSessions({
   const { groups, ungrouped } = useMemo(() => bucketSessionsByGroup(sessions), [sessions]);
   const ungroupedCount = ungrouped.length;
 
+  // Чаты без темы раскладываются по дням, а то, над чем Клод работает прямо
+  // сейчас, поднимается наверх отдельной группой. Плоский список из полусотни
+  // одинаковых строк не отвечал на два вопроса, ради которых в него и
+  // заходят: что считается прямо сейчас и где вчерашняя работа.
+  const dayBuckets = useMemo(() => {
+    const running = ungrouped.filter((session) => activeSessions.has(session.id));
+    const idle = ungrouped.filter((session) => !activeSessions.has(session.id));
+    return [
+      ...(running.length > 0
+        ? [{ key: 'running' as const, title: 'Сейчас работает', items: running }]
+        : []),
+      ...groupByRecency(idle, currentTime, (session) => getSessionTime(session) || null),
+    ];
+  }, [ungrouped, activeSessions, currentTime]);
+
   if (!isExpanded) {
     return null;
   }
@@ -257,7 +273,24 @@ export default function SidebarProjectSessions({
             </div>
           ))}
 
-          {ungrouped.map(renderSession)}
+          {dayBuckets.map((bucket) => (
+            <div key={bucket.key} className="space-y-1 pb-1">
+              <div className="flex items-center gap-1.5 px-2 pt-1">
+                {bucket.key === 'running' ? (
+                  <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-green-500" aria-hidden />
+                ) : (
+                  <span className="h-1 w-1 flex-shrink-0 rounded-full bg-muted-foreground/40" aria-hidden />
+                )}
+                <p className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                  {t(`sessions.group.${bucket.key}`, { defaultValue: bucket.title })}
+                </p>
+                <span className="flex-shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+                  {bucket.items.length}
+                </span>
+              </div>
+              {bucket.items.map(renderSession)}
+            </div>
+          ))}
 
           {hasMoreSessions && (
             <Button

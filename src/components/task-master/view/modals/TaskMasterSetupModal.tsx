@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Plus, Terminal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+
 import { cn } from '../../../../lib/utils';
-import Shell from '../../../shell/view/Shell';
 import type { TaskMasterProject } from '../../types';
+
+/**
+ * Терминал — по требованию, и это единственное место, кроме вкладки «Терминал»,
+ * откуда он вызывается. Пока таких мест было два, сборщик считал терминал общей
+ * зависимостью и поднимал его в стартовую загрузку страницы: 387 КБ, которые
+ * скачивались и разбирались при каждом входе ради окна настройки, открываемого
+ * раз в жизни.
+ */
+const Shell = lazy(() => import('../../../shell/view/Shell'));
 
 type TaskMasterSetupModalProps = {
   isOpen: boolean;
@@ -55,6 +64,7 @@ export default function TaskMasterSetupModal({ isOpen, project, onClose, onAfter
 
         <div className="flex-1 p-4">
           <div className="h-full overflow-hidden rounded-lg bg-black">
+            <Suspense fallback={<div className="p-4 text-xs text-muted-foreground">Загружаю терминал…</div>}>
             <Shell
               selectedProject={project}
               selectedSession={null}
@@ -67,6 +77,7 @@ export default function TaskMasterSetupModal({ isOpen, project, onClose, onAfter
                 }
               }}
             />
+            </Suspense>
           </div>
         </div>
 

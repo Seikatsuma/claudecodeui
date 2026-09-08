@@ -7,6 +7,62 @@ export function normalizeInlineCodeFences(text: string) {
   }
 }
 
+/**
+ * Отбивает списки и заголовки пустой строкой, если её не поставила модель.
+ *
+ * Разметка Markdown устроена строго: нумерованный список начинает новый блок
+ * только если он начинается с единицы. Поэтому текст вида
+ *
+ *     Полезные, но не срочные (11)
+ *     11. «Сегодня»: карточка …
+ *     12. «Дети»: верхние метрики …
+ *
+ * склеивался в один сплошной абзац — все пункты шли подряд через точку, и
+ * читать это было нечем. Ровно то же происходило с заголовком, который
+ * модель написала вплотную к предыдущей строке.
+ *
+ * Здесь недостающая пустая строка ставится сама. Внутри блоков кода ничего
+ * не трогается: там перевод строки значим, и лишняя пустая строка ломает
+ * отступы.
+ */
+export function separateMarkdownBlocks(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let insideFence = false;
+
+  const isListItem = (line: string) => /^[ \t]{0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/.test(line);
+  const isHeading = (line: string) => /^[ \t]{0,3}#{1,6}[ \t]+\S/.test(line);
+  const isBlank = (line: string) => line.trim() === '';
+  // Продолжение пункта — строка с отступом под уже начатым списком.
+  const isIndented = (line: string) => /^[ \t]+\S/.test(line);
+
+  for (const line of lines) {
+    if (/^[ \t]{0,3}(?:```|~~~)/.test(line)) {
+      insideFence = !insideFence;
+      out.push(line);
+      continue;
+    }
+    if (insideFence) {
+      out.push(line);
+      continue;
+    }
+
+    const previous = out.length > 0 ? out[out.length - 1] : '';
+    const needsGap =
+      !isBlank(previous) &&
+      !isListItem(previous) &&
+      !isIndented(previous) &&
+      (isListItem(line) || isHeading(line));
+
+    if (needsGap) out.push('');
+    out.push(line);
+  }
+
+  return out.join('\n');
+}
+
 export function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -393,8 +393,14 @@ export function handleShellConnection(
         const shellCommand = buildShellCommand(data, dependencies);
         const resumeSessionId = resolveResumeSessionId(data, dependencies);
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
-        const shellArgs =
-          os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
+        // Пустая команда означает «просто открой оболочку», а не «выполни
+        // ничего». `bash -c ''` честно выполняет пустую строку и сразу
+        // выходит с кодом 0 — именно так выглядела кнопка общей командной
+        // строки: терминал открывался и тут же умирал. Без команды запускаем
+        // обычную интерактивную оболочку с прочитанным профилем.
+        const shellArgs = os.platform() === 'win32'
+          ? (shellCommand ? ['-Command', shellCommand] : ['-NoLogo'])
+          : (shellCommand ? ['-c', shellCommand] : ['-l', '-i']);
         const termCols = readNumber(data.cols, 80);
         const termRows = readNumber(data.rows, 24);
         const prioritizedPath = prioritizeUserNpmGlobalBin(process.env);

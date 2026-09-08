@@ -3,11 +3,14 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 
+
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { parseFilesInputTag } from '@/shared/image-attachments.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
+
+import { readSessionLines } from './transcript-tail-cache.js';
 
 const PROVIDER = 'claude';
 
@@ -121,27 +124,32 @@ async function getSessionMessages(
     const files = await fsp.readdir(projectDir);
     const agentFiles = files.filter((file) => file.endsWith('.jsonl') && file.startsWith('agent-'));
 
-    const messages: AnyRecord[] = [];
     const agentToolsCache = new Map<string, AnyRecord[]>();
 
-    const fileStream = fs.createReadStream(jsonLPath);
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity,
-    });
+    // Читаем только хвост стенограммы и только дописанное с прошлого раза.
+    //
+    // Раньше здесь разбирался весь файл целиком на каждый запрос: у чата с
+    // 25 МБ стенограммы это 1,7 секунды, и платились они при каждом открытии
+    // чата, ради двух десятков последних сообщений.
+    const needFromEnd = limit === null ? null : offset + limit;
+    const tail = await readSessionLines(jsonLPath, providerSessionId, needFromEnd);
 
-    for await (const line of rl) {
+    const messages: AnyRecord[] = [];
+    let foreign = 0;
+    for (const line of tail.lines) {
       if (!line.trim()) {
         continue;
       }
-
       try {
         const entry = JSON.parse(line) as AnyRecord;
         if (entry.sessionId === providerSessionId) {
           messages.push(entry);
+        } else {
+          foreign += 1;
         }
       } catch {
-        // Skip malformed JSONL lines that can happen during concurrent writes.
+        // Битые строки случаются, когда файл пишут в этот же момент.
+        foreign += 1;
       }
     }
 
@@ -179,16 +187,23 @@ async function getSessionMessages(
     const sortedMessages = messages.sort(
       (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime(),
     );
-    const total = sortedMessages.length;
+    // Когда прочитан весь файл, счёт точный. Когда только хвост — берём счёт
+    // из него: отбор строк по идентификатору сеанса может изредка прихватить
+    // лишнюю строку, и лучше показать кнопку «показать ранние» зря, чем
+    // спрятать её и потерять переписку.
+    const total = tail.complete ? tail.total - foreign : tail.total;
 
     if (limit === null) {
       return sortedMessages;
     }
 
-    const startIndex = Math.max(0, total - offset - limit);
-    const endIndex = total - offset;
+    // Срез отсчитывается от конца ИМЕЮЩИХСЯ строк, а не от общего счёта:
+    // в хвосте лежат последние сообщения, и именно они нужны при открытии.
+    const available = sortedMessages.length;
+    const startIndex = Math.max(0, available - offset - limit);
+    const endIndex = Math.max(startIndex, available - offset);
     const paginatedMessages = sortedMessages.slice(startIndex, endIndex);
-    const hasMore = startIndex > 0;
+    const hasMore = total > offset + paginatedMessages.length;
 
     return {
       messages: paginatedMessages,

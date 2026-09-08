@@ -1,9 +1,16 @@
-import React, { useMemo, useState } from 'react';
+import React, { lazy, Suspense, useMemo, useState } from 'react';
 
 import { useTheme } from '../../../../contexts/ThemeContext';
-import { getLanguageExtensions } from '../../../code-editor/utils/editorExtensions';
 
-import { CodeMirrorMergeView } from './CodeMirrorMergeView';
+/**
+ * Сам просмотрщик правок подгружается по требованию.
+ *
+ * Он тянет за собой CodeMirror — это 644 КБ, которые раньше скачивались и
+ * разбирались при каждом открытии приложения, хотя правки файлов в ленте
+ * встречаются далеко не в каждом ответе. Теперь этот кусок приезжает в тот
+ * момент, когда правку действительно надо показать.
+ */
+const CodeMirrorMergeView = lazy(() => import('./CodeMirrorMergeView'));
 
 type DiffLine = {
   type: string;
@@ -57,11 +64,6 @@ export const ToolDiffViewer: React.FC<ToolDiffViewerProps> = ({
   const safeOldContent = oldContent ?? '';
   const safeNewContent = newContent ?? '';
 
-  const languageExtensions = useMemo(
-    () => getLanguageExtensions(filePath || ''),
-    [filePath]
-  );
-
   const maxLineCount = useMemo(() => {
     const oldLines = safeOldContent.split('\n').length;
     const newLines = safeNewContent.split('\n').length;
@@ -98,12 +100,18 @@ export const ToolDiffViewer: React.FC<ToolDiffViewerProps> = ({
           className="overflow-hidden"
           style={isCollapsed ? { maxHeight: COLLAPSED_MAX_HEIGHT } : undefined}
         >
-          <CodeMirrorMergeView
-            oldContent={safeOldContent}
-            newContent={safeNewContent}
-            languageExtensions={languageExtensions}
-            isDarkMode={isDarkMode}
-          />
+          <Suspense
+            fallback={
+              <div className="px-3 py-4 text-xs text-muted-foreground">Загружаю правки…</div>
+            }
+          >
+            <CodeMirrorMergeView
+              oldContent={safeOldContent}
+              newContent={safeNewContent}
+              filePath={filePath}
+              isDarkMode={isDarkMode}
+            />
+          </Suspense>
         </div>
 
         {isCollapsed && (

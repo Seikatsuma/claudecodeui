@@ -1,8 +1,9 @@
 import { type ReactNode, useState } from 'react';
-import { Archive, Folder, MessageSquare, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { Archive, Folder, RotateCcw, Terminal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
-import { ScrollArea } from '../../../../shared/view/ui';
+import { ScrollArea, Tooltip } from '../../../../shared/view/ui';
+import { cn } from '../../../../lib/utils';
 import type { AppTab, Project, ProjectSession } from '../../../../types/app';
 import type { ReleaseInfo } from '../../../../shared/types';
 import type { ConversationSearchResults, SearchProgress } from '../../hooks/useSidebarController';
@@ -17,8 +18,6 @@ import SidebarUsageLimits from './SidebarUsageLimits';
 import SidebarProjectList, { type SidebarProjectListProps } from './SidebarProjectList';
 import SidebarProjectPickerTrigger from './SidebarProjectPickerTrigger';
 import SidebarProjectSessions from './SidebarProjectSessions';
-import SidebarRecentConversations from './SidebarRecentConversations';
-import SidebarWorkspaceTabs from './SidebarWorkspaceTabs';
 
 function HighlightedSnippet({ snippet, highlights }: { snippet: string; highlights: { start: number; end: number }[] }) {
   const parts: ReactNode[] = [];
@@ -100,8 +99,6 @@ type SidebarContentProps = {
   selectedSession: ProjectSession | null;
   activeTab: AppTab;
   setActiveTab: (tab: AppTab) => void;
-  shouldShowTasksTab: boolean;
-  shouldShowBrowserTab: boolean;
   pulseSessionsCount: number;
   archivedProjects: ArchivedProjectListItem[];
   archivedSessions: ArchivedSessionListItem[];
@@ -157,8 +154,6 @@ export default function SidebarContent({
   selectedSession,
   activeTab,
   setActiveTab,
-  shouldShowTasksTab,
-  shouldShowBrowserTab,
   pulseSessionsCount,
   archivedProjects,
   archivedSessions,
@@ -264,6 +259,25 @@ export default function SidebarContent({
         searchFilter={searchFilter}
         onSearchFilterChange={onSearchFilterChange}
         onClearSearchFilter={onClearSearchFilter}
+        terminalSlot={
+          <Tooltip content={t('tabs.shell', { defaultValue: 'Командная строка' })} position="top">
+            <button
+              type="button"
+              onClick={() => setActiveTab(activeTab === 'shell' ? 'chat' : 'shell')}
+              aria-pressed={activeTab === 'shell'}
+              aria-label={t('tabs.shell', { defaultValue: 'Командная строка' })}
+              title={t('tabs.shell', { defaultValue: 'Командная строка' })}
+              className={cn(
+                'flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs font-normal transition-all',
+                activeTab === 'shell'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Terminal className="h-3 w-3" />
+            </button>
+          </Tooltip>
+        }
         projectPickerSlot={projectPicker}
         searchMode={searchMode}
         onSearchModeChange={onSearchModeChange}
@@ -299,18 +313,6 @@ export default function SidebarContent({
               )}
             </div>
           )}
-          <div className="flex items-center gap-1.5">
-            {selectedProject && (
-              <div className="flex-1">
-                <SidebarWorkspaceTabs
-                  activeTab={activeTab}
-                  setActiveTab={setActiveTab}
-                  shouldShowTasksTab={shouldShowTasksTab}
-                  shouldShowBrowserTab={shouldShowBrowserTab}
-                />
-              </div>
-            )}
-          </div>
         </div>
       )}
 

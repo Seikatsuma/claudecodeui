@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { stripProposedPlanEnvelope } from './chatFormatting';
+import { separateMarkdownBlocks, stripProposedPlanEnvelope } from './chatFormatting';
 
 test('stripProposedPlanEnvelope removes a complete outer plan envelope', () => {
   assert.equal(
@@ -25,4 +25,39 @@ test('stripProposedPlanEnvelope preserves tags that are not the outer envelope',
 test('stripProposedPlanEnvelope preserves an unmatched terminal closing tag', () => {
   const content = 'Ordinary text that mentions a terminal tag.\n</proposed_plan>';
   assert.equal(stripProposedPlanEnvelope(content), content);
+});
+
+test('separateMarkdownBlocks отбивает список, начатый не с единицы', () => {
+  const input = [
+    'Полезные, но не срочные (11)',
+    '11. «Сегодня»: карточка «Верных ответов за 4 недели» не про сегодня.',
+    '12. «Сегодня»: метка «3 возраста» — точки без подписи.',
+  ].join('\n');
+
+  assert.equal(
+    separateMarkdownBlocks(input),
+    [
+      'Полезные, но не срочные (11)',
+      '',
+      '11. «Сегодня»: карточка «Верных ответов за 4 недели» не про сегодня.',
+      '12. «Сегодня»: метка «3 возраста» — точки без подписи.',
+    ].join('\n'),
+  );
+});
+
+test('separateMarkdownBlocks отбивает заголовок от предыдущей строки', () => {
+  assert.equal(
+    separateMarkdownBlocks('Хвост абзаца.\n## Следующий раздел'),
+    'Хвост абзаца.\n\n## Следующий раздел',
+  );
+});
+
+test('separateMarkdownBlocks не трогает содержимое блока кода', () => {
+  const input = ['Пример:', '```bash', 'echo один', '# это комментарий, не заголовок', '```'].join('\n');
+  assert.equal(separateMarkdownBlocks(input), input);
+});
+
+test('separateMarkdownBlocks не плодит пустые строки в готовом списке', () => {
+  const input = ['- первый', '- второй', '- третий'].join('\n');
+  assert.equal(separateMarkdownBlocks(input), input);
 });

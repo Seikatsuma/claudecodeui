@@ -78,7 +78,7 @@ export const ToolErrorDisplay: React.FC<ToolErrorDisplayProps> = ({ content, lab
 
       {open && hasContent && (
         <div className="settings-content-enter border-t border-red-500/20 px-3 py-2 text-sm text-red-900 dark:text-red-100">
-          <Markdown className="prose prose-sm prose-red max-w-none font-serif dark:prose-invert">
+          <Markdown className="prose prose-sm prose-red max-w-none text-[13px] leading-[1.55] dark:prose-invert">
             {trimmedContent}
           </Markdown>
         </div>

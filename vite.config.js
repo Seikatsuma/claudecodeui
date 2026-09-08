@@ -90,19 +90,14 @@ export default defineConfig(({ mode }) => {
       reportCompressedSize: false,
       rollupOptions: {
         output: {
+          // Редактор кода и терминал намеренно НЕ вынесены в именованные
+          // куски. Именованный кусок становится частью стартовой загрузки
+          // страницы, даже если пользуется им только вкладка, которую ещё не
+          // открыли: браузер честно скачивал и разбирал мегабайт редактора и
+          // терминала при каждом входе. Без этого списка Rollup кладёт их в
+          // те отложенные куски, которые их и вызывают.
           manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            'vendor-codemirror': [
-              '@uiw/react-codemirror',
-              '@codemirror/lang-css',
-              '@codemirror/lang-html',
-              '@codemirror/lang-javascript',
-              '@codemirror/lang-json',
-              '@codemirror/lang-markdown',
-              '@codemirror/lang-python',
-              '@codemirror/theme-one-dark'
-            ],
-            'vendor-xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-clipboard', '@xterm/addon-webgl']
+            'vendor-react': ['react', 'react-dom', 'react-router-dom']
           }
         }
       }
