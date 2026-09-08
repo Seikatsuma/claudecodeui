@@ -553,12 +553,14 @@ export function useChatComposerState({
     lastAutosizedInputRef.current = target.value;
   }, []);
 
-  const handleAttachmentFiles = useCallback((files: File[]) => {
-    const validFiles = files.filter((file) => {
+  const handleAttachmentFiles = useCallback(async (files: File[]) => {
+    const accepted: File[] = [];
+
+    for (const file of files) {
       try {
         if (!file || typeof file !== 'object') {
           console.warn('Invalid file object:', file);
-          return false;
+          continue;
         }
 
         if (file.size > MAX_ATTACHMENT_SIZE) {
@@ -568,18 +570,38 @@ export function useChatComposerState({
             next.set(fileName, 'File too large (max 10MB)');
             return next;
           });
-          return false;
+          continue;
         }
 
-        return true;
+        // Байты снимаются ЗДЕСЬ, при добавлении, а не при отправке.
+        //
+        // Дропнутый или выбранный скрепкой File — это лишь ссылка на файл на
+        // диске, и она может протухнуть до отправки: скриншот, перетащенный из
+        // всплывающей миниатюры системного скриншотера, живёт во временном
+        // файле, который система удаляет через считанные секунды. Тогда
+        // FormData отдаёт оборванный поток, и сервер отвечает «Unexpected end
+        // of form» — сообщение, по которому невозможно догадаться, что файла
+        // просто уже нет. Вставка из буфера этим не страдала: там данные
+        // изначально в памяти, поэтому она и работала, когда перетаскивание
+        // не работало.
+        const snapshot = new File([await file.arrayBuffer()], file.name || 'file', {
+          type: file.type,
+          lastModified: file.lastModified,
+        });
+        accepted.push(snapshot);
       } catch (error) {
-        console.error('Error validating file:', error, file);
-        return false;
+        console.error('Не удалось прочитать вложение:', error, file);
+        const fileName = file?.name || 'Unknown file';
+        setFileErrors((previous) => {
+          const next = new Map(previous);
+          next.set(fileName, 'Не удалось прочитать файл — перетащите его ещё раз');
+          return next;
+        });
       }
-    });
+    }
 
-    if (validFiles.length > 0) {
-      setAttachedFiles((previous) => [...previous, ...validFiles].slice(0, MAX_ATTACHMENT_COUNT));
+    if (accepted.length > 0) {
+      setAttachedFiles((previous) => [...previous, ...accepted].slice(0, MAX_ATTACHMENT_COUNT));
     }
   }, []);
 
