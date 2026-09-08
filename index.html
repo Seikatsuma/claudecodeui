@@ -22,6 +22,22 @@
     
     <!-- iOS Safari PWA Meta Tags -->
     <meta name="mobile-web-app-capable" content="yes" />
+    <!--
+      Обязательная пара к строке ниже. Apple учитывает
+      apple-mobile-web-app-status-bar-style ТОЛЬКО когда рядом стоит
+      apple-mobile-web-app-capable. Без неё iOS не считает страницу
+      веб-приложением в своём, «яблочном» смысле: строка состояния
+      остаётся непрозрачной, и высота содержимого урезается на её 62
+      точки, хотя само окно занимает экран целиком.
+
+      Замер с телефона Егора: экран 874, окно 874, а содержимое 812,
+      начиная с самого верха. Те самые 62 точки и оставались пустой
+      полосой внизу — вне страницы, поэтому никакая правка стилей до
+      неё не дотягивалась. Заодно 62 точки отступа сверху, которые
+      приложение честно добавляло под строку состояния, оказывались
+      лишними: iOS уже вычла их.
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Claude UI" />
     
