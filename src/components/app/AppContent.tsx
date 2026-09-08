@@ -311,6 +311,57 @@ function AppContentInner() {
       return value;
     };
 
+    // Временные метки границ страницы.
+    //
+    // Пустую полосу снизу не удаётся ни воспроизвести на сервере, ни объяснить
+    // числами: экран 874, окно 874, а страница 812. Непонятно главное — эти 62
+    // точки лежат выше страницы или ниже её. От ответа зависит, где чинить:
+    // в стилях приложения или в том, как iOS выдаёт окно.
+    //
+    // Поэтому рисуем две полоски по краям самой страницы: зелёная — где
+    // страница начинается, красная — где заканчивается. На снимке экрана сразу
+    // видно, совпадают ли они с краями экрана. Убрать вместе с /api/layout-probe.
+    const drawEdgeMarks = () => {
+      const make = (place: 'top' | 'bottom', color: string) => {
+        const node = document.createElement('div');
+        node.dataset.edgeMark = place;
+        node.style.cssText = [
+          'position:fixed',
+          'left:0',
+          'right:0',
+          `${place}:0`,
+          'height:4px',
+          `background:${color}`,
+          'z-index:2147483647',
+          'pointer-events:none',
+        ].join(';');
+        document.body.appendChild(node);
+      };
+      document.querySelectorAll('[data-edge-mark]').forEach((node) => node.remove());
+      make('top', '#34c759');
+      make('bottom', '#ff375f');
+
+      const label = document.createElement('div');
+      label.dataset.edgeMark = 'label';
+      label.style.cssText = [
+        'position:fixed',
+        'right:6px',
+        'bottom:8px',
+        'z-index:2147483647',
+        'pointer-events:none',
+        'font:11px/1.3 ui-monospace,monospace',
+        'color:#fff',
+        'background:rgba(0,0,0,.75)',
+        'padding:3px 6px',
+        'border-radius:5px',
+      ].join(';');
+      label.textContent =
+        `экран ${window.screen.height} · окно ${window.outerHeight} · страница ${window.innerHeight}`;
+      document.body.appendChild(label);
+    };
+    drawEdgeMarks();
+    window.addEventListener('orientationchange', () => window.setTimeout(drawEdgeMarks, 300));
+
     // Разовый отчёт с устройства: что именно сообщает браузер.
     //
     // Раньше отчёт слался только из приложения с экрана «Домой». Но пустая
