@@ -298,6 +298,19 @@ function AppContentInner() {
     update();
 
 
+    // Меряем высоту НАСТОЯЩИМ элементом: значение из getComputedStyle для
+    // единиц вроде dvh WebKit отдаёт устаревшим, а offsetHeight заставляет
+    // пересчитать раскладку и говорит правду.
+    const measureCssHeight = (unit: string): number => {
+      const probeNode = document.createElement('div');
+      probeNode.style.cssText =
+        `position:fixed;top:0;left:0;width:0;height:${unit};visibility:hidden;pointer-events:none`;
+      document.body.appendChild(probeNode);
+      const value = probeNode.offsetHeight;
+      probeNode.remove();
+      return value;
+    };
+
     // Разовый отчёт с устройства: что именно сообщает браузер.
     //
     // Раньше отчёт слался только из приложения с экрана «Домой». Но пустая
@@ -344,6 +357,10 @@ function AppContentInner() {
             availH: String(window.screen.availHeight),
             headerPad: styles.getPropertyValue('--header-total-padding').trim(),
             dpr: String(window.devicePixelRatio),
+            // Чему РЕАЛЬНО равны обе меры высоты на этом устройстве: именно
+            // расхождение между ними и оставляло пустую полосу.
+            vh100: String(measureCssHeight('100vh')),
+            dvh100: String(measureCssHeight('100dvh')),
             изПриложения: String(isStandalone),
             браузер: navigator.userAgent.slice(0, 60),
             // Решающее число: где окно приложения стоит на экране.
