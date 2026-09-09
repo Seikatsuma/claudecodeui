@@ -598,7 +598,11 @@ export function useChatSessionState({
       top: container.scrollTop,
     };
 
-    const scrolledNearTop = container.scrollTop < 100;
+    // Подгружаем не у самой кромки, а за экран до неё: пока человек долистывает
+    // последний экран, старое уже приходит, и прокрутка не спотыкается.
+    // Раньше порог был сто точек — старое начинало грузиться, когда листать
+    // было уже некуда, и это читалось как рывок.
+    const scrolledNearTop = container.scrollTop < Math.max(100, container.clientHeight);
 
     // "Load all" prompt: appear (with fade-in) when the user reaches the top
     if (scrolledNearTop && hasMoreMessages && !allMessagesLoadedRef.current) {
