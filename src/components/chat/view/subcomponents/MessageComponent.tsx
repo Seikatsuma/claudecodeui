@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef } from 'react';
+import { memo, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import LLMProviderLogo from '../../../llm-provider-logo/LLMProviderLogo';
@@ -11,7 +11,7 @@ import type {
 import { formatUsageLimitText, stripProposedPlanEnvelope } from '../../utils/chatFormatting';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, ToolErrorDisplay, shouldHideToolResult } from '../../tools';
-import { Reasoning, ReasoningTrigger, ReasoningContent } from '../../../../shared/view/ui';
+import { Reasoning, ReasoningTrigger, ReasoningContent, Shimmer } from '../../../../shared/view/ui';
 
 import ChatMessageImages from './ChatMessageImages';
 import ChatMessageFiles from './ChatMessageFiles';
@@ -62,6 +62,23 @@ function toRequestLabel(content: string): string | undefined {
 
 const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
+
+  /*
+    Подпись шапки размышления. Живёт здесь, а не в самом Reasoning: тот —
+    общий примитив без доступа к переводам, и в русском интерфейсе показывал
+    английское «Thinking...».
+
+    Мерцающее «Думает» — строго пока идёт поток. Нулевая длительность больше
+    не приравнивается к «идёт»: её получает всякая мысль короче полусекунды
+    (длительность округляется), из-за чего завершённые блоки навсегда
+    оставались мерцающими и список было не отличить от живого.
+  */
+  const thinkingLabel = useCallback((isStreaming: boolean, duration?: number) => {
+    if (isStreaming) return <Shimmer>{t('thinking.header.live')}</Shimmer>;
+    if (duration === undefined) return <p>{t('thinking.header.few')}</p>;
+    if (duration === 0) return <p>{t('thinking.header.fast')}</p>;
+    return <p>{t('thinking.header.seconds', { count: duration })}</p>;
+  }, [t]);
   const isGrouped = prevMessage && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
       (prevMessage.type === 'user') ||
@@ -347,7 +364,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 isStreaming={Boolean(message.isStreaming)}
                 duration={typeof message.thinkingDurationSeconds === 'number' ? message.thinkingDurationSeconds : undefined}
               >
-                <ReasoningTrigger />
+                <ReasoningTrigger getThinkingMessage={thinkingLabel} />
                 <ReasoningContent>
                   <Markdown className="prose prose-sm prose-gray max-w-none text-[13px] leading-[1.55] [&_h1]:mt-5 [&_h2]:mt-5 [&_p]:my-0 [&_li]:my-0 dark:prose-invert">
                     {message.content}
@@ -362,7 +379,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 {/* Reasoning accordion */}
                 {showThinking && message.reasoning && (
                   <Reasoning className="mb-3" defaultOpen={false}>
-                    <ReasoningTrigger />
+                    <ReasoningTrigger getThinkingMessage={thinkingLabel} />
                     <ReasoningContent>
                       <div className="whitespace-pre-wrap">
                         {message.reasoning}
