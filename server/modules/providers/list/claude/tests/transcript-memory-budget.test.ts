@@ -122,9 +122,13 @@ test('открытие длинного чата укладывается в б�
       });
     });
 
-    assert.ok(page, 'страница должна прийти');
-    assert.equal(page!.messages.length, 20, 'страница — двадцать сообщений, как просили');
-    assert.equal(page!.hasMore, true, 'кнопка «показать ранние» должна остаться');
+    // Присваивание происходит внутри замыкания, и TypeScript этого не видит:
+    // после вызова он считает переменную по-прежнему `null` и запрещает читать
+    // поля. Снимаем сужение отдельной ссылкой — проверка от этого не слабеет.
+    const pageResult = page as Awaited<ReturnType<typeof sessions.fetchHistory>> | null;
+    assert.ok(pageResult, 'страница должна прийти');
+    assert.equal(pageResult.messages.length, 20, 'страница — двадцать сообщений, как просили');
+    assert.equal(pageResult.hasMore, true, 'кнопка «показать ранние» должна остаться');
     t.diagnostic(`страница чата: ${asMb(pageGrowth)}`);
     assert.ok(
       pageGrowth < MEMORY_BUDGET_BYTES,
