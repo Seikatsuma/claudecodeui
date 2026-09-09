@@ -51,6 +51,8 @@ interface ChatMessagesPaneProps {
   isLoadingMoreMessages: boolean;
   hasMoreMessages: boolean;
   totalMessages: number;
+  /** Дотянуть всю переписку — нужно меню выгрузки, чтобы сохранить её целиком. */
+  loadAllMessages: () => void;
   sessionMessagesCount: number;
   visibleMessages: ChatMessage[];
   allMessagesLoaded: boolean;
@@ -103,6 +105,7 @@ function ChatMessagesPane({
   isLoadingMoreMessages,
   hasMoreMessages,
   totalMessages,
+  loadAllMessages,
   sessionMessagesCount,
   visibleMessages,
   allMessagesLoaded,
@@ -168,7 +171,13 @@ function ChatMessagesPane({
       {chatMessages.length > 0 && (
         <div className="pointer-events-none sticky right-4 top-3 z-10 mb-2 flex justify-end sm:px-4">
           <div className="pointer-events-auto">
-            <ChatExportMenu messages={chatMessages} sessionTitle={selectedSession?.title} />
+            <ChatExportMenu
+              loadedCount={chatMessages.length}
+              totalCount={totalMessages}
+              onLoadAll={loadAllMessages}
+              getMessages={() => chatMessages}
+              sessionTitle={selectedSession?.title}
+            />
           </div>
         </div>
       )}

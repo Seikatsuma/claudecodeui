@@ -284,7 +284,20 @@ function AppContentInner() {
       // vv.offsetTop which would make --keyboard-height fluctuate during
       // normal scrolling, causing the container to bounce up and down.
       const gap = Math.max(0, window.innerHeight - vv.height);
-      const kb = isStandalone ? Math.max(0, gap - restingGap) : gap;
+      const raw = isStandalone ? Math.max(0, gap - restingGap) : gap;
+
+      // Ограничитель. Клавиатура физически не занимает больше двух третей
+      // экрана, а вот числа от браузера в момент её появления бывают любыми:
+      // высота видимой области успевает провалиться почти до нуля, и разность
+      // становится больше самого экрана. Оболочка задана как «низ на высоте
+      // клавиатуры», поэтому при таком значении её нижняя граница уезжает выше
+      // верхней, высота схлопывается в ноль, и поле ввода оказывается на самом
+      // верху поверх часов — это Егор и снял.
+      //
+      // Ограничение снимает целый класс таких срывов: даже если замер соврал,
+      // раскладка остаётся рабочей.
+      const ceiling = Math.round(window.innerHeight * 0.7);
+      const kb = Math.min(raw, ceiling);
       document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
     };
     // Run once on mount, not only on the next resize: if the browser's own
@@ -328,7 +341,9 @@ function AppContentInner() {
       // the keyboard overlays rather than shrinks the layout viewport.
       style={{
         bottom: 'var(--keyboard-height, 0px)',
-        maxHeight: 'calc(100dvh - var(--keyboard-height, 0px))',
+        // Пол на всякий случай: даже при неверном замере оболочка остаётся
+        // видимой, а не сжимается в полоску.
+        maxHeight: 'max(240px, calc(100dvh - var(--keyboard-height, 0px)))',
       }}
     >
       {!isMobile ? (
