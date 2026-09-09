@@ -39,7 +39,7 @@ function ChatInterface({
   onShowAllTasks,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
-  const { subscribe } = useWebSocket();
+  const { subscribe, isConnected } = useWebSocket();
   const { t } = useTranslation('chat');
 
   const sessionStore = useSessionStore();
@@ -236,6 +236,34 @@ function ChatInterface({
     setPendingPermissionRequests,
     resolvePermissionModeForProvider,
   });
+
+  // Обрыв связи во время ответа больше не остаётся без объяснения.
+  //
+  // Егор: «отправляю сообщение — и ни ответа, ни размышлений, ни ошибки,
+  // вообще ничего». Так и было: сервер падал (09.09 — дважды за утро, от
+  // нехватки памяти и от оборванной трубы), браузер молча ждал три секунды,
+  // переподключался, получал от сервера «ничего не выполняется» — и снимал
+  // признак работы. Человек оставался со своим сообщением и пустотой.
+  //
+  // Само падение лечится на сервере. Здесь — вторая половина обещания: если
+  // связь всё же пропала посреди ответа, об этом говорится прямо, и видно,
+  // что сообщение нужно отправить заново.
+  const wasConnectedRef = useRef(isConnected);
+  useEffect(() => {
+    const lostWhileWaiting = wasConnectedRef.current && !isConnected && isProcessing;
+    wasConnectedRef.current = isConnected;
+    if (!lostWhileWaiting) {
+      return;
+    }
+    addMessage({
+      type: 'error',
+      content: t(
+        'errors.connectionLostWhileWaiting',
+        'Связь с сервером прервалась, ответ не получен. Отправьте сообщение ещё раз.',
+      ),
+      timestamp: new Date(),
+    });
+  }, [isConnected, isProcessing, addMessage, t]);
 
   // On WebSocket reconnect, request a bounded persisted-tail sync (deferred
   // while Chat is hidden), then re-subscribe — the
