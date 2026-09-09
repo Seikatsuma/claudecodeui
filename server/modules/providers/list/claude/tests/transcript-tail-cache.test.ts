@@ -13,12 +13,31 @@ function row(session: string, index: number): string {
   return JSON.stringify({ sessionId: session, n: index, text: `строка ${index}` });
 }
 
+/**
+ * Временные каталоги этого файла — чтобы убрать их после прогона.
+ *
+ * Раньше каждый тест создавал каталог и не убирал его. Тесты с большими
+ * стенограммами оставляли по 120 МБ за прогон, и к 09.09 в /tmp скопился
+ * почти гигабайт при свободных двух с половиной — то есть проверка защиты
+ * от переполнения памяти сама подъедала диск.
+ */
+const temporaryDirectories: string[] = [];
+
 async function makeFile(rows: string[]): Promise<string> {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'tail-cache-'));
+  temporaryDirectories.push(dir);
   const file = path.join(dir, 'transcript.jsonl');
   await fsp.writeFile(file, rows.join('\n') + '\n', 'utf8');
   return file;
 }
+
+test.after(async () => {
+  forgetTranscriptTail();
+  await Promise.all(
+    temporaryDirectories.map((dir) => fsp.rm(dir, { recursive: true, force: true })),
+  );
+  temporaryDirectories.length = 0;
+});
 
 test('читает строки только своего сеанса', async () => {
   forgetTranscriptTail();
@@ -68,18 +87,32 @@ test('переписанный файл читается заново, а не �
   assert.deepEqual(again.lines.map((l) => JSON.parse(l).n), [9]);
 });
 
-test('запрос «всю историю» после подрезки читает файл заново, а не отдаёт хвост', async () => {
+test('запрос «всю историю» у огромного файла отдаёт хвост и честно признаётся, что он не весь', async () => {
   forgetTranscriptTail();
-  // Строки нарочно большие, чтобы кэш пришлось подрезать по объёму.
+  // Стенограмма нарочно больше потолка полного чтения (12 МБ): такие у Егора
+  // уже есть, и раньше именно на них служба падала по памяти.
   const big = 'я'.repeat(1024 * 1024);
   const rows = Array.from({ length: 60 }, (_, i) =>
     JSON.stringify({ sessionId: SESSION, n: i, text: big }));
   const file = await makeFile(rows);
 
   const first = await readSessionLines(file, SESSION, null);
-  assert.equal(first.total, 60, 'вся история должна прийти целиком');
-  assert.equal(first.complete, true);
+  assert.ok(first.lines.length > 0, 'хвост переписки должен прийти');
+  assert.ok(first.lines.length < 60, 'весь файл целиком в память не читаем');
+  assert.equal(first.complete, false, 'ответ неполный — кнопка «показать ранние» нужна');
+  // Пришёл именно конец переписки, а не её начало.
+  assert.equal(JSON.parse(first.lines[first.lines.length - 1]).n, 59);
 
   const second = await readSessionLines(file, SESSION, null);
-  assert.equal(second.total, 60, 'и во второй раз тоже');
+  assert.equal(second.lines.length, first.lines.length, 'и во второй раз столько же');
+});
+
+test('запрос «всю историю» у обычного файла отдаёт её целиком', async () => {
+  forgetTranscriptTail();
+  const rows = Array.from({ length: 60 }, (_, i) => JSON.stringify({ sessionId: SESSION, n: i }));
+  const file = await makeFile(rows);
+
+  const result = await readSessionLines(file, SESSION, null);
+  assert.equal(result.total, 60);
+  assert.equal(result.complete, true);
 });
