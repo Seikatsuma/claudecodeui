@@ -204,7 +204,15 @@
 
   /* Adjust fixed inset positioning in PWA mode */
   body.pwa-mode .fixed.inset-0 {
-    top: var(--header-total-padding);
+    /*
+      Ровно высота строки состояния — и ни точкой больше.
+      Раньше здесь было --header-total-padding, то есть строка состояния
+      ПЛЮС восемь точек «на всякий случай». Эти восемь точек и читались как
+      зазор между часами айфона и полосой с чатами: содержимое начиналось на
+      70 точках там, где занято 62. Егор: «пусть верхняя полоса с чатами
+      будет впритык к шапке айфона».
+    */
+    top: var(--header-safe-area-top);
     left: var(--safe-area-inset-left);
     right: var(--safe-area-inset-right);
     bottom: 0;
