@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
@@ -8,6 +6,8 @@ import type {
   ProviderModelsDefinition,
 } from '@/shared/types.js';
 import { buildDefaultProviderCurrentActiveModel } from '@/shared/utils.js';
+
+import { readTailLines } from './transcript-tail-cache.js';
 
 export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
@@ -231,28 +231,52 @@ const extractClaudeModelFromMessageContent = (content: unknown): string | null =
   return null;
 };
 
+/**
+ * Сколько байтов с конца стенограммы просматривать в поисках модели.
+ *
+ * Модель записана в каждом ответе помощника, поэтому ответ почти всегда
+ * лежит в самом хвосте. Первый шаг маленький — он покрывает обычный случай за
+ * миллисекунды; второй нужен, если хвост занят длинной чередой инструментов
+ * без ответов.
+ */
+const MODEL_LOOKUP_STEPS_BYTES = [256 * 1024, 4 * 1024 * 1024];
+
+/**
+ * Ищет модель чата с конца стенограммы, а не чтением файла целиком.
+ *
+ * Раньше здесь было `readFile` на весь файл: у чата на 70 МБ это 263 МБ
+ * памяти на один запрос «какая сейчас модель» при потолке кучи 256 МБ.
+ * Запрос приходит при каждом открытии чата — то есть это была та же авария,
+ * что уронила общую службу 09.09, просто с другой стороны.
+ */
 const readClaudeSessionModelFromJsonl = async (
   sessionId: string,
   jsonlPath: string,
 ): Promise<ProviderCurrentActiveModel | null> => {
-  const content = await readFile(jsonlPath, 'utf8');
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  for (const stepBytes of MODEL_LOOKUP_STEPS_BYTES) {
+    const { lines, fromStart } = await readTailLines(jsonlPath, sessionId, stepBytes);
 
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    try {
-      const event = JSON.parse(lines[index]) as ClaudeInitEvent;
-      const model = extractClaudeEventModel(event, sessionId);
-      if (model) {
-        return { model };
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      try {
+        const event = JSON.parse(lines[index]) as ClaudeInitEvent;
+        const model = extractClaudeEventModel(event, sessionId);
+        if (model) {
+          return { model };
+        }
+      } catch {
+        // Skip malformed JSONL lines that can happen during concurrent writes.
       }
-    } catch {
-      // Skip malformed JSONL lines that can happen during concurrent writes.
+    }
+
+    // Дочитали до начала файла — дальше искать негде.
+    if (fromStart) {
+      return null;
     }
   }
 
+  // Модель не нашлась в отведённом окне. Читать остальные десятки мегабайт
+  // ради подписи с названием модели незачем: вызывающий подставит значение
+  // по умолчанию, а служба останется живой.
   return null;
 };
 
