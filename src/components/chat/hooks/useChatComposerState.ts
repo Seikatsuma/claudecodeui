@@ -149,7 +149,12 @@ const createFakeSubmitEvent = () => {
 };
 
 const MAX_ATTACHMENT_COUNT = 10;
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+// Потолок на одно вложение. 10 МБ отсекали ровно тот случай, ради которого
+// вложения и нужны: скриншот экрана 2560x1440 весит около 11 МБ, и человек
+// получал отказ на самом обычном действии. Сервер принимает до 50 МБ
+// (ASSETS_MAX_ATTACHMENT_BYTES), так что 25 МБ — с запасом и там, и там.
+const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_SIZE_MB = Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024));
 
 const isImageAttachment = (attachment: ChatAttachment) => {
   if (attachment.mimeType?.startsWith('image/')) return true;
@@ -567,7 +572,7 @@ export function useChatComposerState({
           const fileName = file.name || 'Unknown file';
           setFileErrors((previous) => {
             const next = new Map(previous);
-            next.set(fileName, 'File too large (max 10MB)');
+            next.set(fileName, `Файл слишком большой (максимум ${MAX_ATTACHMENT_SIZE_MB} МБ)`);
             return next;
           });
           continue;
