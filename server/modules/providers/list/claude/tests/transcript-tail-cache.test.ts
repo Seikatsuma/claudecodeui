@@ -68,18 +68,32 @@ test('переписанный файл читается заново, а не �
   assert.deepEqual(again.lines.map((l) => JSON.parse(l).n), [9]);
 });
 
-test('запрос «всю историю» после подрезки читает файл заново, а не отдаёт хвост', async () => {
+test('запрос «всю историю» у огромного файла отдаёт хвост и честно признаётся, что он не весь', async () => {
   forgetTranscriptTail();
-  // Строки нарочно большие, чтобы кэш пришлось подрезать по объёму.
+  // Стенограмма нарочно больше потолка полного чтения (12 МБ): такие у Егора
+  // уже есть, и раньше именно на них служба падала по памяти.
   const big = 'я'.repeat(1024 * 1024);
   const rows = Array.from({ length: 60 }, (_, i) =>
     JSON.stringify({ sessionId: SESSION, n: i, text: big }));
   const file = await makeFile(rows);
 
   const first = await readSessionLines(file, SESSION, null);
-  assert.equal(first.total, 60, 'вся история должна прийти целиком');
-  assert.equal(first.complete, true);
+  assert.ok(first.lines.length > 0, 'хвост переписки должен прийти');
+  assert.ok(first.lines.length < 60, 'весь файл целиком в память не читаем');
+  assert.equal(first.complete, false, 'ответ неполный — кнопка «показать ранние» нужна');
+  // Пришёл именно конец переписки, а не её начало.
+  assert.equal(JSON.parse(first.lines[first.lines.length - 1]).n, 59);
 
   const second = await readSessionLines(file, SESSION, null);
-  assert.equal(second.total, 60, 'и во второй раз тоже');
+  assert.equal(second.lines.length, first.lines.length, 'и во второй раз столько же');
+});
+
+test('запрос «всю историю» у обычного файла отдаёт её целиком', async () => {
+  forgetTranscriptTail();
+  const rows = Array.from({ length: 60 }, (_, i) => JSON.stringify({ sessionId: SESSION, n: i }));
+  const file = await makeFile(rows);
+
+  const result = await readSessionLines(file, SESSION, null);
+  assert.equal(result.total, 60);
+  assert.equal(result.complete, true);
 });

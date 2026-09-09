@@ -58,6 +58,26 @@ const upload = multer({
   },
 });
 
+/**
+ * Переводит невнятные ошибки разбора multipart в понятные человеку.
+ *
+ * «Unexpected end of form» busboy выдаёт, когда поток запроса кончился до
+ * закрывающей границы. На практике за этим почти всегда стоит одно: браузер
+ * не смог дочитать файл — ссылка на него протухла (перетащенный из
+ * всплывающей миниатюры скриншот живёт во временном файле считанные секунды)
+ * или соединение оборвалось на полпути. Пользователю нужно знать именно это,
+ * а не внутреннее устройство парсера.
+ */
+function humanizeUploadError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : 'Upload failed';
+  if (/unexpected end of form/i.test(raw)) {
+    return 'Файл не догрузился: браузер не смог его дочитать. '
+      + 'Так бывает со скриншотом, перетащенным из всплывающей миниатюры — '
+      + 'система успевает удалить временный файл. Сохраните его и попробуйте снова.';
+  }
+  return raw;
+}
+
 const attachmentUpload = multer({
   storage,
   limits: {
@@ -73,8 +93,7 @@ const attachmentUpload = multer({
 router.post('/images', (req, res) => {
   upload.array('images', 5)(req, res, (err: unknown) => {
     if (err) {
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      return res.status(400).json({ error: message });
+      return res.status(400).json({ error: humanizeUploadError(err) });
     }
 
     const files = Array.isArray(req.files) ? req.files : [];
@@ -95,8 +114,7 @@ router.post('/images', (req, res) => {
 router.post('/files', (req, res) => {
   attachmentUpload.array('files', 10)(req, res, (err: unknown) => {
     if (err) {
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      return res.status(400).json({ error: message });
+      return res.status(400).json({ error: humanizeUploadError(err) });
     }
 
     const files = Array.isArray(req.files) ? req.files : [];
