@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Load environment variables before other imports execute.
 import './load-env.js';
+// Ставим защиту до всего остального: если что-то упадёт при запуске,
+// журнал должен объяснить причину, а не оборваться на полуслове.
 import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -9,13 +11,14 @@ import http from 'http';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 
+import { installProcessGuards } from '@/shared/process-guards.js';
 import { AppError, findApplicationRoot, getClaudeJsonPath, getModuleDirectory, IS_PLATFORM, OPEN_REGISTRATION, terminalTextStyles } from '@/shared/utils.js';
 import {
     closeSessionsWatcher,
     initializeSessionsWatcher,
     providerRuntimeService,
 } from '@/modules/providers/index.js';
-import { userDb } from '@/modules/database/index.js';
+import { userDb, initializeDatabase, sessionsDb  } from '@/modules/database/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
@@ -50,8 +53,11 @@ import { fileTreeRoutes } from './modules/file-tree/index.js';
 import { worktreesRoutes } from './modules/worktrees/index.js';
 import browserUseMcpRoutes from './modules/browser-use/browser-use-mcp.routes.js';
 import { browserUseService } from './modules/browser-use/browser-use.service.js';
-import { initializeDatabase, sessionsDb } from './modules/database/index.js';
 import { configureWebPush } from './modules/notifications/index.js';
+
+// Модули загружаются раньше любого кода, поэтому защита ставится сразу
+// после блока импортов — до первого запроса и до открытия сокетов.
+installProcessGuards();
 
 const __dirname = getModuleDirectory(import.meta.url);
 // The server source runs from /server, while the compiled output runs from /dist-server/server.
