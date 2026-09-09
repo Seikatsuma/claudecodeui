@@ -126,11 +126,21 @@ export interface ReasoningTriggerProps extends React.ButtonHTMLAttributes<HTMLBu
 }
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number): React.ReactNode => {
-  if (isStreaming || duration === 0) {
+  // Мерцающее «думает» показывается ТОЛЬКО пока идёт поток.
+  //
+  // Раньше сюда же попадала нулевая длительность, а её получает всякая мысль
+  // короче полусекунды: длительность округляется, и быстрый блок закрывался
+  // с нулём. В итоге завершённый блок навсегда оставался мерцающим «думает»,
+  // и по списку было невозможно понять, идёт размышление сейчас или давно
+  // закончилось — рядом стояли и живые, и застывшие.
+  if (isStreaming) {
     return <Shimmer>Thinking...</Shimmer>;
   }
   if (duration === undefined) {
     return <p>Thought for a few seconds</p>;
+  }
+  if (duration === 0) {
+    return <p>Thought for less than a second</p>;
   }
   return <p>Thought for {duration} seconds</p>;
 };

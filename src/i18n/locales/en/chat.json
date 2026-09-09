@@ -62,7 +62,13 @@
   },
   "thinking": {
     "title": "Thinking...",
-    "emoji": "💭 Thinking..."
+    "emoji": "💭 Thinking...",
+    "header": {
+      "live": "Thinking...",
+      "fast": "Thought for less than a second",
+      "few": "Thought for a few seconds",
+      "seconds": "Thought for {{count}} seconds"
+    }
   },
   "json": {
     "response": "JSON Response"
