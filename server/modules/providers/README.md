@@ -182,6 +182,16 @@ Command forms currently used by the providers are:
   - `limit: null` means unbounded/full history.
   - `limit: 0` means an empty page.
   - always return `total`, `hasMore`, `offset`, and `limit` when paginating.
+- Never read a whole transcript to serve one page. Transcripts grow without
+  bound (70 MB files exist in production) and the service runs under a 450 MB
+  cgroup limit, so a full read is a hundreds-of-megabytes spike that kills the
+  process for every connected user - this crashed the shared instance on
+  2026-09-07 and again on 2026-09-09. Read a bounded window from the END of the
+  file (`transcript-tail-cache.ts` in the Claude provider is the reference
+  implementation) and, when the window was truncated, report `total` as an
+  upper-bound estimate with `hasMore: true`. An over-reported `total` only
+  leaves a "load earlier" button visible one extra time; an exact `total` is
+  not worth a full read.
 - Sanitize any filesystem-derived ids before using them in file or database paths.
 - Do not assume a provider's history format matches another provider's format.
 

@@ -153,3 +153,9 @@ tasks/
 cloudcli-sidebar-app-source.tar.gz
 cloudcli-sidebar.html
 electron/*.tar.gz
+
+# Копии сборки, которые остаются рядом при выкатке и откате.
+# Без этого их подхватывает авто-снапшот (git add -A) и тянет в историю
+# десятки мегабайт собранного кода.
+dist-server.*
+dist.prev/

@@ -14,6 +14,18 @@ import { readSessionLines } from './transcript-tail-cache.js';
 
 const PROVIDER = 'claude';
 
+/**
+ * Сколько сырых строк стенограммы брать под одно сообщение страницы.
+ *
+ * Одна строка файла после разбора даёт от нуля до нескольких сообщений
+ * (у ответа помощника отдельным сообщением становится каждый кусок: текст,
+ * размышление, вызов инструмента), поэтому берём с запасом. Лишние строки
+ * стоят миллисекунды, нехватка — пустой экран вместо переписки.
+ */
+const RAW_LINES_PER_MESSAGE = 3;
+/** Нижняя граница окна: у коротких страниц запас в три строки ничего не даёт. */
+const MIN_RAW_WINDOW_LINES = 200;
+
 type ClaudeToolResult = {
   content: unknown;
   isError: boolean;
@@ -661,11 +673,22 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const { limit = null, offset = 0 } = options;
     const providerSessionId = options.providerSessionId ?? sessionId;
 
+    // Берём из файла только окно под запрошенную страницу.
+    //
+    // Раньше здесь всегда читалась ВСЯ стенограмма — ради точного счёта
+    // сообщений в ответе. У чата на 70 МБ это разовый всплеск в сотни
+    // мегабайт при пределе службы 450 МБ: 09.09 служба падала с «heap out of
+    // memory» при каждом открытии такого чата и уходила в перезапуск по
+    // кругу, унося чаты всех, кто в этот момент работал. Точный счёт того не
+    // стоит: он нужен лишь кнопке «показать ранние», и оценка сверху
+    // (см. ниже) справляется с этим не хуже.
+    const rawWindow = limit === null
+      ? null
+      : Math.max(MIN_RAW_WINDOW_LINES, (offset + limit) * RAW_LINES_PER_MESSAGE);
+
     let result: ClaudeHistoryResult;
     try {
-      // Load full history first so `total` reflects frontend-normalized messages,
-      // not raw JSONL records.
-      result = await getSessionMessages(sessionId, providerSessionId, null, 0);
+      result = await getSessionMessages(sessionId, providerSessionId, rawWindow, 0);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[ClaudeProvider] Failed to load session ${sessionId}:`, message);
@@ -673,6 +696,12 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     }
 
     const rawMessages = Array.isArray(result) ? result : (result.messages || []);
+    // Прочитано ли окно целиком до начала переписки. Когда нет — счёт
+    // сообщений ниже будет оценкой, а не точным числом.
+    const rawTruncated = Array.isArray(result) ? false : Boolean(result.hasMore);
+    const rawTotal = Array.isArray(result)
+      ? rawMessages.length
+      : (result.total ?? rawMessages.length);
 
     const toolResultMap = new Map<string, ClaudeToolResult>();
     for (const raw of rawMessages) {
@@ -723,10 +752,15 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const normalizedLimit = limit === null ? null : Math.max(0, limit);
     const { page, hasMore } = sliceTailPage(normalized, normalizedLimit, normalizedOffset);
 
+    // Когда окно подрезано, в нём лежит не вся переписка, и счёт по нему —
+    // заниженный. Берём большее из двух оценок: показать кнопку «показать
+    // ранние» лишний раз безопаснее, чем спрятать её и потерять переписку.
+    const effectiveTotal = rawTruncated ? Math.max(total, rawTotal) : total;
+
     return {
       messages: page,
-      total,
-      hasMore,
+      total: effectiveTotal,
+      hasMore: hasMore || rawTruncated,
       offset: normalizedOffset,
       limit: normalizedLimit,
     };
