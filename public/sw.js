@@ -4,16 +4,50 @@
 // Имя меняется вместе с любым изменением этого файла: браузер переустанавливает
 // служебный кэш только когда сам файл стал другим побайтово. Установленное на
 // экран «Домой» приложение месяц отдавало старую сборку именно поэтому.
-const CACHE_NAME = 'claude-ui-v4';
+const CACHE_NAME = 'claude-ui-v5';
 const urlsToCache = [
   '/manifest.json'
 ];
+
+/**
+ * Заранее кладёт в кэш куски новой сборки.
+ *
+ * Замер холодного запуска по мобильной сети: 9,5 секунды до рабочего экрана,
+ * из них почти всё — скачивание. А холодным он у Егора оказывается почти
+ * всегда: каждая выкатка меняет имена файлов, и телефон честно тянет их
+ * заново при первом же открытии.
+ *
+ * Поэтому новый служебный файл, устанавливаясь, сам читает свежую страницу,
+ * достаёт из неё имена кусков и складывает их в кэш — в фоне, пока человек
+ * ещё ничего не открыл. К моменту, когда он зайдёт, всё уже лежит на
+ * телефоне, и открытие идёт из памяти.
+ *
+ * Ошибки здесь намеренно проглатываются: не сумели прогреть — просто
+ * скачается при открытии, как раньше. Установку это блокировать не должно.
+ */
+function precacheBuild() {
+  return fetch('/index.html', { cache: 'no-store' })
+    .then(response => (response.ok ? response.text() : Promise.reject(new Error('нет страницы'))))
+    .then(html => {
+      const assets = [];
+      const pattern = /(?:src|href)="(\/assets\/[^"]+)"/g;
+      let found = pattern.exec(html);
+      while (found) {
+        assets.push(found[1]);
+        found = pattern.exec(html);
+      }
+      if (assets.length === 0) return undefined;
+      return caches.open(CACHE_NAME).then(cache => cache.addAll(assets));
+    })
+    .catch(() => undefined);
+}
 
 // Install event
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(urlsToCache))
+      .then(() => precacheBuild()),
   );
   self.skipWaiting();
 });
