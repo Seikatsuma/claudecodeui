@@ -527,6 +527,34 @@ export function useChatSessionState({
     setIsUserScrolledUp(!isNearBottom());
   }, [isActive, isNearBottom]);
 
+  // Догон для айфона: инерция.
+  //
+  // На телефоне палец делает бросок и отрывается, а лента продолжает ехать
+  // сама — иногда полэкрана. Во время инерции `touchmove` уже не приходит,
+  // поэтому положение, посчитанное на последнем касании, врёт: человек в тот
+  // миг был ещё у низа, а доехал далеко вверх. Дальше приходит новый кусок
+  // ответа, и лента, честно считая что человек внизу, утаскивает его обратно.
+  // Егор: «дёргает и отправляет в самый низ, не давая листать».
+  //
+  // `scrollend` браузер шлёт один раз, когда движение окончательно
+  // остановилось — в том числе после инерции. Собственные наши перемотки
+  // отсеиваются тем же признаком, что и везде.
+  const handleScrollSettled = useCallback(() => {
+    if (!isActive) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (programmaticScrollTargetRef.current !== null) return;
+    if (container.scrollHeight <= container.clientHeight) return;
+    setIsUserScrolledUp(!isNearBottom());
+  }, [isActive, isNearBottom]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return undefined;
+    container.addEventListener('scrollend', handleScrollSettled);
+    return () => container.removeEventListener('scrollend', handleScrollSettled);
+  }, [handleScrollSettled]);
+
   const handleScroll = useCallback(async () => {
     if (!isActive) return;
     const container = scrollContainerRef.current;
