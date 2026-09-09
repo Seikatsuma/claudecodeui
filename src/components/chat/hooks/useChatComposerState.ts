@@ -1169,15 +1169,27 @@ export function useChatComposerState({
     // Re-run for restored drafts and programmatic input changes. User typing is
     // already resized in onInput, so this avoids doing the same forced layout twice.
     resizeTextarea(textareaRef.current);
-  }, [input, resizeTextarea]);
+    // И обязательно выровнять слой подсветки.
+    //
+    // Он лежит поверх поля ввода и прокручивается отдельно. Раньше здесь
+    // менялась только высота, а прокрутка слоя оставалась той, что была в
+    // прошлом чате. Получалось, что текст нарисован на одной строке, а
+    // курсор стоит на другой — Егор: «строка сдвигается, хотя фактически она
+    // на той же линии, а при начале ввода вводится правильно». Правильно
+    // потому, что первое же нажатие клавиши шло по другому пути, где
+    // выравнивание было.
+    syncInputOverlayScroll(textareaRef.current);
+  }, [input, resizeTextarea, syncInputOverlayScroll]);
 
   useEffect(() => {
     if (!textareaRef.current || input.trim()) {
       return;
     }
     textareaRef.current.style.height = 'auto';
+    // Пустое поле — слой тоже в начало, иначе он останется прокрученным.
+    syncInputOverlayScroll(textareaRef.current);
     setIsTextareaExpanded(false);
-  }, [input]);
+  }, [input, syncInputOverlayScroll]);
 
   const handleInputChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
