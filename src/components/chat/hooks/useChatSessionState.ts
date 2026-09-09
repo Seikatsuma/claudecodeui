@@ -12,7 +12,19 @@ import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messag
 
 import { normalizedToChatMessages } from './useChatMessages';
 
-const INITIAL_VISIBLE_MESSAGES = 100;
+/**
+ * Сколько загруженных сообщений показывать сразу.
+ *
+ * Сотня стояла как защита от торможения: рисовать больше телефон не тянул, и
+ * появлялась кнопка «показать ещё» поверх подгрузки с сервера — две разные
+ * кнопки об одном и том же, что и раздражало.
+ *
+ * Теперь за экраном сообщения не размечаются и не рисуются вовсе (см.
+ * `.chat-row` в index.css), поэтому потолок поднят до величины, до которой в
+ * жизни не доходит: подгрузку по-прежнему ограничивает сервер, по двадцать
+ * сообщений на прокрутку вверх.
+ */
+const INITIAL_VISIBLE_MESSAGES = 2000;
 
 interface UseChatSessionStateArgs {
   isActive: boolean;

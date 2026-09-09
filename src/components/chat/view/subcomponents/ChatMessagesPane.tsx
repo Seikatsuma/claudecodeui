@@ -70,6 +70,14 @@ interface ChatMessagesPaneProps {
   selectedProject: Project;
 }
 
+/**
+ * Сколько последних сообщений всегда рисуются полностью.
+ *
+ * Три — это ответ, который печатается прямо сейчас, и пара соседей: у них
+ * высота меняется на каждом кадре, а по ней лента решает, держаться ли низа.
+ */
+const LIVE_TAIL_SIZE = 3;
+
 function ChatMessagesPane({
   scrollContainerRef,
   onWheel,
@@ -257,15 +265,21 @@ function ChatMessagesPane({
 
           {(() => {
             let prevMessage: ChatMessage | null = null;
+            // Последние сообщения не «замораживаем»: в них идёт поток, высота
+            // меняется каждый кадр, и подменять её оценкой нельзя — именно по
+            // ней лента решает, держаться ли низа.
+            const liveTailFrom = groupedVisibleMessages.length - LIVE_TAIL_SIZE;
 
-            return groupedVisibleMessages.map((item) => {
+            return groupedVisibleMessages.map((item, index) => {
+              const rowClassName = index >= liveTailFrom ? 'chat-row chat-row--live' : 'chat-row';
+
               if (isToolGroupItem(item)) {
                 const groupPrevMessage = prevMessage;
                 prevMessage = item.messages[item.messages.length - 1] || prevMessage;
 
                 return (
+                  <div className={rowClassName} key={`tool-group-${getMessageKey(item.messages[0])}`}>
                   <ToolGroupContainer
-                    key={`tool-group-${getMessageKey(item.messages[0])}`}
                     group={item}
                     prevMessage={groupPrevMessage}
                     createDiff={createDiff}
@@ -278,6 +292,7 @@ function ChatMessagesPane({
                     selectedProject={selectedProject}
                     provider={provider}
                   />
+                  </div>
                 );
               }
 
@@ -285,8 +300,8 @@ function ChatMessagesPane({
               prevMessage = item;
 
               return (
+                <div className={rowClassName} key={getMessageKey(item)}>
                 <MessageComponent
-                  key={getMessageKey(item)}
                   message={item}
                   prevMessage={messagePrevMessage}
                   createDiff={createDiff}
@@ -298,6 +313,7 @@ function ChatMessagesPane({
                   selectedProject={selectedProject}
                   provider={provider}
                 />
+                </div>
               );
             });
           })()}
