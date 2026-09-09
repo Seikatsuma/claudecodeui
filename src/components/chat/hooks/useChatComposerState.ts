@@ -149,6 +149,8 @@ const createFakeSubmitEvent = () => {
 };
 
 const MAX_ATTACHMENT_COUNT = 10;
+/** Сколько держать засов отправки, если запуск так и не начался (обрыв, отказ сервера). */
+const SUBMIT_LOCK_FAILSAFE_MS = 20_000;
 // Потолок на одно вложение. 10 МБ отсекали ровно тот случай, ради которого
 // вложения и нужны: скриншот экрана 2560x1440 весит около 11 МБ, и человек
 // получал отказ на самом обычном действии. Сервер принимает до 50 МБ
@@ -692,6 +694,39 @@ export function useChatComposerState({
     selectedSession,
   ]);
 
+  /*
+    Засов от повторной отправки.
+
+    Единственным барьером был флаг isLoading, но это состояние React: оно
+    поднимается только когда сервер подтвердил запуск. Между нажатием и этим
+    моментом второе нажатие проходило насквозь, и сервер отвечал «в этой
+    сессии уже идёт запуск», а в ленте оставались два одинаковых сообщения.
+    Зазор особенно широк при вложениях: отправка ждёт загрузки файла, и на
+    многомегабайтном скриншоте это заметные секунды.
+
+    Ref, а не state: он меняется синхронно, прямо в обработчике, поэтому
+    второй вызов видит засов сразу, не дожидаясь перерисовки.
+  */
+  const submitInFlightRef = useRef(false);
+  const submitLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const releaseSubmitLock = useCallback(() => {
+    submitInFlightRef.current = false;
+    if (submitLockTimerRef.current) {
+      clearTimeout(submitLockTimerRef.current);
+      submitLockTimerRef.current = null;
+    }
+  }, []);
+
+  // Засов снимается, когда запуск действительно начался. Таймер — страховка:
+  // если отправка не дошла (обрыв связи, отказ сервера), поле ввода не должно
+  // остаться заблокированным навсегда.
+  useEffect(() => {
+    if (isLoading) releaseSubmitLock();
+  }, [isLoading, releaseSubmitLock]);
+
+  useEffect(() => releaseSubmitLock, [releaseSubmitLock]);
+
   const handleSubmit = useCallback(
     async (
       event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
@@ -831,6 +866,16 @@ export function useChatComposerState({
           return;
         }
       }
+
+      // Засов берётся здесь, а не выше: пока идёт ответ, сообщения кладутся в
+      // очередь, и копить их подряд — нормально. Охранять нужно только
+      // настоящую отправку.
+      if (submitInFlightRef.current) {
+        return;
+      }
+      submitInFlightRef.current = true;
+      if (submitLockTimerRef.current) clearTimeout(submitLockTimerRef.current);
+      submitLockTimerRef.current = setTimeout(releaseSubmitLock, SUBMIT_LOCK_FAILSAFE_MS);
 
       const messageContent = currentInput;
 
