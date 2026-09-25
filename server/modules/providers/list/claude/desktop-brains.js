@@ -16,13 +16,20 @@ import path from 'node:path';
 const PROTOCOL_SKIP = /^(?:да|нет|ок|окей|ага|угу|хорошо|спасибо|понял|ясно|дальше|продолжай|стоп|делай|давай)[\s.!,)]*$/i;
 const SERVICE_MARKERS = ['<task-notification', '<system', '<command-', '<local-command', '[Request interrupted'];
 
-// Разрушительные команды: удаление, затирание истории, форматирование.
+// Разрушительные команды: любое удаление файлов, затирание истории, форматирование.
+// Это личный компьютер — даже один файл удаляется только после «да» человека.
 // Пользователь сказал «да» — Claude повторяет команду с USER_CONFIRMED=da.
 const DESTRUCTIVE = [
-  [/\brm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b/, 'rm -r (рекурсивное удаление)'],
-  [/\brm\s+-[a-zA-Z]*f/, 'rm -f (удаление без вопросов)'],
-  [/\brmdir\s+\/s\b|\bdel\s+\/[sfq]/i, 'удаление папок в Windows'],
-  [/\bRemove-Item\b[^|;]*-Recurse/i, 'Remove-Item -Recurse'],
+  // Команды оболочки сверяются с текстом без кавычек («git commit -m 'убрал rm'» — не удаление).
+  [/(^|[\s;&|(`$])rm\s/, 'rm (удаление файлов)', 'shell'],
+  [/(^|[\s;&|(`$])(?:rmdir|rd)\s/i, 'удаление папки', 'shell'],
+  [/(^|[\s;&|(`$])(?:del|erase|ri)\s/i, 'удаление файлов в Windows', 'shell'],
+  [/\bRemove-Item\b/i, 'Remove-Item (удаление в PowerShell)', 'shell'],
+  [/(^|[\s;&|])unlink\s/, 'unlink (удаление файла)', 'shell'],
+  [/shutil\.rmtree|os\.(?:remove|unlink|rmdir)\s*\(|\.unlink\s*\(/, 'удаление файлов из Python'],
+  [/\.(?:rm|rmdir|unlink)(?:Sync)?\s*\(|\brimraf\b/, 'удаление файлов из Node'],
+  [/\bgit\s+checkout\s+(?:--\s+)?\.(?:\s|$)|\bgit\s+restore\s+(?:--staged\s+)?\.(?:\s|$)/, 'git checkout/restore . (затирает правки)'],
+  [/\bFormat-Volume\b/i, 'форматирование диска'],
   [/\bgit\s+reset\s+--hard\b/, 'git reset --hard (затирает несохранённую работу)'],
   [/\bgit\s+clean\s+-[a-zA-Z]*[fdx]/, 'git clean (удаляет файлы, которых нет в истории)'],
   [/\bgit\s+push\s+[^|;]*(?:--force|-f\b)/, 'git push --force (переписывает чужую историю)'],
@@ -89,8 +96,9 @@ function loadBrains(dir) {
 export function findDestructive(command) {
   const text = String(command || '');
   if (/(^|[\s;&|])USER_CONFIRMED=da\b/.test(text)) return null;
-  for (const [pattern, label] of DESTRUCTIVE) {
-    if (pattern.test(text)) return label;
+  const unquoted = text.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "''");
+  for (const [pattern, label, scope] of DESTRUCTIVE) {
+    if (pattern.test(scope === 'shell' ? unquoted : text)) return label;
   }
   return null;
 }

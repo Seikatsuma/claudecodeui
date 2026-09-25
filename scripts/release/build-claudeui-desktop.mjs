@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..', '..');
@@ -48,8 +48,73 @@ const bin = (name) => path.join(rootDir, 'node_modules', '.bin', process.platfor
 
 await fs.rm(stageDir, { recursive: true, force: true });
 await fs.mkdir(stageDir, { recursive: true });
-for (const item of ['electron', 'dist', 'dist-server', 'public', 'shared', 'desktop', 'package-lock.json']) {
+for (const item of ['electron', 'dist', 'dist-server', 'public', 'shared', 'desktop/brains', 'package-lock.json']) {
   await copy(item);
+}
+
+// Программа уходит людям, а код сервера, обёртки и страницы лежит внутри
+// читаемым текстом: комментарии разработки (с цитатами и именами) вырезаем.
+// Сжимаются только пробелы — имена в коде те же, поведение то же.
+const esbuild = await import(pathToFileURL(path.join(rootDir, 'node_modules', 'esbuild', 'lib', 'main.js')).href);
+async function stripComments(dir) {
+  let count = 0;
+  for (const entry of await fs.readdir(dir, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath || entry.path, entry.name);
+    const loader = /\.(?:m|c)?js$/.test(entry.name) ? 'js' : /\.css$/.test(entry.name) ? 'css' : null;
+    if (loader) {
+      const code = await fs.readFile(file, 'utf8');
+      const { code: stripped } = await esbuild.transform(code, { loader, minifyWhitespace: true, legalComments: 'none', charset: 'utf8' });
+      await fs.writeFile(file, stripped, 'utf8');
+      count += 1;
+    } else if (/\.html$/.test(entry.name)) {
+      const html = await fs.readFile(file, 'utf8');
+      await fs.writeFile(file, html.replace(/<!--[\s\S]*?-->/g, ''), 'utf8');
+      count += 1;
+    }
+  }
+  return count;
+}
+// Тесты сервера людям не нужны.
+for (const entry of await fs.readdir(path.join(stageDir, 'dist-server'), { withFileTypes: true, recursive: true })) {
+  if (entry.isDirectory() && entry.name === 'tests') {
+    await fs.rm(path.join(entry.parentPath || entry.path, entry.name), { recursive: true, force: true });
+  }
+}
+for (const dir of ['dist-server', 'shared', 'electron', 'dist', 'public']) {
+  console.log(`комментарии убраны: ${dir} — ${await stripComments(path.join(stageDir, dir))} файлов`);
+}
+// Правила сайта владельца, которым не место в программе для всех.
+const STAGE_PATCHES = [
+  ['dist-server/server/modules/user/thought-translation.js', /имя Egor пиши «Егор»\.\s*/g, ''],
+];
+for (const [rel, pattern, replacement] of STAGE_PATCHES) {
+  const file = path.join(stageDir, rel);
+  const text = await fs.readFile(file, 'utf8').catch(() => null);
+  if (text !== null) await fs.writeFile(file, text.replace(pattern, replacement), 'utf8');
+}
+
+// Страж: личное и служебное не должно уехать людям. Адрес сервера аккаунтов
+// (sobsila.ru) — законная часть программы, остальное — остановка сборки.
+const PERSONAL = /Егор|Вячеслав|Славы|Славой|Софь|egor\.ea07|server-my|woezix|artraid_pull|clwduser1/;
+const leaks = [];
+for (const dir of ['dist-server', 'shared', 'electron', 'desktop', 'dist', 'public']) {
+  for (const entry of await fs.readdir(path.join(stageDir, dir), { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile() || !/\.(?:m|c)?js$|\.json$|\.md$|\.html$|\.css$/.test(entry.name)) continue;
+    const file = path.join(entry.parentPath || entry.path, entry.name);
+    const lines = (await fs.readFile(file, 'utf8')).split('\n');
+    lines.forEach((line, index) => {
+      if (PERSONAL.test(line)) leaks.push(`${path.relative(stageDir, file)}:${index + 1}: ${line.trim().slice(0, 140)}`);
+    });
+  }
+}
+if (leaks.length) {
+  console.error(`Личное в программе (${leaks.length}):\n${leaks.slice(0, 40).join('\n')}`);
+  throw new Error('в программе осталось личное — сборка остановлена');
+}
+if (process.env.CLAUDEUI_STAGE_ONLY === '1') {
+  console.log('Подготовка проверена (CLAUDEUI_STAGE_ONLY), дальше не собираю.');
+  process.exit(0);
 }
 await fs.mkdir(path.join(stageDir, 'scripts'), { recursive: true });
 await copy('scripts/fix-node-pty.js');
