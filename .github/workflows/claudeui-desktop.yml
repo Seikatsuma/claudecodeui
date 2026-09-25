@@ -50,6 +50,8 @@ jobs:
         run: npm ci
         env:
           HUSKY: '0'
+          # ripgrep и др. качают файлы с GitHub: без ключа — отказ 403 по лимиту
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Сборка интерфейса и сервера
         run: npm run build
@@ -58,6 +60,8 @@ jobs:
 
       - name: Сборка программы
         run: node scripts/release/build-claudeui-desktop.mjs ${{ matrix.target }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Проба запуска и снимок экрана
         shell: bash
