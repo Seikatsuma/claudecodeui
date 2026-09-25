@@ -142,18 +142,23 @@ const stagePackage = {
     mac: {
       category: 'public.app-category.productivity',
       icon: 'electron/assets/logo-macos.icns',
-      target: ['dmg', 'zip'],
-      // Подпись «для себя» (ad-hoc): без неё Mac на M-процессоре не запустит
-      // программу вовсе. Настоящая подпись Apple — платная, см. agent.md.
-      identity: '-',
+      // Claude Code работает на macOS 13 и новее — ниже программа бесполезна.
+      minimumSystemVersion: '13.0',
+      // Здесь собирается одна половина (M или Intel) без упаковки и подписи:
+      // половины склеивает в одну программу для любого Mac и подписывает
+      // make-mac-universal.mjs (подпись «для себя», настоящая Apple — платная).
+      target: ['dir'],
+      identity: null,
       hardenedRuntime: false,
       gatekeeperAssess: false,
       notarize: false,
     },
-    dmg: { title: 'Claude UI' },
     win: {
       icon: 'electron/assets/logo-windows.ico',
+      // Один установщик для Windows 10 и 11 (x64; на ARM-ноутбуках Windows 11
+      // запускает его своей эмуляцией).
       target: ['nsis'],
+      artifactName: 'Claude-UI-${version}-windows.${ext}',
     },
     nsis: {
       oneClick: false,
@@ -173,6 +178,31 @@ await fs.writeFile(path.join(stageDir, 'package.json'), `${JSON.stringify(stageP
 // Только пакеты для работы (без разработки), с установочными скриптами:
 // нативным модулям они нужны до пересборки под Electron.
 await run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: stageDir });
+
+// Mac: в каждой половине Claude для обоих процессоров — тогда у половин
+// одинаковый набор файлов и они склеиваются в одну программу для любого Mac.
+if (process.platform === 'darwin') {
+  const sdkVersion = JSON.parse(readFileSync(path.join(stageDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'package.json'), 'utf8')).version;
+  for (const arch of ['arm64', 'x64']) {
+    const name = `claude-agent-sdk-darwin-${arch}`;
+    const target = path.join(stageDir, 'node_modules', '@anthropic-ai', name);
+    try {
+      await fs.access(path.join(target, 'claude'));
+      continue;
+    } catch {
+      // нет — докачиваем
+    }
+    const packDir = path.join(stageDir, '.pack');
+    await fs.mkdir(packDir, { recursive: true });
+    await run('npm', ['pack', `@anthropic-ai/${name}@${sdkVersion}`, '--pack-destination', packDir, '--silent'], { cwd: stageDir });
+    await fs.mkdir(target, { recursive: true });
+    await run('tar', ['-xzf', path.join(packDir, `anthropic-ai-${name}-${sdkVersion}.tgz`), '-C', target, '--strip-components=1']);
+    await fs.chmod(path.join(target, 'claude'), 0o755);
+    await fs.rm(packDir, { recursive: true, force: true });
+  }
+}
+// Служебный список установленного у половин разный — людям он не нужен.
+await fs.rm(path.join(stageDir, 'node_modules', '.package-lock.json'), { force: true });
 
 console.log(`Пересборка нативных модулей под Electron ${electronVersion} (${process.arch})…`);
 await run(bin('electron-rebuild'), ['--version', electronVersion, '--module-dir', stageDir, '--arch', process.arch, '--force',

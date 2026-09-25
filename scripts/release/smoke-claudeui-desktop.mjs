@@ -29,6 +29,10 @@ const fail = (line) => {
 };
 
 function findApp() {
+  if (process.env.SMOKE_APP) {
+    if (!fs.existsSync(process.env.SMOKE_APP)) throw new Error(`программа не найдена: ${process.env.SMOKE_APP}`);
+    return process.env.SMOKE_APP;
+  }
   const root = path.resolve('release', 'claudeui');
   const candidates = process.platform === 'darwin'
     ? ['mac-arm64', 'mac', 'mac-universal'].map((dir) => path.join(root, dir, 'Claude UI.app', 'Contents', 'MacOS', 'Claude UI'))
@@ -76,10 +80,14 @@ const appRoot = process.platform === 'darwin'
   ? path.join(path.dirname(executable), '..', 'Resources', 'app')
   : path.join(path.dirname(executable), 'resources', 'app');
 
-// 1. Вложенный Claude.
-const claudeBin = path.join(appRoot, 'node_modules', '@anthropic-ai',
-  `claude-agent-sdk-${process.platform}-${process.arch === 'arm64' ? 'arm64' : 'x64'}`,
-  process.platform === 'win32' ? 'claude.exe' : 'claude');
+// 1. Вложенный Claude. Программа на Windows ARM работает как x64 (эмуляция),
+// поэтому берём тот Claude, который реально лежит в программе.
+const sdkRoot = path.join(appRoot, 'node_modules', '@anthropic-ai');
+const platformDirs = fs.readdirSync(sdkRoot).filter((dir) => dir.startsWith(`claude-agent-sdk-${process.platform}-`) && !dir.endsWith('-musl'));
+const preferred = `claude-agent-sdk-${process.platform}-${process.arch === 'arm64' ? 'arm64' : 'x64'}`;
+const claudeDir = platformDirs.includes(preferred) ? preferred : platformDirs[0];
+const claudeBin = path.join(sdkRoot, claudeDir || preferred, process.platform === 'win32' ? 'claude.exe' : 'claude');
+log(`система: ${os.type()} ${os.release()} ${process.arch}; Claude в программе: ${platformDirs.join(', ')}`);
 try {
   log(`Claude внутри: ${execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 60000 }).trim()}`);
 } catch (error) {

@@ -1,9 +1,9 @@
 name: Claude UI для компьютера
 
-# Сборка программы для Mac (M-процессор и Intel) и Windows на машинах GitHub.
-# Запуск: вручную (Actions → «Claude UI для компьютера» → Run) или пушем в desktop-app.
-# Итог: артефакты сборки (установщики) + снимки экрана с каждой системы —
-# программа запускается на той же машине и снимается (проба «открылась ли»).
+# Одна программа для любого Mac (macOS 13+, M и Intel) и один установщик для
+# Windows 10 и 11. Затем проверка ИЗ УСТАНОВЩИКОВ на разных версиях систем:
+# программа ставится как у человека, входит пробным аккаунтом, открывает
+# «Этот компьютер» и снимает экран. Запуск: пуш в desktop-app или вручную.
 on:
   workflow_dispatch:
   push:
@@ -15,26 +15,25 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.name }}
+    name: Сборка — ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 75
-    continue-on-error: ${{ matrix.optional }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Mac (M-процессор)
+          - name: Mac, половина M
             os: macos-latest
             target: --mac
-            optional: false
-          - name: Mac (Intel)
+            artifact: half-mac-arm64
+          - name: Mac, половина Intel
             os: macos-15-intel
             target: --mac
-            optional: true
-          - name: Windows
+            artifact: half-mac-x64
+          - name: Windows 10/11
             os: windows-latest
             target: --win
-            optional: false
+            artifact: claude-ui-windows
     steps:
       - name: Код
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -64,7 +63,118 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Проба запуска и снимок экрана
+      - name: Половина для Mac — архивом (ссылки внутри программы сохраняются)
+        if: runner.os == 'macOS'
+        run: |
+          APP="$(find release/claudeui -maxdepth 2 -name 'Claude UI.app' -type d | head -1)"
+          test -n "$APP"
+          tar -czf half.tgz -C "$(dirname "$APP")" "Claude UI.app"
+
+      - name: Выгрузка половины Mac
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: half.tgz
+          compression-level: 0
+          retention-days: 3
+
+      - name: Выгрузка установщика Windows
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/claudeui/*.exe
+          if-no-files-found: error
+          compression-level: 0
+
+  mac-universal:
+    name: Одна программа для любого Mac
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Код
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+      - name: Инструмент склейки
+        run: npm i --no-save --no-package-lock --ignore-scripts @electron/universal@2.0.3
+      - name: Половины
+        uses: actions/download-artifact@v4
+        with:
+          pattern: half-mac-*
+      - name: Склейка, подпись, .dmg
+        run: |
+          mkdir -p x64 arm64
+          tar -xzf half-mac-x64/half.tgz -C x64
+          tar -xzf half-mac-arm64/half.tgz -C arm64
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/release/make-mac-universal.mjs "x64/Claude UI.app" "arm64/Claude UI.app" out "$VERSION"
+      - name: Выгрузка
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: claude-ui-mac
+          path: out/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+  smoke:
+    name: Проверка — ${{ matrix.name }}
+    needs: [build, mac-universal]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS 14 (M), os: macos-14, kind: mac, optional: false }
+          - { name: macOS 15 (M), os: macos-15, kind: mac, optional: false }
+          - { name: macOS 26 (M), os: macos-26, kind: mac, optional: true }
+          - { name: macOS 15 (Intel), os: macos-15-intel, kind: mac, optional: false }
+          - { name: Windows 10 (ядро Server 2022), os: windows-2022, kind: win, optional: false }
+          - { name: Windows 11 (ядро Server 2025), os: windows-2025, kind: win, optional: false }
+          - { name: Windows 11 ARM, os: windows-11-arm, kind: win, optional: true }
+    steps:
+      - name: Код
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+      - name: Установщик
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.kind == 'mac' && 'claude-ui-mac' || 'claude-ui-windows' }}
+          path: installer
+      - name: Установка на Mac — как человек, из .dmg в «Программы»
+        if: matrix.kind == 'mac'
+        run: |
+          sw_vers
+          DMG="$(ls installer/*.dmg | head -1)"
+          hdiutil attach "$DMG" -nobrowse -mountpoint /Volumes/ClaudeUI
+          ls -la /Volumes/ClaudeUI
+          cp -R "/Volumes/ClaudeUI/Claude UI.app" /Applications/
+          hdiutil detach /Volumes/ClaudeUI
+          echo "SMOKE_APP=/Applications/Claude UI.app/Contents/MacOS/Claude UI" >> "$GITHUB_ENV"
+      - name: Установка на Windows — установщиком, без вопросов
+        if: matrix.kind == 'win'
+        shell: pwsh
+        run: |
+          [System.Environment]::OSVersion | Format-List
+          $exe = Get-ChildItem installer -Filter *.exe | Select-Object -First 1
+          Start-Process -FilePath $exe.FullName -ArgumentList '/S' -Wait
+          $app = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Claude UI.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $app) { throw 'программа не установилась' }
+          "SMOKE_APP=$($app.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Запуск, вход, «Этот компьютер», снимок
         timeout-minutes: 10
         shell: bash
         run: node scripts/release/smoke-claudeui-desktop.mjs
@@ -72,22 +182,10 @@ jobs:
           SMOKE_OUT: smoke
           SMOKE_EMAIL: ${{ secrets.CLAUDEUI_SMOKE_EMAIL }}
           SMOKE_PASSWORD: ${{ secrets.CLAUDEUI_SMOKE_PASSWORD }}
-
-      - name: Установщики
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: claude-ui-${{ runner.os }}-${{ runner.arch }}
-          path: |
-            release/claudeui/*.dmg
-            release/claudeui/*.zip
-            release/claudeui/*.exe
-          if-no-files-found: error
-          compression-level: 0
-
-      - name: Снимки и журнал пробы
+      - name: Снимки и журнал
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: smoke-${{ runner.os }}-${{ runner.arch }}
+          name: smoke-${{ matrix.os }}
           path: smoke/
           if-no-files-found: warn
