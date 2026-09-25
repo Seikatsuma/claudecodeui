@@ -251,7 +251,7 @@ export default function SidebarSessionItem({
   // название чата не становится короче ни на пиксель.
   const flagTileContent = isFlagged ? (
     <Flag
-      className="h-3 w-3 text-yellow-400"
+      className="h-3 w-3 text-white"
       fill="currentColor"
       strokeWidth={2.5}
       role="img"
@@ -295,7 +295,7 @@ export default function SidebarSessionItem({
               : !isSelected && sessionView.isActive
               ? 'border-green-500/30 bg-green-50/5 dark:bg-green-900/5'
               : 'border-border/30',
-            isFlagged && 'border-yellow-400/60',
+            isFlagged && 'border-red-500/50',
           )}
           onClick={selectMobileSession}
         >
@@ -303,7 +303,7 @@ export default function SidebarSessionItem({
             <div
               className={cn(
                 'w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0',
-                isFlagged ? 'bg-yellow-400/20' : isSelected ? 'bg-primary/10' : 'bg-muted/50',
+                isFlagged ? 'bg-red-500' : isSelected ? 'bg-primary/10' : 'bg-muted/50',
               )}
             >
               {flagTileContent}
@@ -511,7 +511,7 @@ export default function SidebarSessionItem({
               : !isSelected && sessionView.isActive
                 ? 'border-green-500/30 bg-green-50/5 hover:bg-green-50/10 dark:bg-green-900/5 dark:hover:bg-green-900/10'
                 : 'hover:bg-accent/50',
-            isFlagged && 'border-yellow-400/60',
+            isFlagged && 'border-red-500/50',
           )}
           // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click and the
           // native right-click menu use the href to open a new tab/window.
@@ -525,7 +525,7 @@ export default function SidebarSessionItem({
             <div
               className={cn(
                 'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md',
-                isFlagged ? 'bg-yellow-400/20' : isSelected ? 'bg-primary/10' : 'bg-muted/50',
+                isFlagged ? 'bg-red-500' : isSelected ? 'bg-primary/10' : 'bg-muted/50',
               )}
             >
               {flagTileContent}
