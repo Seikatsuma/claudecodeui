@@ -1,0 +1,89 @@
+name: Claude UI для компьютера
+
+# Сборка программы для Mac (M-процессор и Intel) и Windows на машинах GitHub.
+# Запуск: вручную (Actions → «Claude UI для компьютера» → Run) или пушем в desktop-app.
+# Итог: артефакты сборки (установщики) + снимки экрана с каждой системы —
+# программа запускается на той же машине и снимается (проба «открылась ли»).
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - desktop-app
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Mac (M-процессор)
+            os: macos-latest
+            target: --mac
+            optional: false
+          - name: Mac (Intel)
+            os: macos-15-intel
+            target: --mac
+            optional: true
+          - name: Windows
+            os: windows-latest
+            target: --win
+            optional: false
+    steps:
+      - name: Код
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Пакеты
+        run: npm ci
+        env:
+          HUSKY: '0'
+
+      - name: Сборка интерфейса и сервера
+        run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Сборка программы
+        run: node scripts/release/build-claudeui-desktop.mjs ${{ matrix.target }}
+
+      - name: Проба запуска и снимок экрана
+        shell: bash
+        run: |
+          npm i --no-save --no-package-lock playwright-core@1.55
+          node scripts/release/smoke-claudeui-desktop.mjs
+        env:
+          SMOKE_OUT: smoke
+          SMOKE_EMAIL: ${{ secrets.CLAUDEUI_SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.CLAUDEUI_SMOKE_PASSWORD }}
+
+      - name: Установщики
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: claude-ui-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            release/claudeui/*.dmg
+            release/claudeui/*.zip
+            release/claudeui/*.exe
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Снимки и журнал пробы
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: smoke-${{ runner.os }}-${{ runner.arch }}
+          path: smoke/
+          if-no-files-found: warn
