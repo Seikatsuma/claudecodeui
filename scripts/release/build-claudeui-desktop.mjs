@@ -67,7 +67,7 @@ async function stripComments(dir) {
       const { code: stripped } = await esbuild.transform(code, { loader, minifyWhitespace: true, legalComments: 'none', charset: 'utf8' });
       await fs.writeFile(file, stripped, 'utf8');
       count += 1;
-    } else if (/\.html$/.test(entry.name)) {
+    } else if (/\.(?:html|svg|xml)$/.test(entry.name)) {
       const html = await fs.readFile(file, 'utf8');
       await fs.writeFile(file, html.replace(/<!--[\s\S]*?-->/g, ''), 'utf8');
       count += 1;
@@ -100,7 +100,7 @@ const PERSONAL = /Егор|Вячеслав|Славы|Славой|Софь|ego
 const leaks = [];
 for (const dir of ['dist-server', 'shared', 'electron', 'desktop', 'dist', 'public']) {
   for (const entry of await fs.readdir(path.join(stageDir, dir), { withFileTypes: true, recursive: true })) {
-    if (!entry.isFile() || !/\.(?:m|c)?js$|\.json$|\.md$|\.html$|\.css$/.test(entry.name)) continue;
+    if (!entry.isFile() || !/\.(?:m|c)?js$|\.json$|\.md$|\.html$|\.svg$|\.xml$|\.txt$|\.css$/.test(entry.name)) continue;
     const file = path.join(entry.parentPath || entry.path, entry.name);
     const lines = (await fs.readFile(file, 'utf8')).split('\n');
     lines.forEach((line, index) => {

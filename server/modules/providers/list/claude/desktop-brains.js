@@ -21,11 +21,11 @@ const SERVICE_MARKERS = ['<task-notification', '<system', '<command-', '<local-c
 // Пользователь сказал «да» — Claude повторяет команду с USER_CONFIRMED=da.
 const DESTRUCTIVE = [
   // Команды оболочки сверяются с текстом без кавычек («git commit -m 'убрал rm'» — не удаление).
-  [/(^|[\s;&|(`$])rm\s/, 'rm (удаление файлов)', 'shell'],
-  [/(^|[\s;&|(`$])(?:rmdir|rd)\s/i, 'удаление папки', 'shell'],
-  [/(^|[\s;&|(`$])(?:del|erase|ri)\s/i, 'удаление файлов в Windows', 'shell'],
+  [/(^|[\s;&|(`$"'])rm(?:\s|$)/, 'rm (удаление файлов)', 'shell'],
+  [/(^|[\s;&|(`$"'])(?:rmdir|rd)(?:\s|$)/i, 'удаление папки', 'shell'],
+  [/(^|[\s;&|(`$"'])(?:del|erase|ri)(?:\s|$)/i, 'удаление файлов в Windows', 'shell'],
   [/\bRemove-Item\b/i, 'Remove-Item (удаление в PowerShell)', 'shell'],
-  [/(^|[\s;&|])unlink\s/, 'unlink (удаление файла)', 'shell'],
+  [/(^|[\s;&|"'])unlink(?:\s|$)/, 'unlink (удаление файла)', 'shell'],
   [/shutil\.rmtree|os\.(?:remove|unlink|rmdir)\s*\(|\.unlink\s*\(/, 'удаление файлов из Python'],
   [/\.(?:rm|rmdir|unlink)(?:Sync)?\s*\(|\brimraf\b/, 'удаление файлов из Node'],
   [/\bgit\s+checkout\s+(?:--\s+)?\.(?:\s|$)|\bgit\s+restore\s+(?:--staged\s+)?\.(?:\s|$)/, 'git checkout/restore . (затирает правки)'],
@@ -96,7 +96,10 @@ function loadBrains(dir) {
 export function findDestructive(command) {
   const text = String(command || '');
   if (/(^|[\s;&|])USER_CONFIRMED=da\b/.test(text)) return null;
-  const unquoted = text.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "''");
+  // Кавычки убираем, только если команда не запускает оболочку со строкой:
+  // в «bash -c "…"», «powershell -Command "…"», eval, iex внутри кавычек — сама команда.
+  const runsQuotedCode = /\b(?:bash|sh|zsh|dash|fish|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh)\b[^|;&]*\s(?:-c|-Command|\/c|\/k)\b|\beval\b|\biex\b|Invoke-Expression|\bxargs\b|\bexec\b/i.test(text);
+  const unquoted = runsQuotedCode ? text : text.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "''");
   for (const [pattern, label, scope] of DESTRUCTIVE) {
     if (pattern.test(scope === 'shell' ? unquoted : text)) return label;
   }
