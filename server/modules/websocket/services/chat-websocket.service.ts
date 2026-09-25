@@ -39,7 +39,12 @@ import type {
 } from '@/shared/types.js';
 import type { ProviderAdoptedTurn, ProviderAdoptPayload, ProviderSteerPayload } from '@/shared/interfaces.js';
 import { isPlatformOwnerWebUser, OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
-import { getImageAssetsDirForUser, readRequestUserId, resolveWebUserRuntimeContext } from '@/shared/web-user-runtime.js';
+import {
+  getImageAssetsDirForUser,
+  hasOwnClaudeAccess,
+  readRequestUserId,
+  resolveWebUserRuntimeContext,
+} from '@/shared/web-user-runtime.js';
 
 /**
  * Basic per-user concurrency cap for OPEN_REGISTRATION instances (see
@@ -132,6 +137,10 @@ function sendJson(ws: WebSocket, payload: unknown): void {
  * `error` message kind) so the frontend can distinguish "your request was
  * invalid" from "the model run produced an error" without inspecting text.
  */
+/** Что увидит в чате человек без своего входа в Claude и без ключа API. */
+const CLAUDE_LOGIN_REQUIRED_MESSAGE =
+  'Войдите в Claude: Настройки → Агенты → Claude → «Войти». Или добавьте свой ключ API Anthropic там же.';
+
 function sendProtocolError(
   ws: WebSocket,
   code: string,
@@ -229,16 +238,18 @@ async function handleChatSend(
   // Owner bypass: when the owner's ~/.claude-webuser-<id> is symlinked to
   // their real ~/.claude, the SDK authenticates via the existing OAuth session
   // in that directory — no explicit API key is needed or stored.
+  // Остальным хватает любого СВОЕГО доступа: ключа API или входа подпиской в
+  // командной строке сайта (shared/web-user-runtime.ts, hasOwnClaudeAccess).
   if (
     OPEN_REGISTRATION &&
     provider === 'claude' &&
-    !openRegistrationContext.anthropicApiKey &&
-    !isPlatformOwnerWebUser(numericUserId)
+    !isPlatformOwnerWebUser(numericUserId) &&
+    !(await hasOwnClaudeAccess(openRegistrationContext))
   ) {
     sendProtocolError(
       ws,
-      'ANTHROPIC_API_KEY_REQUIRED',
-      'Add your Anthropic API key in Settings to start chatting with Claude.',
+      'CLAUDE_LOGIN_REQUIRED',
+      CLAUDE_LOGIN_REQUIRED_MESSAGE,
       sessionId,
       clientMessageId,
     );
@@ -460,6 +471,7 @@ async function runProviderTurn(input: {
     // process.env exactly as it always has for Account 1/2.
     claudeConfigDir: runtimeContext.claudeConfigDir ?? undefined,
     anthropicApiKey: runtimeContext.anthropicApiKey ?? undefined,
+    isolateInheritedClaudeAuth: runtimeContext.isolateInheritedClaudeAuth || undefined,
   };
 
   try {
@@ -554,10 +566,10 @@ async function runQueuedChatMessage(
   if (
     OPEN_REGISTRATION
     && provider === 'claude'
-    && !runtimeContext.anthropicApiKey
     && !isPlatformOwnerWebUser(numericUserId)
+    && !(await hasOwnClaudeAccess(runtimeContext))
   ) {
-    console.warn(`[Очередь чата] у пользователя ${String(userId)} нет ключа — сообщение ${message.id} отброшено`);
+    console.warn(`[Очередь чата] пользователь ${String(userId)} не вошёл в Claude и не добавил ключ — сообщение ${message.id} отброшено`);
     return true;
   }
 
