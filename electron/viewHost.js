@@ -10,23 +10,29 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+// Экран ожидания: спокойная надпись по-русски. Технический журнал запуска
+// человеку не показываем — он есть в «Сведениях для поддержки» (меню программы).
+// Показываем только строки с ошибкой, если запуск упал.
 function buildPlaceholderHtml(title, message, logs = []) {
-  const logHtml = logs.length
-    ? `<pre>${logs.map(escapeHtml).join('\n')}</pre>`
-    : '<pre>Waiting for process output...</pre>';
+  const errors = logs
+    .filter((line) => /error|ошибк|exited with code [1-9]|failed/i.test(line))
+    .filter((line) => !/No \.env file found/.test(line)) // сервер программы работает без .env — это не ошибка
+    .slice(-6);
   return [
     '<!doctype html><meta charset="utf-8">',
     '<style>',
-    'html,body{margin:0;height:100%;background:#0a0a0a;color:#fafafa;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}',
-    'body{padding:28px;overflow:hidden}',
-    '.shell{height:100%;display:flex;flex-direction:column;gap:16px}',
-    '.box{display:flex;align-items:center;gap:10px;color:#d4d4d4;flex:0 0 auto}',
-    '.dot{width:8px;height:8px;border-radius:50%;background:#0b60ea;box-shadow:0 0 0 6px rgba(11,96,234,.15)}',
-    'pre{margin:0;flex:1;overflow:auto;border:1px solid #262626;border-radius:10px;background:#050505;color:#d4d4d4;padding:14px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;white-space:pre-wrap;user-select:text}',
+    'html,body{margin:0;height:100%;background:#141414;color:#ececea;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}',
+    'body{display:flex;align-items:center;justify-content:center}',
+    '.box{display:flex;flex-direction:column;align-items:center;gap:16px;max-width:560px;padding:24px;text-align:center}',
+    '.spin{width:28px;height:28px;border-radius:50%;border:3px solid #333;border-top-color:#4f8ef7;animation:s 0.9s linear infinite}',
+    '@keyframes s{to{transform:rotate(360deg)}}',
+    '.sub{color:#8f8f8a;font-size:13px}',
+    'pre{margin:8px 0 0;text-align:left;max-width:100%;overflow:auto;background:#0b0b0b;border:1px solid #2a2a2a;border-radius:8px;padding:10px;color:#e0a0a0;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap}',
     '</style>',
-    '<div class="shell">',
-    `<div class="box"><span class="dot"></span><span>${escapeHtml(message || `Открываю ${title}…`)}</span></div>`,
-    logHtml,
+    '<div class="box"><div class="spin"></div>',
+    `<div>${escapeHtml(message || `Открываю ${title}…`)}</div>`,
+    '<div class="sub">Обычно это несколько секунд.</div>',
+    errors.length ? `<pre>${errors.map(escapeHtml).join('\n')}</pre>` : '',
     '</div>',
   ].join('');
 }
