@@ -526,6 +526,8 @@ function AppContentInner() {
         const form = document.querySelector('textarea.chat-input-placeholder')?.closest('form')?.getBoundingClientRect();
         const textarea = rectOf('textarea.chat-input-placeholder');
         const shell = rectOf('div.fixed.inset-0.flex.bg-background');
+        // Окно поверх экрана с полем (переименование чата и т.п.), 26.09.26.
+        const dialog = document.activeElement?.closest('[role="dialog"]')?.getBoundingClientRect();
         void authenticatedFetch('/api/user/viewport-probe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -549,6 +551,8 @@ function AppContentInner() {
             textareaTop: textarea?.top ?? -1,
             composerPad: composer ? parseFloat(getComputedStyle(document.querySelector('.chat-composer-shell')!).paddingBottom) : -1,
             focused: document.activeElement?.tagName ?? '',
+            dialogTop: dialog?.top ?? -1,
+            dialogBottom: dialog?.bottom ?? -1,
           }),
         }).catch(() => {});
       }, 900);

@@ -193,7 +193,11 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           role="dialog"
           aria-modal="true"
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
+            // absolute, а не fixed: окно считается от обёртки, а обёртку при
+            // открытой клавиатуре iPhone правило в index.css держит над
+            // клавиатурой (html.keyboard-open .fixed.inset-0). От всего экрана
+            // низ панели переименования уходил под клавиатуру (26.09.26).
+            'absolute left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
             'rounded-xl border bg-popover text-popover-foreground shadow-lg',
             animationClassName ?? 'animate-dialog-content-show',
             className
