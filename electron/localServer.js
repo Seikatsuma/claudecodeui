@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
@@ -125,6 +126,23 @@ function getNodeRuntime(usePackagedElectronRuntime) {
   return { command: 'node', env: {}, label: 'PATH node' };
 }
 
+// Claude, вложенный в пакет под эту систему (@anthropic-ai/claude-agent-sdk-<система>-<процессор>).
+// Отдельно ставить Claude человеку не нужно. Своё явное CLAUDE_CLI_PATH важнее.
+function resolveBundledClaudeEnv(serverCwd) {
+  if (process.env.CLAUDE_CLI_PATH) return {};
+  const platform = process.platform === 'win32' ? 'win32' : process.platform;
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const binary = process.platform === 'win32' ? 'claude.exe' : 'claude';
+  const candidates = [
+    path.join(serverCwd, 'node_modules', '@anthropic-ai', `claude-agent-sdk-${platform}-${arch}`, binary),
+    path.join(serverCwd, 'node_modules', '@anthropic-ai', `claude-agent-sdk-${platform}-${arch}-musl`, binary),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return { CLAUDE_CLI_PATH: candidate };
+  }
+  return {};
+}
+
 function stripTrailingSlash(value) {
   return value.endsWith('/') ? value.slice(0, -1) : value;
 }
@@ -246,8 +264,10 @@ async function waitForCloudCliServer(baseUrl, timeoutMs) {
 }
 
 export class LocalServerController {
-  constructor({ appRoot, settingsPath, isPackaged = false, appVersion, onChange }) {
+  constructor({ appRoot, settingsPath, isPackaged = false, appVersion, onChange, getServerEnv }) {
     this.appRoot = appRoot;
+    // Настройки сервера от программы: мозги, встроенный Claude, своя база, режим разрешений.
+    this.getServerEnv = typeof getServerEnv === 'function' ? getServerEnv : () => ({});
     this.settingsPath = settingsPath;
     this.isPackaged = isPackaged;
     this.appVersion = appVersion;
@@ -294,7 +314,7 @@ export class LocalServerController {
   getPendingTarget() {
     return {
       kind: 'local',
-      name: 'Local CloudCLI',
+      name: 'Этот компьютер',
       url: this.localServerUrl || `http://${DISPLAY_HOST}:${this.localServerPort || DEFAULT_PORT}`,
     };
   }
@@ -411,6 +431,8 @@ export class LocalServerController {
       env: {
         ...process.env,
         ...runtime.env,
+        ...resolveBundledClaudeEnv(serverCwd),
+        ...this.getServerEnv(),
         HOST: bindHost,
         SERVER_PORT: String(port),
         PATH: getDesktopPath(),
@@ -439,7 +461,7 @@ export class LocalServerController {
     this.ownedServerProcess.once('exit', (code, signal) => {
       this.appendStartupLog(`process exited with code ${code ?? 'null'} and signal ${signal ?? 'null'}`);
       if (this.ownedServerProcess) {
-        console.error(`CloudCLI desktop server exited with code ${code ?? 'null'} and signal ${signal ?? 'null'}`);
+        console.error(`Claude UI: локальный сервер завершился with code ${code ?? 'null'} and signal ${signal ?? 'null'}`);
       }
       this.ownedServerProcess = null;
     });
@@ -449,7 +471,9 @@ export class LocalServerController {
     const defaultUrl = `http://${HOST}:${DEFAULT_PORT}`;
     const defaultDisplayUrl = `http://${DISPLAY_HOST}:${DEFAULT_PORT}`;
     const devUrl = process.env.ELECTRON_DEV_URL;
-    const forceOwnServer = process.env.ELECTRON_FORCE_OWN_SERVER === '1';
+    // Всегда свой сервер: чужой интерфейс, уже запущенный на этом компьютере,
+    // не знает про мозги и аккаунт и может принадлежать другой программе.
+    const forceOwnServer = process.env.ELECTRON_FORCE_OWN_SERVER !== '0';
 
     if (devUrl) {
       const ready = await waitForCloudCliServer(defaultUrl, SERVER_START_TIMEOUT_MS);
@@ -466,7 +490,7 @@ export class LocalServerController {
         if (await isCloudCliServer(candidateUrl)) {
           const displayUrl = getDisplayUrl(candidateUrl);
           this.localServerPort = getPortFromUrl(candidateUrl);
-          this.appendStartupLog(`Using existing Local CloudCLI at ${displayUrl}`);
+          this.appendStartupLog(`Подключаюсь к уже работающему интерфейсу: ${displayUrl}`);
           return displayUrl;
         }
       }
@@ -491,7 +515,7 @@ export class LocalServerController {
       ].join('\n\n'));
     }
 
-    this.appendStartupLog(`Local CloudCLI ready at ${displayUrl}`);
+    this.appendStartupLog(`Интерфейс готов: ${displayUrl}`);
     this.localServerUrl = displayUrl;
     return displayUrl;
   }
@@ -507,7 +531,7 @@ export class LocalServerController {
     await this.ensureLocalServer();
     return {
       kind: 'local',
-      name: 'Local CloudCLI',
+      name: 'Этот компьютер',
       url: this.localServerUrl,
     };
   }

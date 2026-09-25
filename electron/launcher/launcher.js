@@ -120,12 +120,12 @@ window.__MOCK_STATE__ = {
 
   function statusMeta(status) {
     var map = {
-      running: { label: 'Running', cls: 'ok', dot: '#10b981', verb: 'Opening', open: 'Open' },
-      starting: { label: 'Starting', cls: 'warn', dot: '#f59e0b', verb: 'Starting', open: 'Open', busy: true },
-      stopped: { label: 'Stopped', cls: 'idle', dot: '#6b7280', verb: 'Starting', open: 'Start & open' },
-      paused: { label: 'Paused', cls: 'warn', dot: '#f59e0b', verb: 'Resuming', open: 'Resume' },
+      running: { label: 'Работает', cls: 'ok', dot: '#10b981', verb: 'Открываю', open: 'Открыть' },
+      starting: { label: 'Запускается', cls: 'warn', dot: '#f59e0b', verb: 'Запускаю', open: 'Открыть', busy: true },
+      stopped: { label: 'Остановлен', cls: 'idle', dot: '#6b7280', verb: 'Запускаю', open: 'Запустить' },
+      paused: { label: 'На паузе', cls: 'warn', dot: '#f59e0b', verb: 'Продолжаю', open: 'Продолжить' },
     };
-    return map[status] || { label: status || 'Unknown', cls: 'idle', dot: '#6b7280', verb: 'Starting', open: 'Start & open' };
+    return map[status] || { label: status || '—', cls: 'idle', dot: '#6b7280', verb: 'Открываю', open: 'Открыть' };
   }
 
   function connected(state) {
@@ -137,10 +137,10 @@ window.__MOCK_STATE__ = {
   }
 
   function accountLabel(state) {
-    if (authState(state) === 'expired') return 'Reconnect';
+    if (authState(state) === 'expired') return 'Войти заново';
     if (state && state.account && state.account.email) return state.account.email;
-    if (connected(state)) return 'Connected';
-    return 'Log in';
+    if (connected(state)) return 'Аккаунт';
+    return 'Войти';
   }
 
   function localUrl(state) {
@@ -149,7 +149,7 @@ window.__MOCK_STATE__ = {
 
   function envCount(state) {
     var count = state && state.environments ? state.environments.length : 0;
-    return count + ' environment' + (count === 1 ? '' : 's');
+    return count ? 'серверов: ' + count : 'серверов нет';
   }
 
   function errMsg(error) {
@@ -260,10 +260,10 @@ window.__MOCK_STATE__ = {
     var env = (CC.state.environments || []).filter(function (environment) { return environment.id === id; })[0];
     var meta = statusMeta(env ? env.status : '');
     CC._busyEnv = id;
-    CC._status = { msg: (meta.verb || 'Opening') + ' ' + ((env && (env.name || env.subdomain)) || 'environment') + '...', tone: 'progress' };
+    CC._status = { msg: (meta.verb || 'Открываю') + ' ' + ((env && (env.name || env.subdomain)) || 'сервер') + '…', tone: 'progress' };
     if (env) {
       var tabId = 'remote:' + env.id;
-      var tabs = CC.state.tabs && CC.state.tabs.length ? CC.state.tabs : [{ id: 'home', title: 'Launcher', kind: 'launcher', closable: false }];
+      var tabs = CC.state.tabs && CC.state.tabs.length ? CC.state.tabs : [{ id: 'home', title: 'Главная', kind: 'launcher', closable: false }];
       tabs = tabs.map(function (tab) {
         tab.active = false;
         return tab;
@@ -294,55 +294,57 @@ window.__MOCK_STATE__ = {
   CC.act = function (name, node) {
     switch (name) {
       case 'local':
-        return CC.run('Starting Local CloudCLI...', function () { return bridge.openLocal(); });
+        return CC.run('Открываю этот компьютер…', function () { return bridge.openLocal(); });
       case 'connect':
-        return CC.run('Opening cloudcli.ai to connect your account...', function () { return bridge.connectCloud(); });
+        return CC.run('', function () { return bridge.showLauncher(); });
+      case 'home':
+        return CC.run('', function () { return bridge.showLauncher(); });
       case 'logout':
-        return CC.run('Logging out...', function () { return bridge.disconnectCloud(); });
+        return CC.run('Выхожу…', function () { return bridge.disconnectCloud(); });
       case 'open-web':
-        return CC.run('Opening local web UI in your browser...', function () { return bridge.openLocalWebUi(); });
+        return CC.run('Открываю в браузере…', function () { return bridge.openLocalWebUi(); });
       case 'copy-web':
-        return CC.run('Copied local URL to clipboard', function () { return bridge.copyLocalWebUrl(); });
+        return CC.run('Адрес скопирован', function () { return bridge.copyLocalWebUrl(); });
       case 'diagnostics':
-        return CC.run('Copied diagnostics to clipboard', function () { return bridge.copyDiagnostics(); });
+        return CC.run('Сведения скопированы', function () { return bridge.copyDiagnostics(); });
       case 'set-setting':
-        return CC.run('Saved', function () { return bridge.updateSetting(node.key, node.value); });
+        return CC.run('Сохранено', function () { return bridge.updateSetting(node.key, node.value); });
       case 'set-theme-mode':
-        return CC.run('Saved', function () { return bridge.updateSetting('themeMode', node.value); });
+        return CC.run('Сохранено', function () { return bridge.updateSetting('themeMode', node.value); });
       case 'settings-toggle':
-        return CC.run('Opening desktop settings...', function () { return bridge.showDesktopSettings(); });
+        return CC.run('Открываю настройки…', function () { return bridge.showDesktopSettings(); });
       case 'desktop-settings-toggle':
-        return CC.run('Opening desktop settings...', function () { return bridge.showDesktopSettings(); });
+        return CC.run('Открываю настройки…', function () { return bridge.showDesktopSettings(); });
       case 'local-settings-toggle':
-        return CC.run('Opening local settings...', function () { return bridge.showLocalSettings(); });
+        return CC.run('Открываю настройки…', function () { return bridge.showLocalSettings(); });
       case 'settings-close':
         return CC.closeSheet();
       case 'dashboard':
-        return CC.run('Opening CloudCLI dashboard...', function () { return bridge.openCloudDashboard(); });
+        return CC.run('Открываю…', function () { return bridge.openCloudDashboard(); });
       case 'refresh-environments':
-        return CC.run('Refreshing cloud environments...', function () { return bridge.refreshEnvironments(); });
+        return CC.run('Обновляю список серверов…', function () { return bridge.refreshEnvironments(); });
       case 'refresh-tab':
-        return CC.run('Refreshing tab...', function () { return bridge.refreshActiveTab(); });
+        return CC.run('Обновляю…', function () { return bridge.refreshActiveTab(); });
       case 'env-action':
-        return CC.run('Opening environment...', function () { return bridge.runActiveEnvironmentAction(node.getAttribute('data-cc-env-action')); });
+        return CC.run('Открываю…', function () { return bridge.runActiveEnvironmentAction(node.getAttribute('data-cc-env-action')); });
       case 'env-menu':
-        return CC.run('Opening environment actions...', function () { return bridge.showActiveEnvironmentActionsMenu(); });
+        return CC.run('Открываю…', function () { return bridge.showActiveEnvironmentActionsMenu(); });
       case 'env-row-menu':
-        return CC.run('Opening environment actions...', function () { return bridge.showEnvironmentActionsMenu(node.getAttribute('data-cc-environment-id')); });
+        return CC.run('Открываю…', function () { return bridge.showEnvironmentActionsMenu(node.getAttribute('data-cc-environment-id')); });
       default:
         return;
     }
   };
 
   function renderTabs(state) {
-    var tabs = state.tabs && state.tabs.length ? state.tabs : [{ id: 'home', title: 'Home', closable: false, active: true }];
+    var tabs = state.tabs && state.tabs.length ? state.tabs : [{ id: 'home', title: 'Главная', closable: false, active: true }];
     return tabs.map(function (tab) {
       var title = tab.title || '';
       var visibleChars = Math.min(title.length, 20);
-      var tabWidth = Math.max(112, Math.min(232, (visibleChars * 8) + (tab.closable ? 56 : 38)));
+      var tabWidth = Math.max(96, Math.min(232, (visibleChars * 8) + (tab.closable ? 56 : 38)));
       return '<button class="tb-tab no-drag' + (tab.active ? ' active' : '') + '" data-cc-tab="' + esc(tab.id) + '" title="' + esc(title) + '" style="width:' + tabWidth + 'px;flex-basis:' + tabWidth + 'px">' +
         '<span>' + esc(title) + '</span>' +
-        (tab.closable ? '<span class="tb-close" data-cc-close-tab="' + esc(tab.id) + '" title="Close tab">&times;</span>' : '') +
+        (tab.closable ? '<span class="tb-close" data-cc-close-tab="' + esc(tab.id) + '" title="Закрыть вкладку">&times;</span>' : '') +
         '</button>';
     }).join('');
   }
@@ -356,18 +358,18 @@ window.__MOCK_STATE__ = {
     }
     var activeRefreshable = (state.activeTarget && (state.activeTarget.kind === 'remote' || state.activeTarget.kind === 'local')) ||
       (activeTab && activeTab.id !== 'home');
-    var envActions = activeEnvironmentId ? '<button class="btn sm tb-action no-drag" data-cc-action="env-row-menu" data-cc-environment-id="' + esc(activeEnvironmentId) + '" title="Open environment actions">Open environment in...</button>' : '';
-    var refreshAction = activeRefreshable ? '<button class="icon-btn tb-action no-drag" data-cc-action="refresh-tab" title="Refresh tab">' + icon('refresh', 16) + '</button>' : '';
-    var logoutAction = (conn || authState(state) === 'expired') ? '<button class="icon-btn tb-action no-drag" data-cc-action="logout" title="Logout">' + icon('logOut', 16) + '</button>' : '';
+    var envActions = '';
+    var refreshAction = activeRefreshable ? '<button class="icon-btn tb-action tb-refresh no-drag" data-cc-action="refresh-tab" title="Обновить вкладку">' + icon('refresh', 16) + '</button>' : '';
+    var logoutAction = (conn || authState(state) === 'expired') ? '<button class="icon-btn tb-action tb-logout no-drag" data-cc-action="logout" title="Выйти из аккаунта">' + icon('logOut', 16) + '</button>' : '';
     return '<div class="titlebar">' +
-      '<div class="brand"><img class="mk" src="' + esc(LOGO_URL) + '" alt=""><span>CloudCLI</span></div>' +
+      '<div class="brand"><img class="mk" src="' + esc(LOGO_URL) + '" alt=""><span class="brand-name">Claude UI</span></div>' +
       '<div class="tb-tabs no-drag">' + renderTabs(state) + '</div>' +
       '<span style="flex:1"></span>' +
       refreshAction +
       envActions +
-      '<button class="btn sm tb-action no-drag" data-cc-action="connect" title="' + esc(authState(state) === 'expired' ? 'Reconnect your CloudCLI account' : accountLabel(state)) + '"><span class="dot" style="background:' + (conn ? 'var(--ok)' : (authState(state) === 'expired' ? 'var(--warn)' : 'var(--tx3)')) + '"></span>' + esc(accountLabel(state)) + '</button>' +
+      '<button class="btn sm tb-action no-drag" data-cc-action="home" title="' + esc(authState(state) === 'expired' ? 'Войти заново' : accountLabel(state)) + '"><span class="dot" style="background:' + (conn ? 'var(--ok)' : (authState(state) === 'expired' ? 'var(--warn)' : 'var(--tx3)')) + '"></span><span class="tb-acct-label">' + esc(accountLabel(state)) + '</span></button>' +
       logoutAction +
-      '<button class="icon-btn tb-action no-drag" data-cc-action="settings-toggle" title="Settings">' + icon('settings', 16) + '</button>' +
+      '<button class="icon-btn tb-action no-drag" data-cc-action="settings-toggle" title="Настройки программы">' + icon('settings', 16) + '</button>' +
       '</div>';
   };
 
@@ -375,12 +377,12 @@ window.__MOCK_STATE__ = {
     var status = CC._status || {};
     var running = !!state.localServerRunning;
     return '<div class="statusbar">' +
-      '<span><span class="dot" style="width:7px;height:7px;background:' + (running ? 'var(--ok)' : 'var(--tx3)') + '"></span> local ' + (running ? 'running · ' + esc(localUrl(state)) : 'idle') + '</span>' +
+      '<span><span class="dot" style="width:7px;height:7px;background:' + (running ? 'var(--ok)' : 'var(--tx3)') + '"></span> этот компьютер: ' + (running ? 'запущен' : 'не запущен') + '</span>' +
       '<span class="sep">·</span><span>' + esc(envCount(state)) + '</span>' +
-      '<span class="sep">·</span><span>' + (authState(state) === 'expired' ? 'session expired' : (connected(state) ? esc(accountLabel(state)) : 'not connected')) + '</span>' +
+      '<span class="sep">·</span><span>' + (authState(state) === 'expired' ? 'вход устарел' : (connected(state) ? esc(accountLabel(state)) : 'не выполнен вход')) + '</span>' +
       '<span style="flex:1"></span>' +
       (status.msg ? '<span class="status-msg ' + esc(status.tone) + '">' + esc(status.msg) + '</span><span class="sep">·</span>' : '') +
-      '<span>v' + esc(VERSION) + '</span>' +
+      '<span>v' + esc(state.appVersion || VERSION) + '</span>' +
       '</div>';
   };
 
@@ -511,12 +513,12 @@ window.__MOCK_STATE__ = {
       var closeTab = event.target.closest('[data-cc-close-tab]');
       if (closeTab) {
         event.stopPropagation();
-        CC.run('Closing tab...', function () { return bridge.closeTab(closeTab.getAttribute('data-cc-close-tab')); });
+        CC.run('Закрываю вкладку…', function () { return bridge.closeTab(closeTab.getAttribute('data-cc-close-tab')); });
         return;
       }
       var tab = event.target.closest('[data-cc-tab]');
       if (tab) {
-        CC.run('Switching tab...', function () { return bridge.switchTab(tab.getAttribute('data-cc-tab')); });
+        CC.run('', function () { return bridge.switchTab(tab.getAttribute('data-cc-tab')); });
         return;
       }
       var action = event.target.closest('[data-cc-action]');
@@ -618,70 +620,149 @@ window.__MOCK_STATE__ = {
   };
 })();
 
-(function sidebarApp() {
+(function homeApp() {
   var CC = window.CC;
+  var bridge = window.cloudcliDesktop;
+  // Черновик формы живёт между перерисовками (состояние программы приходит часто).
+  var form = { mode: 'login', name: '', email: '', password: '', error: '', busy: false };
 
-  function navItem(id, iconName, label, meta, selected) {
-    return '<button class="sb-item' + (selected === id ? ' active' : '') + '" data-cc-nav="' + id + '">' +
-      CC.icon(iconName, 16) + '<span>' + label + '</span><span class="sb-meta">' + CC.esc(meta) + '</span></button>';
+  function field(id, label, type, value, hint, autocomplete) {
+    return '<label class="auth-f"><span class="auth-l">' + label + '</span>' +
+      '<input class="auth-i" id="' + id + '" type="' + type + '" value="' + CC.esc(value) + '" autocomplete="' + autocomplete + '" spellcheck="false">' +
+      (hint ? '<span class="auth-h">' + hint + '</span>' : '') + '</label>';
   }
 
-  function localPane(state) {
-    return '<div class="pane-h"><div><h2 class="pane-title">Local servers</h2><p class="pane-sub">Manage Local CloudCLI on this machine. No account required.</p></div></div>' +
-      '<div class="card"><div class="card-head"><div><div class="card-t">Local server</div><div class="card-sub mono">' + CC.esc(CC.localUrl(state) || 'Starts on demand') + '</div></div><div class="card-tools"><span class="dot" style="background:' + (state.localServerRunning ? 'var(--ok)' : 'var(--tx3)') + '"></span><button class="icon-btn" data-cc-action="local-settings-toggle" title="Local settings">' + CC.icon('gear', 16) + '</button></div></div>' +
-      '<div class="card-actions"><button class="btn pri" data-cc-action="local">' + CC.icon('play', 15) + 'Open Local CloudCLI</button><button class="btn" data-cc-action="open-web">' + CC.icon('arrow', 14) + 'Open in browser</button><button class="btn" data-cc-action="copy-web">' + CC.icon('copy', 14) + 'Copy URL</button></div></div>';
+  function authPane() {
+    var isRegister = form.mode === 'register';
+    return '<div class="auth">' +
+      '<div class="auth-card">' +
+      '<img class="auth-logo" src="' + CC.esc(CC.logoUrl) + '" alt="">' +
+      '<h1 class="auth-t">' + (isRegister ? 'Регистрация' : 'Вход в Claude UI') + '</h1>' +
+      '<p class="auth-s">Тот же интерфейс, что на сайте. Claude работает с папками этого компьютера.</p>' +
+      '<form id="auth-form" novalidate>' +
+      (isRegister ? field('auth-name', 'Как вас зовут', 'text', form.name, '', 'name') : '') +
+      field('auth-email', 'Почта', 'email', form.email, '', 'email') +
+      field('auth-password', 'Пароль', 'password', form.password, isRegister ? 'Не короче 8 знаков' : '', isRegister ? 'new-password' : 'current-password') +
+      (form.error ? '<div class="auth-err" role="alert">' + CC.esc(form.error) + '</div>' : '') +
+      '<button class="btn pri auth-go" type="submit"' + (form.busy ? ' disabled' : '') + '>' +
+      (form.busy ? (isRegister ? 'Создаю аккаунт…' : 'Вхожу…') : (isRegister ? 'Создать аккаунт' : 'Войти')) + '</button>' +
+      '</form>' +
+      '<div class="auth-switch">' + (isRegister
+        ? 'Уже есть аккаунт? <button class="link" data-auth-mode="login">Войти</button>'
+        : 'Нет аккаунта? <button class="link" data-auth-mode="register">Зарегистрироваться</button>') + '</div>' +
+      '</div></div>';
   }
 
-  function envRow(environment) {
-    var meta = CC.statusMeta(environment.status);
-    var tags = (environment.agent ? '<span class="tag">' + CC.esc(environment.agent) + '</span>' : '') + (environment.region ? '<span class="tag">' + CC.esc(environment.region) + '</span>' : '');
-    return '<div class="env" data-cc-env="' + environment.id + '"><span class="dot" style="background:' + meta.dot + '"></span>' +
-      '<div class="env-i"><div class="env-n">' + CC.esc(environment.name || environment.subdomain) + '</div><div class="env-u mono">' + CC.esc(environment.access_url || '') + '</div></div>' +
-      '<div class="env-tags">' + tags + '</div>' +
-      '<span class="badge ' + meta.cls + '">' + meta.label + '</span>' +
-      '<button class="btn sm" data-cc-action="env-row-menu" data-cc-environment-id="' + environment.id + '">Open environment in...</button>' +
-      '<button class="btn sm ' + (environment.status === 'running' ? 'pri' : '') + '">' + CC.icon(meta.busy ? 'refresh' : (environment.status === 'running' ? 'arrow' : 'play'), 14) + meta.open + '</button></div>';
+  function serverRow(environment) {
+    return '<button class="place" data-cc-env="' + CC.esc(environment.id) + '">' +
+      '<span class="place-ic">' + CC.icon('cloud', 18) + '</span>' +
+      '<span class="place-i"><span class="place-n">' + CC.esc(environment.name || environment.subdomain) + '</span>' +
+      '<span class="place-u">' + CC.esc((environment.access_url || '').replace(/^https?:\/\//, '')) + '</span></span>' +
+      '<span class="place-go">Открыть</span></button>';
   }
 
-  function cloudPane(state) {
-    var header = '<div class="pane-h"><div><h2 class="pane-title">Environments</h2><p class="pane-sub">' + CC.esc(CC.envCount(state)) + '</p></div><button class="btn sm" data-cc-action="dashboard">' + CC.icon('arrow', 14) + 'Dashboard</button></div>';
-    if (CC.authState(state) === 'expired') {
-      return header + '<div class="empty">Your CloudCLI session expired.<div style="margin-top:14px"><button class="btn pri" data-cc-action="connect">' + CC.icon('cloudPlus', 15) + 'Reconnect account</button></div></div>';
-    }
-    if (!CC.connected(state)) {
-      return header + '<div class="empty">Connect your CloudCLI account to list hosted environments.<div style="margin-top:14px"><button class="btn pri" data-cc-action="connect">' + CC.icon('cloudPlus', 15) + 'Connect account</button></div></div>';
-    }
-    if (state.cloudLoading && !(state.environments || []).length) {
-      return header + '<div class="empty">Loading your CloudCLI environments...</div>';
-    }
-
-    var list = (state.environments || []).map(envRow).join('');
-    if (!list) list = '<div class="empty">No hosted environments yet.</div>';
-    return header + list;
+  function homePane(state) {
+    var account = state.account || {};
+    var who = account.name ? account.name + ' · ' + account.email : account.email;
+    var servers = (state.environments || []);
+    var computer = state.platform === 'darwin' ? 'Mac' : (state.platform === 'win32' ? 'компьютер с Windows' : 'компьютер');
+    return '<div class="home">' +
+      '<h2 class="pane-title">Где работать</h2>' +
+      '<button class="place place-main" data-cc-action="local">' +
+      '<span class="place-ic">' + CC.icon('monitor', 18) + '</span>' +
+      '<span class="place-i"><span class="place-n">Этот компьютер</span>' +
+      '<span class="place-u">Папки и файлы на этом ' + (state.platform === 'darwin' ? 'Mac' : 'компьютере') + (state.localServerRunning ? ' · запущено' : '') + '</span></span>' +
+      '<span class="place-go">Открыть</span></button>' +
+      (servers.length
+        ? '<div class="lbl home-lbl">Мои серверы</div>' + servers.map(serverRow).join('')
+        : '') +
+      '<div class="lbl home-lbl">Аккаунт</div>' +
+      '<div class="acct">' +
+      '<div class="acct-i"><div class="acct-n">' + CC.esc(who || '') + '</div>' +
+      '<div class="acct-m">' + CC.esc(account.planLabel || 'Личный') + (state.brainsVersion ? ' · мозги ' + CC.esc(state.brainsVersion) : '') + '</div></div>' +
+      '<button class="btn sm" data-cc-action="logout">' + CC.icon('logOut', 14) + 'Выйти</button>' +
+      '</div>' +
+      '<p class="home-note">Claude в программе работает по вашей подписке Claude. Если он попросит войти — нажмите «Войти в Claude» в настройках интерфейса и подтвердите вход в браузере.</p>' +
+      '<span hidden>' + CC.esc(computer) + '</span>' +
+      '</div>';
   }
 
   function renderBody(state) {
-    var section = CC.ui.section || ((CC.connected(state) || CC.authState(state) === 'expired') ? 'cloud' : 'local');
-    CC.ui.section = section;
-    var nav = '<div class="sb"><div class="sb-grp"><div class="lbl">Launcher</div>' +
-      navItem('local', 'terminal', 'Local servers', state.localServerRunning ? 'on' : 'idle', section) +
-      navItem('cloud', 'cloud', 'Cloud environments', (state.environments || []).length, section) +
-      '</div></div>';
-    return nav + '<div class="sb-main">' + (section === 'local' ? localPane(state) : cloudPane(state)) + '</div>';
+    return '<div class="sb-main home-wrap">' + (CC.connected(state) ? homePane(state) : authPane()) + '</div>';
+  }
+
+  function readForm() {
+    var name = document.getElementById('auth-name');
+    var email = document.getElementById('auth-email');
+    var password = document.getElementById('auth-password');
+    if (name) form.name = name.value;
+    if (email) form.email = email.value;
+    if (password) form.password = password.value;
+  }
+
+  function submit() {
+    readForm();
+    var isRegister = form.mode === 'register';
+    var email = form.email.trim();
+    if (!email || email.indexOf('@') < 1) {
+      form.error = 'Впишите почту.';
+      return CC.render(CC.state);
+    }
+    if (!form.password) {
+      form.error = 'Впишите пароль.';
+      return CC.render(CC.state);
+    }
+    if (isRegister && form.password.length < 8) {
+      form.error = 'Пароль — не короче 8 знаков.';
+      return CC.render(CC.state);
+    }
+    form.error = '';
+    form.busy = true;
+    CC.render(CC.state);
+    var fields = { email: email, password: form.password, name: form.name.trim() };
+    var call = isRegister ? bridge.register(fields) : bridge.signIn(fields);
+    Promise.resolve(call).then(function (state) {
+      form.busy = false;
+      form.password = '';
+      if (state) CC.setState(state);
+    }).catch(function (error) {
+      form.busy = false;
+      // Ошибка из главного процесса приходит с приставкой «Error invoking remote method…».
+      form.error = String(error && error.message ? error.message : error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+      CC.render(CC.state);
+    });
   }
 
   function onClick(event) {
-    var nav = event.target.closest('[data-cc-nav]');
-    if (!nav) return false;
-    CC.ui.section = nav.getAttribute('data-cc-nav');
-    CC.render(CC.state);
-    return true;
+    var mode = event.target.closest('[data-auth-mode]');
+    if (mode) {
+      readForm();
+      form.mode = mode.getAttribute('data-auth-mode');
+      form.error = '';
+      CC.render(CC.state);
+      return true;
+    }
+    return false;
+  }
+
+  function afterRender() {
+    var formNode = document.getElementById('auth-form');
+    if (!formNode) return;
+    formNode.addEventListener('submit', function (event) {
+      event.preventDefault();
+      submit();
+    });
+    formNode.addEventListener('input', function () { readForm(); });
+    var focusId = form.mode === 'register' && !form.name ? 'auth-name' : (!form.email ? 'auth-email' : 'auth-password');
+    var focusNode = document.getElementById(focusId);
+    if (focusNode && document.activeElement === document.body) focusNode.focus();
   }
 
   CC.register({
-    bodyClass: 'v-sidebar',
+    bodyClass: 'v-home',
     renderBody: renderBody,
     onClick: onClick,
+    afterRender: afterRender,
   });
   CC.start();
 })();

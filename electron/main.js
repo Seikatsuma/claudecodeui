@@ -3,19 +3,22 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { BrainsManager } from './brains.js';
 import { CloudController } from './cloud.js';
 import { DesktopWindowManager } from './desktopWindow.js';
 import { DesktopNotificationsController } from './desktopNotifications.js';
+import { LocalAuth } from './localAuth.js';
 import { LocalServerController } from './localServer.js';
 import { TabsController } from './tabs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const APP_NAME = 'CloudCLI';
-const APP_USER_MODEL_ID = 'ai.cloudcli.desktop';
-const CALLBACK_PROTOCOL = 'cloudcli';
+const APP_NAME = 'Claude UI';
+const APP_USER_MODEL_ID = 'ru.sobsila.claudeui';
+const CALLBACK_PROTOCOL = 'claudeui';
 const CALLBACK_URL = `${CALLBACK_PROTOCOL}://auth/callback`;
-const CLOUDCLI_CONTROL_PLANE_URL = process.env.CLOUDCLI_CONTROL_PLANE_URL || 'https://cloudcli.ai';
+// Сервер аккаунтов: второй сервер, cc2.sobsila.ru/desktop (регистрация, вход, серверы, мозги).
+const CLOUDCLI_CONTROL_PLANE_URL = (process.env.CLAUDE_UI_ACCOUNT_URL || 'https://cc2.sobsila.ru/desktop').replace(/\/+$/, '');
 const REMOTE_START_TIMEOUT_MS = 30000;
 const AUTH_CALLBACK_TTL_MS = 10 * 60 * 1000;
 
@@ -30,6 +33,8 @@ let desktopWindow = null;
 let localServer = null;
 let cloud = null;
 let desktopNotifications = null;
+let brains = null;
+let localAuth = null;
 let isQuitting = false;
 let isRefreshingCloud = false;
 let pendingCloudConnectStartedAt = 0;
@@ -115,6 +120,9 @@ function getDesktopState() {
     account: {
       connected: authState === 'connected',
       email: cloudAccount?.email || null,
+      name: cloudAccount?.name || null,
+      plan: cloudAccount?.plan || null,
+      planLabel: cloudAccount?.planLabel || null,
       authState,
       requiresReconnect: authState === 'expired',
     },
@@ -129,6 +137,9 @@ function getDesktopState() {
     activeTabId: tabs.activeTabId,
     environments: cloud.getEnvironments().map(serializeEnvironment),
     desktopNotifications: desktopNotifications?.getState() || { enabled: false, supported: false, connectedCount: 0, targetCount: 0 },
+    brainsVersion: brains?.getVersion() || null,
+    platform: process.platform,
+    appVersion: app.getVersion(),
   };
 }
 
@@ -165,7 +176,7 @@ function syncDesktopState() {
     void desktopWindow.showLocalStartupTarget(localServer.getPendingTarget(), localServer.getStartupLogs())
       .catch((error) => {
         if (isExpectedNavigationAbort(error)) return;
-        void showError('Could not update local startup log', error);
+        void showError('Не удалось показать запуск', error);
       });
   }
 }
@@ -246,8 +257,8 @@ async function copyDiagnostics() {
   clipboard.writeText(getDiagnosticsText());
   await dialog.showMessageBox(desktopWindow?.getMainWindow() || undefined, {
     type: 'info',
-    title: 'Diagnostics copied',
-    message: 'CloudCLI desktop diagnostics were copied to the clipboard.',
+    title: 'Сведения скопированы',
+    message: 'Сведения о программе скопированы — их можно вставить в сообщение поддержке.',
   });
 }
 
@@ -259,15 +270,15 @@ async function refreshCloudEnvironments({ showErrors = false } = {}) {
   } catch (error) {
     const authState = cloud.getAuthState();
     if (authState === 'expired') {
-      const expiredError = new Error('Your CloudCLI session expired. Reconnect your account.');
+      const expiredError = new Error('Вход устарел. Войдите в аккаунт заново.');
       if (showErrors) {
-        await showError('CloudCLI login required', expiredError);
+        await showError('Нужно войти заново', expiredError);
         return [];
       }
       throw expiredError;
     }
     if (showErrors) {
-      await showError('Could not load CloudCLI environments', error);
+      await showError('Не удалось загрузить список серверов', error);
       return [];
     }
     throw error;
@@ -299,13 +310,13 @@ async function handleDeepLink(url) {
   }
 
   if (!pendingCloudConnectStartedAt || Date.now() - pendingCloudConnectStartedAt > AUTH_CALLBACK_TTL_MS) {
-    await showError('CloudCLI account connection failed', new Error('No recent CloudCLI account connection was started from this app.'));
+    await showError('Не удалось войти', new Error('Вход не начинали из этой программы.'));
     return;
   }
 
   const apiKey = parsed.searchParams.get('api_key');
   if (!apiKey) {
-    await showError('CloudCLI account connection failed', new Error('The callback did not include an API key.'));
+    await showError('Не удалось войти', new Error('Сервер аккаунтов не прислал ключ.'));
     return;
   }
 
@@ -318,8 +329,8 @@ async function handleDeepLink(url) {
 
   dialog.showMessageBox(desktopWindow?.getMainWindow() || undefined, {
     type: 'info',
-    title: 'CloudCLI account connected',
-    message: cloud.getAccount()?.email ? `Connected as ${cloud.getAccount().email}.` : 'CloudCLI account connected.',
+    title: 'Вход выполнен',
+    message: cloud.getAccount()?.email ? `Вы вошли как ${cloud.getAccount().email}.` : 'Вход выполнен.',
   }).catch(() => {});
 }
 
@@ -329,18 +340,18 @@ async function copyLocalWebUrl() {
   const localUrl = localServer.getLocalServerUrl();
 
   if (!shareableUrl) {
-    throw new Error('Local CloudCLI URL is not available yet.');
+    throw new Error('Интерфейс этого компьютера ещё запускается.');
   }
 
   clipboard.writeText(shareableUrl);
   const isLanUrl = shareableUrl !== localUrl;
   await dialog.showMessageBox(desktopWindow?.getMainWindow() || undefined, {
     type: 'info',
-    title: 'Web URL copied',
-    message: isLanUrl ? 'LAN web URL copied.' : 'Local web URL copied.',
+    title: 'Адрес скопирован',
+    message: isLanUrl ? 'Скопирован адрес для домашней сети.' : 'Скопирован адрес на этом компьютере.',
     detail: isLanUrl
-      ? `${shareableUrl}\n\nUse this URL from another device on the same network.`
-      : `${shareableUrl}\n\nThis URL works on this computer. Enable LAN access before starting Local CloudCLI to copy a phone-accessible URL.`,
+      ? `${shareableUrl}\n\nОткройте его с другого устройства в той же сети.`
+      : `${shareableUrl}\n\nАдрес работает только на этом компьютере.`,
   });
 
   return getDesktopState();
@@ -350,7 +361,7 @@ async function openLocalWebUi() {
   await localServer.ensureLocalServer();
   const url = localServer.getShareableWebUrl() || localServer.getLocalServerUrl();
   if (!url) {
-    throw new Error('Local CloudCLI URL is not available yet.');
+    throw new Error('Интерфейс этого компьютера ещё запускается.');
   }
 
   await openExternalUrl(url);
@@ -364,9 +375,9 @@ async function updateDesktopSetting(key, value) {
   if (result.requiresRestartNotice) {
     await dialog.showMessageBox(desktopWindow?.getMainWindow() || undefined, {
       type: 'info',
-      title: 'Restart local server to apply',
-      message: 'LAN access changes apply the next time the local server starts.',
-      detail: 'Quit CloudCLI and stop the local server, then open Local CloudCLI again.',
+      title: 'Нужен перезапуск',
+      message: 'Доступ из домашней сети включится при следующем запуске программы.',
+      detail: 'Закройте Claude UI и откройте снова.',
     });
   }
 
@@ -386,19 +397,19 @@ async function showEnvironmentPicker() {
     }
   }
 
-  const choices = ['Local CloudCLI', ...environments.map((environment) => {
+  const choices = ['Этот компьютер', ...environments.map((environment) => {
     const status = environment.status === 'running' ? '' : ` (${environment.status})`;
     return `${environment.name || environment.subdomain}${status}`;
   })];
 
   const response = await dialog.showMessageBox(desktopWindow?.getMainWindow(), {
     type: 'question',
-    buttons: [...choices, 'Cancel'],
+    buttons: [...choices, 'Отмена'],
     defaultId: 0,
     cancelId: choices.length,
-    title: 'Switch CloudCLI Environment',
-    message: 'Choose where this desktop window should connect.',
-    detail: refreshError ? `Cloud environments could not be refreshed. Showing cached environments.\n\n${refreshError.message || refreshError}` : undefined,
+    title: 'Где работать',
+    message: 'Выберите, где работать: на этом компьютере или на вашем сервере.',
+    detail: refreshError ? `Список серверов не обновился, показан прежний.\n\n${refreshError.message || refreshError}` : undefined,
   });
 
   if (response.response === choices.length) return getDesktopState();
@@ -492,8 +503,8 @@ async function openEnvironmentInSsh(environment) {
     clipboard.writeText(sshCommand);
     await dialog.showMessageBox(desktopWindow?.getMainWindow() || undefined, {
       type: 'info',
-      title: 'SSH command copied',
-      message: 'The SSH command was copied to the clipboard.',
+      title: 'Команда SSH скопирована',
+      message: 'Команда SSH скопирована в буфер обмена.',
       detail: sshCommand,
     });
   }
@@ -506,8 +517,8 @@ async function copyEnvironmentMobileUrl(environment) {
   clipboard.writeText(url);
   await dialog.showMessageBox(desktopWindow?.getMainWindow() || undefined, {
     type: 'info',
-    title: 'Environment URL copied',
-    message: 'Use this URL from your mobile browser.',
+    title: 'Адрес скопирован',
+    message: 'Откройте этот адрес в браузере телефона.',
     detail: url,
   });
   return getDesktopState();
@@ -526,7 +537,7 @@ function getActiveRemoteEnvironment() {
 async function runActiveEnvironmentAction(action) {
   const environment = getActiveRemoteEnvironment();
   if (!environment) {
-    throw new Error('Open a cloud environment first.');
+    throw new Error('Сначала откройте сервер.');
   }
 
   switch (action) {
@@ -545,22 +556,81 @@ async function runActiveEnvironmentAction(action) {
   }
 }
 
+// Вход в локальный интерфейс — до загрузки страницы (его подкладывает preload).
+async function ensureLocalLogin(url) {
+  await localAuth.ensureToken(url || localServer.getLocalServerUrl(), cloud.getAccount()?.email);
+}
+
 async function openLocalInDesktop() {
+  if (cloud.getAuthState() !== 'connected') {
+    await desktopWindow.showLauncher();
+    return getDesktopState();
+  }
   const existingTab = tabs.getTab('local');
   if (existingTab && localServer.getLocalServerUrl()) {
-    await desktopWindow.showTarget(await localServer.getResolvedTarget());
+    const resolved = await localServer.getResolvedTarget();
+    await ensureLocalLogin(resolved.url);
+    await desktopWindow.showTarget(resolved);
     return getDesktopState();
   }
 
   const pendingTarget = localServer.getPendingTarget();
   tabs.upsertTarget(pendingTarget);
   setActiveTarget(pendingTarget);
-  await desktopWindow.showLocalStartupTarget(pendingTarget, localServer.getStartupLogs());
+  // Экран запуска перерисовывается и из syncDesktopState (строки журнала):
+  // прерванная этим загрузка — не ошибка, запуск сервера продолжается.
+  await desktopWindow.showLocalStartupTarget(pendingTarget, localServer.getStartupLogs())
+    .catch((error) => {
+      if (!isExpectedNavigationAbort(error)) throw error;
+    });
   desktopWindow.emitDesktopState();
 
   const target = await localServer.getResolvedTarget();
+  await ensureLocalLogin(target.url);
   await desktopWindow.showTarget(target);
   return getDesktopState();
+}
+
+// После входа: серверы и тариф с сервера аккаунтов, свежие мозги, сразу — этот компьютер.
+async function afterSignedIn() {
+  void cloud.refreshAccount().then(() => syncDesktopState()).catch(() => {});
+  void refreshCloudEnvironments({ showErrors: false }).catch(() => {});
+  void brains.syncFromServer(() => cloud.fetchBrains())
+    .then((updated) => { if (updated) syncDesktopState(); })
+    .catch((error) => console.warn('[Brains] не обновились:', error?.message || error));
+  return openLocalInDesktop();
+}
+
+async function signIn(kind, fields) {
+  await cloud.passwordAuth(kind, fields || {});
+  syncDesktopState();
+  return afterSignedIn();
+}
+
+function getServerEnv() {
+  const account = cloud?.getAccount();
+  const env = {
+    CLAUDE_UI_DESKTOP: '1',
+    CLAUDE_UI_BRAINS_DIR: brains.getActiveDir(),
+    DATABASE_PATH: localAuth.getDatabasePath(),
+    // Комнаты агентов (systemd) бывают только на Linux-сервере.
+    CLOUDCLI_AGENT_ROOMS: 'off',
+    // Программа — один человек на своём компьютере: никаких режимов общего
+    // сервера (папки .claude-webuser-N, приглашения, второй блок, чужой голос),
+    // даже если такие переменные окажутся в окружении.
+    OPEN_REGISTRATION: 'false',
+    PLATFORM_OWNER_WEB_USER_IDS: '',
+    ACCOUNT_LABEL: '',
+    SECOND_SERVER_LABEL: '',
+    VOICE_API_BASE_URL: '',
+    VOICE_API_KEY: '',
+  };
+  // Владельцу — как на его сайте: новый чат без вопросов перед каждым действием.
+  // Остальным — встроенное осторожное поведение: Claude спрашивает разрешения.
+  if (account?.plan === 'owner') {
+    env.DEFAULT_PERMISSION_MODE = 'bypassPermissions';
+  }
+  return env;
 }
 
 async function openEnvironmentInDesktop(environment) {
@@ -572,7 +642,7 @@ async function openEnvironmentInDesktop(environment) {
   if (!hadTab) {
     await desktopWindow.showTabPlaceholder(
       pendingTarget,
-      `${environment.status === 'running' ? 'Opening' : 'Starting'} ${pendingTarget.name}...`,
+      `Открываю ${pendingTarget.name}…`,
     );
     tabs.upsertTarget(pendingTarget);
     desktopWindow.emitDesktopState();
@@ -677,7 +747,15 @@ async function getEnvironmentAuthToken(environmentUrl) {
 }
 
 async function clearCloudAccount() {
+  await cloud.logoutRemote();
   await cloud.clearCloudAccount();
+  // Без аккаунта программой не пользуются: закрываем и этот компьютер.
+  for (const tab of tabs.removeByKind('local')) {
+    desktopWindow?.destroyTabView(tab.id);
+  }
+  if (activeTarget?.kind === 'local') {
+    await desktopWindow?.showLauncher();
+  }
   desktopNotifications?.stop();
   const removedTabs = tabs.removeByKind('remote');
   for (const tab of removedTabs) {
@@ -696,17 +774,17 @@ function getRemoteEnvironmentMenuItems() {
   const environments = cloud.getEnvironments();
 
   if (!cloudAccount?.apiKey) {
-    return [{ label: 'Connect CloudCLI Account...', click: () => void connectCloudAccount() }];
+    return [{ label: 'Войти в аккаунт…', click: () => void desktopWindow?.showLauncher() }];
   }
 
   if (!environments.length) {
-    return [{ label: 'No environments found', enabled: false }];
+    return [{ label: 'Серверов пока нет', enabled: false }];
   }
 
   return environments.map((environment) => ({
     label: `${environment.name || environment.subdomain}${environment.status === 'running' ? '' : ` (${environment.status})`}`,
     click: () => void openEnvironmentInDesktop(environment)
-      .catch((error) => showError('Could not open environment', error)),
+      .catch((error) => showError('Не удалось открыть сервер', error)),
   }));
 }
 
@@ -730,6 +808,17 @@ function registerIpcHandlers() {
     return getDesktopState();
   });
 
+  ipcMain.handle('claudeui:sign-in', async (_event, fields) => signIn('login', fields));
+  ipcMain.handle('claudeui:register', async (_event, fields) => signIn('register', fields));
+  ipcMain.on('claudeui:local-auth-token', (event) => {
+    let origin = null;
+    try {
+      origin = new URL(event.sender.getURL()).origin;
+    } catch {
+      origin = null;
+    }
+    event.returnValue = localAuth?.getTokenForOrigin(origin) || null;
+  });
   ipcMain.handle('cloudcli-desktop:copy-local-web-url', async () => copyLocalWebUrl());
   ipcMain.handle('cloudcli-desktop:get-state', () => getDesktopState());
   ipcMain.handle('cloudcli-desktop:open-cloud-dashboard', async () => openCloudDashboard());
@@ -737,7 +826,7 @@ function registerIpcHandlers() {
   ipcMain.handle('cloudcli-desktop:open-environment', async (_event, environmentId) => {
     const environment = cloud.findEnvironment(environmentId);
     if (!environment) {
-      throw new Error('Environment not found. Refresh and try again.');
+      throw new Error('Сервер не найден. Обновите список и попробуйте ещё раз.');
     }
     return openEnvironmentInDesktop(environment);
   });
@@ -895,15 +984,22 @@ async function bootstrap() {
   app.setAboutPanelOptions({
     applicationName: APP_NAME,
     applicationVersion: app.getVersion(),
-    copyright: 'CloudCLI',
+    copyright: 'Claude UI',
   });
 
+  brains = new BrainsManager({
+    bundledDir: path.join(getAppRoot(), 'desktop', 'brains'),
+    userDataDir: app.getPath('userData'),
+    log: (line) => console.log(`[Brains] ${line}`),
+  });
+  localAuth = new LocalAuth({ userDataDir: app.getPath('userData') });
   localServer = new LocalServerController({
     appRoot: getAppRoot(),
     settingsPath: getSettingsPath(),
     isPackaged: app.isPackaged,
     appVersion: app.getVersion(),
     onChange: syncDesktopState,
+    getServerEnv,
   });
   cloud = new CloudController({
     storePath: getStorePath(),
@@ -928,17 +1024,21 @@ async function bootstrap() {
   await localServer.loadDesktopSettings();
   await cloud.loadCloudAccount();
   await desktopNotifications.loadSettings();
+  await brains.ensureInstalled().catch((error) => console.warn('[Brains] не разложились:', error?.message || error));
+  await localAuth.prepare();
 
   registerProtocolHandler();
   registerIpcHandlers();
   registerAppEvents();
   await createDesktopWindow();
-  void refreshCloudEnvironments({ showErrors: false });
+  if (cloud.getAuthState() === 'connected') {
+    await afterSignedIn().catch((error) => showError('Не удалось открыть интерфейс', error));
+  }
 }
 
 if (registerSingleInstance()) {
   bootstrap().catch(async (error) => {
-    await showError('CloudCLI failed to start', error);
+    await showError('Claude UI не запустился', error);
     app.quit();
   });
 }

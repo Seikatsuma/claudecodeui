@@ -337,53 +337,25 @@ export class DesktopWindowManager {
     return this.getDesktopState();
   }
 
+  // Свои серверы всегда работают: только открыть здесь, в браузере или скопировать адрес.
   buildEnvironmentActionsSubmenu(environment) {
-    const items = [];
-    const statusSuffix = environment.status === 'running' ? '' : ` (${environment.status})`;
-    items.push({
-      label: 'Open Environment',
-      click: () => void this.actions.openEnvironmentInDesktop(environment)
-        .catch((error) => this.actions.showError(`Could not open ${environment.name || environment.subdomain}${statusSuffix}`, error)),
-    });
-    items.push({
-      label: 'Open in Browser',
-      click: () => void this.actions.openEnvironmentInBrowser(environment)
-        .catch((error) => this.actions.showError('Could not open environment in browser', error)),
-    });
-    items.push({
-      label: 'Open in VS Code',
-      click: () => void this.actions.openEnvironmentInIde(environment, 'vscode')
-        .catch((error) => this.actions.showError('Could not open environment in VS Code', error)),
-    });
-    items.push({
-      label: 'Open in Cursor',
-      click: () => void this.actions.openEnvironmentInIde(environment, 'cursor')
-        .catch((error) => this.actions.showError('Could not open environment in Cursor', error)),
-    });
-    items.push({
-      label: 'Open SSH Terminal',
-      click: () => void this.actions.openEnvironmentInSsh(environment)
-        .catch((error) => this.actions.showError('Could not open SSH terminal', error)),
-    });
-    items.push({
-      label: 'Copy Mobile/Web URL',
-      click: () => this.actions.copyText(this.actions.getEnvironmentUrl(environment)),
-    });
-    if (environment.status !== 'running') {
-      items.unshift({
-        label: environment.status === 'paused' ? 'Resume' : 'Start',
-        click: () => void this.actions.startEnvironment(environment)
-          .catch((error) => this.actions.showError('Could not start environment', error)),
-      });
-    }
-    if (environment.status === 'running') {
-      items.push({
-        label: 'Stop',
-        click: () => void this.actions.stopEnvironment(environment)
-          .catch((error) => this.actions.showError('Could not stop environment', error)),
-      });
-    }
-    return items;
+    const name = environment.name || environment.subdomain;
+    return [
+      {
+        label: 'Открыть',
+        click: () => void this.actions.openEnvironmentInDesktop(environment)
+          .catch((error) => this.actions.showError(`Не удалось открыть ${name}`, error)),
+      },
+      {
+        label: 'Открыть в браузере',
+        click: () => void this.actions.openEnvironmentInBrowser(environment)
+          .catch((error) => this.actions.showError('Не удалось открыть в браузере', error)),
+      },
+      {
+        label: 'Скопировать адрес',
+        click: () => this.actions.copyText(this.actions.getEnvironmentUrl(environment)),
+      },
+    ];
   }
 
   buildTrayEnvironmentSection() {
@@ -391,7 +363,7 @@ export class DesktopWindowManager {
     if (!cloudState.account?.apiKey) {
       return [
         {
-          label: cloudState.account?.email ? `Reconnect ${cloudState.account.email}` : 'Login',
+          label: cloudState.account?.email ? `Войти заново: ${cloudState.account.email}` : 'Войти',
           click: () => void this.actions.connectCloudAccount()
             .catch((error) => this.actions.showError('Could not connect CloudCLI account', error)),
         },
@@ -399,7 +371,7 @@ export class DesktopWindowManager {
     }
 
     if (!cloudState.environments.length) {
-      return [{ label: 'No environments found', enabled: false }];
+      return [{ label: 'Серверов пока нет', enabled: false }];
     }
 
     return cloudState.environments.map((environment) => ({
@@ -414,85 +386,85 @@ export class DesktopWindowManager {
     const localState = this.getLocalState();
     const remoteItems = this.getRemoteEnvironmentMenuItems();
     const cloudAccountLabel = cloudState.account?.apiKey
-      ? (cloudState.account?.email ? `Connected: ${cloudState.account.email}` : 'CloudCLI Connected')
-      : (cloudState.account?.email ? `Reconnect: ${cloudState.account.email}` : 'Connect CloudCLI Account...');
+      ? (cloudState.account?.email ? `Аккаунт: ${cloudState.account.email}` : 'Аккаунт')
+      : (cloudState.account?.email ? `Войти заново: ${cloudState.account.email}` : 'Войти в аккаунт…');
 
     const template = [
       {
         label: this.appName,
         submenu: [
-          { label: `About ${this.appName}`, role: 'about' },
+          { label: `О программе ${this.appName}`, role: 'about' },
           { type: 'separator' },
           {
-            label: 'Show Launcher',
+            label: 'Главная',
             accelerator: 'CmdOrCtrl+Shift+L',
             click: () => void this.showLauncher().catch((error) => this.actions.showError('Could not show launcher', error)),
           },
           {
-            label: 'Switch Environment',
+            label: 'Где работать…',
             accelerator: 'CmdOrCtrl+Shift+E',
             click: () => void this.actions.showEnvironmentPicker().catch((error) => this.actions.showError('Could not switch environment', error)),
           },
           {
-            label: 'Diagnostics',
+            label: 'Сведения для поддержки',
             submenu: [
               {
-                label: 'Copy Diagnostics',
+                label: 'Скопировать сведения',
                 click: () => void this.actions.copyDiagnostics(),
               },
             ],
           },
           { type: 'separator' },
           {
-            label: process.platform === 'darwin' ? `Hide ${this.appName}` : 'Hide',
+            label: process.platform === 'darwin' ? `Скрыть ${this.appName}` : 'Скрыть',
             role: 'hide',
             visible: process.platform === 'darwin',
           },
-          { label: 'Hide Others', role: 'hideOthers', visible: process.platform === 'darwin' },
-          { label: 'Show All', role: 'unhide', visible: process.platform === 'darwin' },
+          { label: 'Скрыть остальные', role: 'hideOthers', visible: process.platform === 'darwin' },
+          { label: 'Показать все', role: 'unhide', visible: process.platform === 'darwin' },
           { type: 'separator', visible: process.platform === 'darwin' },
-          { label: `Quit ${this.appName}`, accelerator: 'CmdOrCtrl+Q', role: 'quit' },
+          { label: `Выйти из ${this.appName}`, accelerator: 'CmdOrCtrl+Q', role: 'quit' },
         ],
       },
       {
-        label: 'Environment',
+        label: 'Работа',
         submenu: [
           {
-            label: 'Show Launcher',
+            label: 'Главная',
             accelerator: 'CmdOrCtrl+Shift+L',
             click: () => void this.showLauncher().catch((error) => this.actions.showError('Could not show launcher', error)),
           },
           {
-            label: 'Switch Environment',
+            label: 'Где работать…',
             accelerator: 'CmdOrCtrl+Shift+E',
             click: () => void this.actions.showEnvironmentPicker().catch((error) => this.actions.showError('Could not switch environment', error)),
           },
           { type: 'separator' },
           {
-            label: 'Open Local CloudCLI',
+            label: 'Этот компьютер',
             accelerator: 'CmdOrCtrl+L',
-            click: () => void this.actions.openLocalInDesktop().catch((error) => this.actions.showError('Could not open local CloudCLI', error)),
+            click: () => void this.actions.openLocalInDesktop().catch((error) => this.actions.showError('Не удалось открыть этот компьютер', error)),
           },
           {
-            label: 'Open Local Web UI in Browser',
+            label: 'Открыть в браузере',
             accelerator: 'CmdOrCtrl+Shift+W',
             click: () => void this.actions.openLocalWebUi().catch((error) => this.actions.showError('Could not open local web UI', error)),
           },
           {
-            label: 'Copy Local Web URL',
+            label: 'Скопировать адрес',
             accelerator: 'CmdOrCtrl+Shift+U',
             click: () => void this.actions.copyLocalWebUrl().catch((error) => this.actions.showError('Could not copy local web URL', error)),
           },
           { type: 'separator' },
           {
-            label: 'Keep Local Server Running After Quit',
+            label: 'Не выключать после закрытия',
             type: 'checkbox',
             checked: localState.desktopSettings.keepLocalServerRunning,
             click: (menuItem) => void this.actions.updateDesktopSetting('keepLocalServerRunning', menuItem.checked)
               .catch((error) => this.actions.showError('Could not update desktop setting', error)),
           },
           {
-            label: 'Allow LAN Access to Local Server',
+            label: 'Доступ из домашней сети',
             type: 'checkbox',
             checked: localState.desktopSettings.exposeLocalServerOnNetwork,
             click: (menuItem) => void this.actions.updateDesktopSetting('exposeLocalServerOnNetwork', menuItem.checked)
@@ -501,32 +473,32 @@ export class DesktopWindowManager {
         ],
       },
       {
-        label: 'Cloud',
+        label: 'Аккаунт',
         submenu: [
           {
             label: cloudAccountLabel,
             accelerator: 'CmdOrCtrl+Shift+C',
-            click: () => void this.actions.connectCloudAccount().catch((error) => this.actions.showError('Could not connect CloudCLI account', error)),
+            click: () => void this.showLauncher().catch((error) => this.actions.showError('Не удалось открыть вход', error)),
           },
           {
-            label: 'Refresh Cloud Environments',
-            click: () => void this.actions.refreshCloudEnvironments().catch((error) => this.actions.showError('Could not load CloudCLI environments', error)),
+            label: 'Обновить список серверов',
+            click: () => void this.actions.refreshCloudEnvironments().catch((error) => this.actions.showError('Не удалось загрузить список серверов', error)),
             enabled: Boolean(cloudState.account?.apiKey),
           },
           {
-            label: 'Logout CloudCLI Account',
+            label: 'Выйти из аккаунта',
             click: () => void this.actions.clearCloudAccount().catch((error) => this.actions.showError('Could not logout', error)),
             enabled: Boolean(cloudState.account?.apiKey),
           },
           { type: 'separator' },
           {
-            label: 'Remote Environments',
+            label: 'Мои серверы',
             submenu: remoteItems,
           },
         ],
       },
       {
-        label: 'Edit',
+        label: 'Правка',
         submenu: [
           { role: 'undo' },
           { role: 'redo' },
@@ -538,25 +510,25 @@ export class DesktopWindowManager {
         ],
       },
       {
-        label: 'View',
+        label: 'Вид',
         submenu: [
           { role: 'reload' },
           { role: 'forceReload' },
           { role: 'toggleDevTools' },
           {
-            label: 'Open Active Tab DevTools',
+            label: 'Инструменты разработчика',
             click: () => this.openActiveTabDevTools(),
           },
           {
-            label: 'Copy WebContents Diagnostics',
+            label: 'Скопировать сведения о вкладках',
             click: () => this.copyWebContentsDiagnostics(),
           },
           {
-            label: 'Reload Active BrowserView',
+            label: 'Перезагрузить вкладку',
             click: () => this.reloadActiveBrowserViewForDiagnostics(),
           },
           {
-            label: 'Detach Active BrowserView',
+            label: 'Отсоединить вкладку',
             click: () => this.detachActiveBrowserViewForDiagnostics(),
           },
           { type: 'separator' },
@@ -568,7 +540,7 @@ export class DesktopWindowManager {
         ],
       },
       {
-        label: 'Window',
+        label: 'Окно',
         submenu: [
           { role: 'minimize' },
           { role: 'zoom' },
@@ -576,14 +548,14 @@ export class DesktopWindowManager {
         ],
       },
       {
-        label: 'Help',
+        label: 'Помощь',
         submenu: [
         {
-          label: 'Open cloudcli.ai',
+          label: 'Сайт программы',
           click: () => void this.actions.openCloudDashboard(),
         },
           {
-            label: 'Copy Diagnostics',
+            label: 'Скопировать сведения',
             click: () => void this.actions.copyDiagnostics(),
           },
         ],
@@ -601,39 +573,39 @@ export class DesktopWindowManager {
 
     const template = [
       {
-        label: 'Local',
+        label: 'Этот компьютер',
         submenu: [
           {
-            label: localState.localServerRunning ? 'Open Local in CloudCLI' : 'Start Local in CloudCLI',
-            click: () => void this.actions.openLocalInDesktop().catch((error) => this.actions.showError('Could not open local CloudCLI', error)),
+            label: 'Открыть этот компьютер',
+            click: () => void this.actions.openLocalInDesktop().catch((error) => this.actions.showError('Не удалось открыть этот компьютер', error)),
           },
           {
-            label: 'Open Local in Browser',
+            label: 'Открыть в браузере',
             click: () => void this.actions.openLocalWebUi().catch((error) => this.actions.showError('Could not open local web UI', error)),
           },
           {
-            label: 'Copy Local URL',
+            label: 'Скопировать адрес',
             click: () => void this.actions.copyLocalWebUrl().catch((error) => this.actions.showError('Could not copy local web URL', error)),
           },
         ],
       },
       {
-        label: 'Cloud Environments',
+        label: 'Мои серверы',
         submenu: this.buildTrayEnvironmentSection(),
       },
       { type: 'separator' },
       {
-        label: cloudState.account?.email ? `Connected: ${cloudState.account.email}` : 'Login',
-        click: () => void this.actions.connectCloudAccount().catch((error) => this.actions.showError('Could not connect CloudCLI account', error)),
+        label: cloudState.account?.email ? `Аккаунт: ${cloudState.account.email}` : 'Войти',
+        click: () => void this.showLauncher().catch((error) => this.actions.showError('Не удалось открыть вход', error)),
       },
       {
-        label: 'Logout CloudCLI Account',
+        label: 'Выйти из аккаунта',
         click: () => void this.actions.clearCloudAccount().catch((error) => this.actions.showError('Could not logout', error)),
         enabled: Boolean(cloudState.account?.apiKey),
       },
       { type: 'separator' },
       {
-        label: `Quit ${this.appName}`,
+        label: `Выйти из ${this.appName}`,
         role: 'quit',
       },
     ];
@@ -711,8 +683,10 @@ export class DesktopWindowManager {
     this.mainWindow = new BrowserWindow({
       width: 1440,
       height: 960,
-      minWidth: 1024,
-      minHeight: 720,
+      // Окно сжимается до ширины телефона: интерфейс сам прячет левую панель
+      // (выезжает по кнопке), как на iPhone. Было 1024 — сузить было нельзя.
+      minWidth: 420,
+      minHeight: 520,
       show: false,
       backgroundColor: '#0f172a',
       title: this.appName,
@@ -740,14 +714,19 @@ export class DesktopWindowManager {
     });
 
     this.mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-      void this.openExternalUrl(url).catch((error) => this.actions.showError('Could not open external link', error));
+      void this.openExternalUrl(url).catch((error) => this.actions.showError('Не удалось открыть ссылку', error));
       return { action: 'deny' };
     });
 
-    this.mainWindow.on('resize', () => {
+    const fitContent = () => {
       this.viewHost.resizeActiveView();
       this.syncSettingsWindowBounds();
-    });
+    };
+    this.mainWindow.on('resize', fitContent);
+    // На части систем «развернуть» и полный экран не шлют resize с итоговым размером.
+    for (const eventName of ['resized', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen', 'restore']) {
+      this.mainWindow.on(eventName, () => setTimeout(fitContent, 0));
+    }
 
     this.mainWindow.on('move', () => {
       this.syncSettingsWindowBounds();

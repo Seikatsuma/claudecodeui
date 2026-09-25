@@ -36,6 +36,7 @@ import { createCompleteMessage, createNormalizedMessage, getClaudeConfigDir, get
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import { noteSurvivorProviderSession, spawnSurvivableClaude } from '@/modules/providers/list/claude/survivor-runs.js';
 import { hasTranscriptOnDisk } from '@/modules/providers/list/claude/transcript-presence.js';
+import { applyDesktopBrains } from './desktop-brains.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -1070,6 +1071,10 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         }]
       }]
     };
+
+    // Настольная программа: правила, протокол к сообщению, помощники и навыки,
+    // защита от удаления (см. desktop-brains.js). На сайте — ничего.
+    applyDesktopBrains(sdkOptions);
 
     // Caveat: in 'auto' and 'bypassPermissions' modes the SDK resolves approval
     // at the permission-mode step and skips this callback, so interactive tools

@@ -20,6 +20,18 @@ function onDesktopStateUpdated(callback) {
   };
 }
 
+// Вход в локальный интерфейс этого компьютера: программа уже вошла сама,
+// кладём свежий вход до того, как страница его проверит (см. electron/localAuth.js).
+if (window.location.protocol === 'http:'
+  && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+  try {
+    const token = ipcRenderer.sendSync('claudeui:local-auth-token');
+    if (token) window.localStorage.setItem('auth-token', token);
+  } catch {
+    // Нет входа — страница покажет свой экран входа.
+  }
+}
+
 if (isCloudCliAppOrigin(window.location)) {
   contextBridge.exposeInMainWorld('cloudcliDesktopNotifications', {
     getState: () => ipcRenderer.invoke('cloudcli-desktop:get-state'),
@@ -30,6 +42,8 @@ if (isCloudCliAppOrigin(window.location)) {
 
 if (window.location.protocol === 'file:') {
   contextBridge.exposeInMainWorld('cloudcliDesktop', {
+    signIn: (fields) => ipcRenderer.invoke('claudeui:sign-in', fields),
+    register: (fields) => ipcRenderer.invoke('claudeui:register', fields),
     connectCloud: () => ipcRenderer.invoke('cloudcli-desktop:connect-cloud'),
     disconnectCloud: () => ipcRenderer.invoke('cloudcli-desktop:disconnect-cloud'),
     copyDiagnostics: () => ipcRenderer.invoke('cloudcli-desktop:copy-diagnostics'),

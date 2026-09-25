@@ -25,7 +25,7 @@ function buildPlaceholderHtml(title, message, logs = []) {
     'pre{margin:0;flex:1;overflow:auto;border:1px solid #262626;border-radius:10px;background:#050505;color:#d4d4d4;padding:14px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;white-space:pre-wrap;user-select:text}',
     '</style>',
     '<div class="shell">',
-    `<div class="box"><span class="dot"></span><span>${escapeHtml(message || `Opening ${title}...`)}</span></div>`,
+    `<div class="box"><span class="dot"></span><span>${escapeHtml(message || `Открываю ${title}…`)}</span></div>`,
     logHtml,
     '</div>',
   ].join('');
@@ -228,8 +228,10 @@ export class ViewHost {
     } catch {
       return;
     }
+    // Размер задаёт только resizeActiveView по событиям окна. Вместе с
+    // setAutoResize страница сжималась дважды (окно −200 → страница −400)
+    // и из-под неё торчал стартовый экран.
     view.setBounds(this.getContentViewBounds());
-    view.setAutoResize({ width: true, height: true });
   }
 
   resizeActiveView() {
@@ -251,7 +253,7 @@ export class ViewHost {
     const view = this.getOrCreateTabView(tabId);
     if (view.__cloudcliLoadingUrl) return;
     this.attach(view);
-    const html = buildPlaceholderHtml(target.name || this.appName, 'Starting Local CloudCLI...', logs);
+    const html = buildPlaceholderHtml(target.name || this.appName, 'Запускаю Claude UI на этом компьютере…', logs);
     if (view.__cloudcliStartupHtml === html) return;
     await view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     view.__cloudcliStartupHtml = html;
