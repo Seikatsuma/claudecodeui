@@ -20,6 +20,8 @@ export type StoredOpenTab = {
   projectId?: string;
   provider?: string;
   title?: string;
+  /** Когда вкладку последний раз открывали (мс) — по нему страница убирает самую давнюю сверх 15. */
+  openedAt?: number;
 };
 
 export type OpenTabsState = {
@@ -67,6 +69,9 @@ export function normalizeOpenTabs(value: unknown): StoredOpenTab[] {
     if (projectId) tab.projectId = projectId;
     if (provider) tab.provider = provider;
     if (title) tab.title = title;
+    if (typeof raw.openedAt === 'number' && Number.isFinite(raw.openedAt) && raw.openedAt > 0) {
+      tab.openedAt = Math.round(raw.openedAt);
+    }
     result.push(tab);
     if (result.length >= MAX_TABS) break;
   }
