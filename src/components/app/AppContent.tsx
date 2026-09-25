@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -54,11 +54,21 @@ export default function AppContent() {
   );
 }
 
+const NARROW_DESKTOP_MAX_WIDTH = 1024;
+
 function AppContentInner() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId?: string }>();
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
+  // Узкое окно на компьютере (768–1023): левая панель не стоит постоянно и не
+  // сжимает чат — на её месте полоска значков, панель выезжает поверх чата.
+  const { isMobile: isBelowWideDesktop } = useDeviceSettings({
+    mobileBreakpoint: NARROW_DESKTOP_MAX_WIDTH,
+    trackPWA: false,
+  });
+  const isNarrowDesktop = !isMobile && isBelowWideDesktop;
+  const [narrowSidebarOpen, setNarrowSidebarOpen] = useState(false);
   const { ws, sendMessage, subscribe, isConnected } = useWebSocket();
 
   const {
@@ -215,6 +225,10 @@ function AppContentInner() {
   // Open-session tabs (VS Code-style strip above the chat area): a session
   // gets a tab the moment it's actually viewed — sidebar click, search
   // result, notification, deep link — never eagerly for the whole sidebar.
+  useEffect(() => {
+    setNarrowSidebarOpen(false);
+  }, [selectedSession?.id, selectedProject?.projectId, isNarrowDesktop]);
+
   const activeSessionId = selectedSession?.id ?? sessionId ?? null;
   const { openTabs, switchToTab, closeTab, moveTab, removeTabsForSessions } = useOpenSessionTabs({
     projects,
@@ -696,7 +710,39 @@ function AppContentInner() {
         maxHeight: 'var(--app-max-h, max(240px, calc(100dvh - var(--keyboard-height, 0px))))',
       }}
     >
-      {!isMobile ? (
+      {!isMobile && isNarrowDesktop ? (
+        // Место в строке держит только полоска (w-12); открытая панель лежит
+        // поверх чата и не сдвигает его. Щелчок по затемнению — закрыть.
+        <div className="relative h-full w-12 flex-shrink-0">
+          {narrowSidebarOpen && (
+            <button
+              type="button"
+              className="fixed inset-0 z-40 cursor-default bg-background/50 backdrop-blur-[1px]"
+              onClick={() => setNarrowSidebarOpen(false)}
+              aria-label={t('versionUpdate.ariaLabels.closeSidebar')}
+            />
+          )}
+          <div
+            className={narrowSidebarOpen
+              ? 'absolute left-0 top-0 z-50 h-full border-r border-border/60 bg-background shadow-2xl'
+              : 'h-full border-r border-border/50'}
+          >
+            <Sidebar
+              {...sidebarPropsLeavingTerminal}
+              onSessionDelete={handleSessionDeleteWithTabCleanup}
+              activeTab={activeTab}
+              setActiveTab={handleSidebarTabSelect}
+              shouldShowTasksTab={shouldShowTasksTab}
+              shouldShowBrowserTab={shouldShowBrowserTab}
+              narrowOverlay={{
+                open: narrowSidebarOpen,
+                onOpen: () => setNarrowSidebarOpen(true),
+                onClose: () => setNarrowSidebarOpen(false),
+              }}
+            />
+          </div>
+        </div>
+      ) : !isMobile ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
           <Sidebar
             {...sidebarPropsLeavingTerminal}

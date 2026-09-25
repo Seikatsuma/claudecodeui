@@ -48,6 +48,7 @@ function Sidebar({
   setActiveTab,
   shouldShowTasksTab,
   shouldShowBrowserTab,
+  narrowOverlay,
 }: SidebarProps) {
   const { t } = useTranslation(['sidebar', 'common']);
   const { isPWA } = useDeviceSettings({ trackMobile: false });
@@ -303,9 +304,9 @@ function Sidebar({
         t={t}
       />
 
-      {isSidebarCollapsed ? (
+      {(narrowOverlay ? !narrowOverlay.open : isSidebarCollapsed) ? (
         <SidebarCollapsed
-          onExpand={handleExpandSidebar}
+          onExpand={narrowOverlay ? narrowOverlay.onOpen : handleExpandSidebar}
           onShowSettings={onShowSettings}
           updateAvailable={updateAvailable}
           restartRequired={restartRequired}
@@ -391,7 +392,7 @@ function Sidebar({
             }}
             isRefreshing={isRefreshing}
             onCreateProject={() => setShowNewProject(true)}
-            onCollapseSidebar={handleCollapseSidebar}
+            onCollapseSidebar={narrowOverlay ? narrowOverlay.onClose : handleCollapseSidebar}
             updateAvailable={updateAvailable}
             restartRequired={restartRequired}
             releaseInfo={releaseInfo}

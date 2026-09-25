@@ -77,6 +77,15 @@ export type SidebarProps = {
   setActiveTab: (tab: AppTab) => void;
   shouldShowTasksTab: boolean;
   shouldShowBrowserTab: boolean;
+  /**
+   * Узкое окно на компьютере: вместо постоянной панели — полоска значков,
+   * а сама панель выезжает поверх чата (открыта/закрыта решает AppContent).
+   */
+  narrowOverlay?: {
+    open: boolean;
+    onOpen: () => void;
+    onClose: () => void;
+  };
 };
 
 export type SessionViewModel = {
