@@ -225,12 +225,26 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
   // устройстве, — его закрыли на другом: уходим к соседней вкладке, как при
   // закрытии крестиком. Иначе правило «открытый чат всегда во вкладках»
   // вернуло бы вкладку и отменило закрытие на всех устройствах.
-  const applyRemote = useCallback((remote: StoredTab[], followClose = true) => {
+  //
+  // Исключение — список полный (15): тогда чат, скорее всего, не закрыли, а
+  // вытеснил предел, когда на другом устройстве открыли новый. Здесь его
+  // читают прямо сейчас — вкладка остаётся на своём месте, а уходит следующая
+  // по давности (иначе телефон уводил бы Егора из чата, пока он за компьютером).
+  const applyRemote = useCallback((incoming: StoredTab[], followClose = true) => {
+    let remote = incoming;
     const previous = tabsRef.current;
     const activeId = activeSessionIdRef.current;
     const remoteIds = new Set(remote.map((tab) => tab.sessionId));
     if (followClose && activeId && !remoteIds.has(activeId) && previous.some((tab) => tab.sessionId === activeId)) {
       const index = previous.findIndex((tab) => tab.sessionId === activeId);
+      if (remote.length >= MAX_OPEN_TABS) {
+        const kept = [...remote];
+        kept.splice(Math.min(index, kept.length), 0, { ...previous[index], openedAt: Date.now() });
+        remote = capTabs(kept, activeId);
+        tabsRef.current = remote;
+        setTabs(remote);
+        return;
+      }
       const neighbour = [...previous.slice(index + 1), ...previous.slice(0, index).reverse()]
         .find((tab) => remoteIds.has(tab.sessionId));
       navigateRef.current(neighbour ? `/session/${neighbour.sessionId}` : '/');
