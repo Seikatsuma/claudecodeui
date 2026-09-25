@@ -34,6 +34,7 @@ import {
 } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage, getClaudeConfigDir, getClaudeJsonPath } from '@/shared/utils.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
+import { INHERITED_CLAUDE_AUTH_ENV_KEYS } from '@/shared/claude-login.js';
 import { noteSurvivorProviderSession, spawnSurvivableClaude } from '@/modules/providers/list/claude/survivor-runs.js';
 import { hasTranscriptOnDisk } from '@/modules/providers/list/claude/transcript-presence.js';
 
@@ -276,6 +277,14 @@ function mapCliOptionsToSDK(options = {}) {
   const resolvedConfigDir = options.claudeConfigDir || getClaudeConfigDir();
   if (resolvedConfigDir) {
     sdkOptions.env.CLAUDE_CONFIG_DIR = resolvedConfigDir;
+  }
+  // Гость площадки с открытой регистрацией работает только своим входом:
+  // ключ Claude из окружения сервера — владельца, и CLI предпочёл бы его
+  // входу из папки гостя (shared/web-user-runtime.ts).
+  if (options.isolateInheritedClaudeAuth) {
+    for (const key of INHERITED_CLAUDE_AUTH_ENV_KEYS) {
+      delete sdkOptions.env[key];
+    }
   }
   const resolvedApiKey = options.anthropicApiKey
     ?? getRequestRuntimeContext()?.anthropicApiKey

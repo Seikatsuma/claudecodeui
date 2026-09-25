@@ -27,12 +27,29 @@ import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 import { isPlatformOwnerWebUser, OPEN_REGISTRATION } from '@/shared/utils.js';
 import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
 
+// Проверки доступа живут без базы данных, чтобы их можно было испытать отдельно.
+export { hasOwnClaudeAccess, withoutInheritedClaudeAuth } from '@/shared/claude-login.js';
+
 const ANTHROPIC_API_KEY_CREDENTIAL_TYPE = 'anthropic_api_key';
 
 export type WebUserRuntimeContext = {
   claudeConfigDir: string | null;
   anthropicApiKey: string | null;
+  /**
+   * Не отдавать процессу ключи Claude из окружения сервера. Они принадлежат
+   * владельцу площадки, а CLI предпочитает ключ из окружения входу из папки:
+   * гость, вошедший своей подпиской, молча работал бы на ключе владельца.
+   */
+  isolateInheritedClaudeAuth: boolean;
 };
+
+const EMPTY_CONTEXT: WebUserRuntimeContext = {
+  claudeConfigDir: null,
+  anthropicApiKey: null,
+  isolateInheritedClaudeAuth: false,
+};
+
+
 
 /**
  * Достаёт опознанного пользователя из соединения. Форматы разные, потому что
@@ -68,17 +85,18 @@ export function resolveWebUserRuntimeContext(
   userId: string | number | null,
 ): WebUserRuntimeContext {
   if (!OPEN_REGISTRATION || userId === null) {
-    return { claudeConfigDir: null, anthropicApiKey: null };
+    return EMPTY_CONTEXT;
   }
 
   const numericUserId = Number(userId);
   if (!Number.isFinite(numericUserId)) {
-    return { claudeConfigDir: null, anthropicApiKey: null };
+    return EMPTY_CONTEXT;
   }
 
   // Владелец площадки — единственный, у кого два настоящих аккаунта и
   // переключатель между ними. Остальные всегда в своём единственном каталоге.
-  const ownerSlot = isPlatformOwnerWebUser(numericUserId)
+  const isOwner = isPlatformOwnerWebUser(numericUserId);
+  const ownerSlot = isOwner
     ? userDb.getActiveOwnerAccountSlot(numericUserId)
     : undefined;
 
@@ -88,6 +106,7 @@ export function resolveWebUserRuntimeContext(
       numericUserId,
       ANTHROPIC_API_KEY_CREDENTIAL_TYPE,
     ),
+    isolateInheritedClaudeAuth: !isOwner,
   };
 }
 
