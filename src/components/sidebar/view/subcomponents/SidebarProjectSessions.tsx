@@ -128,6 +128,12 @@ type SidebarProjectSessionsProps = {
   onNewSession: (project: Project) => void;
   /** Текст из строки поиска над списком. Пусто — показывать всё. */
   searchQuery?: string;
+  /**
+   * Чужая папка для отдельных чатов списка: чат, перенесённый в этот блок из
+   * папки другого блока, стоит в общем списке, но открывается, переименовывается
+   * и удаляется в своей папке. Нет записи — чат этой папки.
+   */
+  sessionProjects?: ReadonlyMap<string, Project>;
   t: TFunction;
 };
 
@@ -173,6 +179,7 @@ export default function SidebarProjectSessions({
   onLoadMoreSessions,
   onNewSession,
   searchQuery = '',
+  sessionProjects,
   t,
 }: SidebarProjectSessionsProps) {
   const trimmedQuery = searchQuery.trim();
@@ -240,7 +247,7 @@ export default function SidebarProjectSessions({
   const renderSession = (session: SessionWithProvider) => (
     <SidebarSessionItem
       key={session.id}
-      project={project}
+      project={sessionProjects?.get(session.id) ?? project}
       session={session}
       selectedSession={selectedSession}
       isProcessing={activeSessions.has(session.id)}
