@@ -682,7 +682,7 @@ window.__MOCK_STATE__ = {
       '<div class="acct-m">' + CC.esc(account.planLabel || 'Личный') + (state.brainsVersion ? ' · мозги ' + CC.esc(state.brainsVersion) : '') + '</div></div>' +
       '<button class="btn sm" data-cc-action="logout">' + CC.icon('logOut', 14) + 'Выйти</button>' +
       '</div>' +
-      '<p class="home-note">Claude в программе работает по вашей подписке Claude. Если он попросит войти — нажмите «Войти в Claude» в настройках интерфейса и подтвердите вход в браузере.</p>' +
+      '<p class="home-note">Claude в программе думает по вашей подписке Claude (Pro или Max). Первый раз войдите в неё: в интерфейсе «Настройки» → «Агенты» → Claude → «Войти», и подтвердите вход в браузере.</p>' +
       '<span hidden>' + CC.esc(computer) + '</span>' +
       '</div>';
   }

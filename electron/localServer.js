@@ -425,17 +425,21 @@ export class LocalServerController {
     this.appendStartupLog(`cwd: ${serverCwd}`);
     this.appendStartupLog(`HOST=${bindHost} SERVER_PORT=${port}`);
 
+    const bundledClaude = resolveBundledClaudeEnv(serverCwd);
     this.ownedServerProcess = spawn(runtime.command, [serverEntry], {
       cwd: serverCwd,
       detached: true,
       env: {
         ...process.env,
         ...runtime.env,
-        ...resolveBundledClaudeEnv(serverCwd),
+        ...bundledClaude,
         ...this.getServerEnv(),
         HOST: bindHost,
         SERVER_PORT: String(port),
-        PATH: getDesktopPath(),
+        // Папка вложенного Claude — первой: кнопка «Войти в Claude» и встроенный
+        // терминал зовут просто `claude`, а отдельно он у человека не установлен.
+        PATH: [bundledClaude.CLAUDE_CLI_PATH ? path.dirname(bundledClaude.CLAUDE_CLI_PATH) : null, getDesktopPath()]
+          .filter(Boolean).join(path.delimiter),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
