@@ -25,7 +25,6 @@ const target = args.has('--mac') ? 'mac' : args.has('--win') ? 'win' : 'linux';
 const dirOnly = args.has('--dir');
 
 const rootPackage = JSON.parse(readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-const desktopVersion = JSON.parse(readFileSync(path.join(rootDir, 'desktop', 'version.json'), 'utf8')).version;
 const electronVersion = JSON.parse(readFileSync(path.join(rootDir, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
 
 function run(command, commandArgs, options = {}) {
@@ -57,9 +56,10 @@ await copy('scripts/fix-node-pty.js');
 
 // Тот же набор пакетов, что у сервера (иначе npm ci откажется), но своё имя
 // программы, версия и настройки упаковки. Скрипты разработки не нужны.
+// Версия программы = версия интерфейса: сервер и страница сверяют их между собой,
+// и расхождение показывается плашкой «обновление установлено — перезапустите».
 const stagePackage = {
   ...rootPackage,
-  version: desktopVersion,
   main: 'electron/main.js',
   productName: 'Claude UI',
   description: 'Claude UI для компьютера',
