@@ -707,13 +707,17 @@ export const sessionsDb = {
   getSessionsByProjectPathPage(projectPath: string, limit: number, offset: number): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
+    // Чаты, перенесённые в другой блок поимённо (`server_scope` задан), идут
+    // в первую порцию: панель делит папку по блокам уже у себя, и старый
+    // перенесённый чат за пределами первых 20 не был бы виден ни в одном
+    // блоке. На экране порядок всё равно по дате — список сортирует клиент.
     const rows = db
       .prepare(
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0` + ACCOUNT_SCOPE_SQL + `
-         ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
+         ORDER BY (server_scope IS NOT NULL) DESC, datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
       .all(normalizedProjectPath, getActiveAccountDir(), limit, offset) as SessionRow[];
