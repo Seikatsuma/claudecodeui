@@ -7,7 +7,11 @@ import { WebSocket, type RawData } from 'ws';
 
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 import { OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
-import { readRequestUserId, resolveWebUserRuntimeContext } from '@/shared/web-user-runtime.js';
+import {
+  readRequestUserId,
+  resolveWebUserRuntimeContext,
+  withoutInheritedClaudeAuth,
+} from '@/shared/web-user-runtime.js';
 
 type ShellIncomingMessage = {
   type?: string;
@@ -501,7 +505,8 @@ export function handleShellConnection(
           rows: termRows,
           cwd: resolvedProjectPath,
           env: {
-            ...process.env,
+            // Гостю — без ключей Claude сервера: они владельца площадки.
+            ...withoutInheritedClaudeAuth(process.env, runtimeContext),
             [prioritizedPath.key]: prioritizedPath.value,
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
