@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -154,6 +155,8 @@ async function openExternalUrl(url) {
 
 async function showError(title, error) {
   const message = error instanceof Error ? error.message : String(error);
+  lastErrorText = `${title}: ${message}`;
+  writeStatusFile();
   console.error(`${title}: ${message}`);
   await dialog.showMessageBox(desktopWindow?.getMainWindow() || undefined, {
     type: 'error',
@@ -168,7 +171,26 @@ function isExpectedNavigationAbort(error) {
   return error?.code === 'ERR_ABORTED' || message.includes('ERR_ABORTED') || message.includes('(-3)');
 }
 
+// Файл состояния для пробы сборки и для поддержки (включается переменной
+// CLAUDE_UI_STATUS_FILE): что открыто, поднят ли сервер этого компьютера, последняя ошибка.
+let lastErrorText = null;
+function writeStatusFile() {
+  const file = process.env.CLAUDE_UI_STATUS_FILE;
+  if (!file || !localServer || !cloud) return;
+  const status = {
+    at: new Date().toISOString(),
+    activeTarget,
+    localWebUrl: localServer.getLocalServerUrl(),
+    account: cloud.getAccount()?.email || null,
+    authState: cloud.getAuthState(),
+    brainsVersion: brains?.getVersion() || null,
+    lastError: lastErrorText,
+  };
+  fs.writeFile(file, JSON.stringify(status, null, 2), 'utf8').catch(() => {});
+}
+
 function syncDesktopState() {
+  writeStatusFile();
   if (!desktopWindow) return;
   desktopWindow.buildAppMenu();
   desktopWindow.emitDesktopState();
@@ -588,6 +610,7 @@ async function openLocalInDesktop() {
   const target = await localServer.getResolvedTarget();
   await ensureLocalLogin(target.url);
   await desktopWindow.showTarget(target);
+  writeStatusFile();
   return getDesktopState();
 }
 

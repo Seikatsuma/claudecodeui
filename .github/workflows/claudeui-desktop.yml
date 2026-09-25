@@ -17,6 +17,7 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
     continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
@@ -64,10 +65,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Проба запуска и снимок экрана
+        timeout-minutes: 10
         shell: bash
-        run: |
-          npm i --no-save --no-package-lock playwright-core@1.55
-          node scripts/release/smoke-claudeui-desktop.mjs
+        run: node scripts/release/smoke-claudeui-desktop.mjs
         env:
           SMOKE_OUT: smoke
           SMOKE_EMAIL: ${{ secrets.CLAUDEUI_SMOKE_EMAIL }}
