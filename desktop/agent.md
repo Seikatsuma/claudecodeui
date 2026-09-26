@@ -49,6 +49,12 @@
 - Проверка из установщиков: macOS 14/15/26 (M), 15 (Intel), Windows Server 2022/2025 (ядра 10/11), Windows 11 ARM.
   На ARM-машине GitHub экран закрыт первичной настройкой Windows — там доказательство по журналу пробы.
 
+## Вид окна и журнал (26.09.26 вечер)
+- Окно одним цветом с интерфейсом, как у Claude Desktop (Егор: «на Mac не с белыми рамками»): страница «Этого
+  компьютера» шлёт свою тему (`claudeui:ui-theme` из preload), main красит верхнюю полосу, кнопки окна Windows и
+  фон (`applyChromeTheme`, цвета `chromeColors` = --background интерфейса), тема запоминается в ui-theme.json.
+- Журнал сервера программы: `<userData>/logs/server.log` (до 5 МБ, потом .old) — первое место при жалобе.
+
 ## Сборка и проверка
 - `.github/workflows/claudeui-desktop.yml` — сборка половин и склейка Mac, установщик Windows, проверка на 7 системах; пуш в
   `desktop-app` или вручную. `scripts/release/build-claudeui-desktop.mjs` кладёт сервер со всеми
