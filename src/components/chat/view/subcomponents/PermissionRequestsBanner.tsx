@@ -140,12 +140,17 @@ function PermissionCard({
         </div>
       </div>
 
-      <ConfirmationActions className="mt-3 flex flex-wrap justify-end gap-2">
-        <ConfirmationAction
-          variant="outline"
-          onClick={() => (explaining ? deny(reason) : setExplaining(true))}
-          title="Claude не сделает этого; можно объяснить, что сделать вместо"
-        >
+      <ConfirmationActions className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        {!explaining && (
+          <button
+            type="button"
+            onClick={() => setExplaining(true)}
+            className="mr-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Запретить и подсказать, что сделать иначе
+          </button>
+        )}
+        <ConfirmationAction variant="outline" onClick={() => deny(reason)} title="Claude не сделает этого">
           Запретить
         </ConfirmationAction>
         {canAlwaysAllow && permissionEntry && (

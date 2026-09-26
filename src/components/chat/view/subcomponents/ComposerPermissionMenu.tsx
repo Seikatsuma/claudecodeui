@@ -103,6 +103,11 @@ export default function ComposerPermissionMenu({
     ? t(`claudeModes.${mode}.description`, { defaultValue: '' })
     : t(`codex.descriptions.${mode}`, { defaultValue: '' })) || undefined;
 
+  // Порядок как в Claude Desktop: от осторожного к смелому, «Без вопросов» — последним.
+  const MODE_ORDER = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'];
+  const orderedModes = [...permissionModes].sort(
+    (a, b) => (MODE_ORDER.indexOf(String(a)) + 1 || 99) - (MODE_ORDER.indexOf(String(b)) + 1 || 99),
+  );
   const activeAppearance = getAppearance(permissionMode);
   const ActiveIcon = activeAppearance.icon;
   const heading = t('composer.permissionHeading', {
@@ -133,7 +138,7 @@ export default function ComposerPermissionMenu({
       {isOpen && anchor && createPortal(
         <ComposerMenuSurface anchor={anchor} menuRef={menuRef} ariaLabel={heading}>
           <ComposerMenuHeading>{heading}</ComposerMenuHeading>
-          {permissionModes.map((mode) => {
+          {orderedModes.map((mode) => {
             const appearance = getAppearance(mode);
             const ModeIcon = appearance.icon;
             return (

@@ -157,8 +157,8 @@
     "tokensUsed": "Израсходовано токенов: {{count}}"
   },
   "providerSelection": {
-    "title": "Выберите вашего AI-ассистента",
-    "description": "Выберите провайдера для начала нового разговора",
+    "title": "Новый чат",
+    "description": "Claude будет работать с файлами этой папки",
     "selectModel": "Выбрать модель",
     "providerInfo": {
       "anthropic": "от Anthropic",

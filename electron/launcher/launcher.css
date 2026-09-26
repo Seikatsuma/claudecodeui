@@ -860,3 +860,10 @@ body.linux .titlebar {
   .tb-refresh { display: none; }
   body.win .titlebar, body.linux .titlebar { padding-right: 138px; }
 }
+
+/* Показать пароль */
+.auth-pass { position: relative; }
+.auth-eye { position: absolute; right: 8px; top: 29px; height: 28px; padding: 0 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--tx2); font: 12px var(--sans); cursor: pointer; }
+.auth-eye:hover { background: var(--s3); color: var(--tx); }
+.auth-pass .auth-i { padding-right: 84px; }

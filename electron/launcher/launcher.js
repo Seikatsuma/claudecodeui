@@ -374,6 +374,7 @@ window.__MOCK_STATE__ = {
   };
 
   CC.statusbar = function (state) {
+    if (!connected(state)) return '';
     var status = CC._status || {};
     var running = !!state.localServerRunning;
     return '<div class="statusbar">' +
@@ -609,7 +610,7 @@ window.__MOCK_STATE__ = {
   var CC = window.CC;
   var bridge = window.cloudcliDesktop;
   // Черновик формы живёт между перерисовками (состояние программы приходит часто).
-  var form = { mode: 'login', name: '', email: '', password: '', error: '', busy: false };
+  var form = { mode: 'login', name: '', email: '', password: '', error: '', busy: false, showPassword: false };
 
   function field(id, label, type, value, hint, autocomplete) {
     return '<label class="auth-f"><span class="auth-l">' + label + '</span>' +
@@ -627,7 +628,10 @@ window.__MOCK_STATE__ = {
       '<form id="auth-form" novalidate>' +
       (isRegister ? field('auth-name', 'Как вас зовут', 'text', form.name, '', 'name') : '') +
       field('auth-email', 'Почта', 'email', form.email, '', 'email') +
-      field('auth-password', 'Пароль', 'password', form.password, isRegister ? 'Не короче 8 знаков' : '', isRegister ? 'new-password' : 'current-password') +
+      '<div class="auth-pass">' +
+      field('auth-password', 'Пароль', form.showPassword ? 'text' : 'password', form.password, isRegister ? 'Не короче 8 знаков' : '', isRegister ? 'new-password' : 'current-password') +
+      '<button type="button" class="auth-eye" data-auth-eye title="' + (form.showPassword ? 'Скрыть пароль' : 'Показать пароль') + '">' + (form.showPassword ? 'Скрыть' : 'Показать') + '</button>' +
+      '</div>' +
       (form.error ? '<div class="auth-err" role="alert">' + CC.esc(form.error) + '</div>' : '') +
       '<button class="btn pri auth-go" type="submit"' + (form.busy ? ' disabled' : '') + '>' +
       (form.busy ? (isRegister ? 'Создаю аккаунт…' : 'Вхожу…') : (isRegister ? 'Создать аккаунт' : 'Войти')) + '</button>' +
@@ -719,6 +723,15 @@ window.__MOCK_STATE__ = {
   }
 
   function onClick(event) {
+    var eye = event.target.closest('[data-auth-eye]');
+    if (eye) {
+      readForm();
+      form.showPassword = !form.showPassword;
+      CC.render(CC.state);
+      var input = document.getElementById('auth-password');
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      return true;
+    }
     var mode = event.target.closest('[data-auth-mode]');
     if (mode) {
       readForm();
