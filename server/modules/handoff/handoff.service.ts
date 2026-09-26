@@ -47,7 +47,8 @@
  *   пересказом не переносятся (перенос 23.09 потерял промпт).
  */
 import fs from 'node:fs';
-import { mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, open as openFile, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -216,12 +217,16 @@ function stripInventory(text: string): string {
  * там не место. Убираются ссылки входа с токеном, ключи API вида sk-…/ghp_…,
  * «Bearer …» и JWT; линии «---» между разделами — шум.
  */
-function scrubBrief(text: string): string {
+export function scrubSecrets(text: string): string {
   return text
     .replace(/(https?:\/\/[^\s`)]*\/(?:enter|invite|login|auth)\/)[A-Za-z0-9_-]{12,}/g, '$1[скрыто]')
     .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abpr]-[A-Za-z0-9-]{10,})/g, '[ключ скрыт]')
     .replace(/\bBearer\s+[A-Za-z0-9._-]{20,}/g, 'Bearer [скрыто]')
-    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[токен скрыт]')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[токен скрыт]');
+}
+
+function scrubBrief(text: string): string {
+  return scrubSecrets(text)
     .replace(/^\s*-{3,}\s*$/gm, '')
     // Модель иногда переписывает подсказку из задания в заголовок:
     // «## Не сработало — что пробовали…» → «## Не сработало».
@@ -535,6 +540,8 @@ type Prepared = {
   step: number;
   transcriptPath: string;
   bytes: number;
+  /** Отпечаток последних байт до `bytes`: откат чата («Вернуться») обрезает файл — заготовка по отменённой ветке не годится. */
+  fingerprint: string;
   brief?: string;
   changedFiles: string[];
   startedAt: number;
@@ -543,6 +550,35 @@ type Prepared = {
 };
 
 const prepared = new Map<string, Prepared>();
+
+/** Последние 4 КБ перед границей — по ним видно, что файл до этого места не менялся. */
+export async function tailFingerprint(filePath: string, bytes: number): Promise<string> {
+  const from = Math.max(0, bytes - 4096);
+  const handle = await openFile(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(bytes - from);
+    await handle.read(buffer, 0, buffer.length, from);
+    return createHash('sha1').update(buffer).digest('hex');
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Заготовка собрана по той же ветке разговора, что лежит в файле сейчас. */
+async function preparedStillValid(item: Prepared, transcriptPath: string): Promise<boolean> {
+  return item.transcriptPath === transcriptPath && transcriptUnchangedUpTo(transcriptPath, item.bytes, item.fingerprint);
+}
+
+/** Файл до `bytes` тот же, что при заготовке: не урезан и не переписан (выставлено для тестов). */
+export async function transcriptUnchangedUpTo(filePath: string, bytes: number, fingerprint: string): Promise<boolean> {
+  try {
+    const { size } = await stat(filePath);
+    if (size < bytes) return false;
+    return (await tailFingerprint(filePath, bytes)) === fingerprint;
+  } catch {
+    return false;
+  }
+}
 
 function runningPrepares(): number {
   let count = 0;
@@ -565,19 +601,21 @@ export async function prepareHandoff(
   const source = await resolveSource(sessionId);
   const key = jobKey(source.accountDir, sessionId);
   const existing = prepared.get(key);
-  if (existing && existing.transcriptPath === source.transcriptPath && existing.status !== 'error' && existing.step >= step) {
-    return { status: existing.status === 'done' ? 'done' : 'running' };
-  }
   if (existing?.status === 'running') return { status: 'running' };
+  if (existing && existing.status === 'done' && existing.step >= step && await preparedStillValid(existing, source.transcriptPath)) {
+    return { status: 'done' };
+  }
   if (runningPrepares() >= PREPARE_CONCURRENCY) return { status: 'busy' };
 
   const bytes = await transcriptLineBoundary(source.transcriptPath);
+  const fingerprint = await tailFingerprint(source.transcriptPath, bytes);
   let settle!: () => void;
   const item: Prepared = {
     status: 'running',
     step,
     transcriptPath: source.transcriptPath,
     bytes,
+    fingerprint,
     changedFiles: [],
     startedAt: Date.now(),
     settled: new Promise<void>((resolve) => { settle = resolve; }),
@@ -648,12 +686,14 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
       let parts: ComposeParts | null = null;
       if (ready && ready.transcriptPath === source.transcriptPath && ready.status !== 'error') {
         await ready.settled;
-        if (ready.status === 'done' && ready.brief) {
+        if (ready.status === 'done' && ready.brief && await preparedStillValid(ready, source.transcriptPath)) {
           const end = await transcriptLineBoundary(source.transcriptPath);
           const tail = await digestTranscriptFile(source.transcriptPath, source.providerSessionId, { start: ready.bytes, end });
           if (tail.text.length <= TAIL_REBUILD_CHARS) {
             const changed = [...tail.changedFiles, ...ready.changedFiles.filter((file) => !tail.changedFiles.includes(file))];
-            parts = { brief: ready.brief, changedFiles: changed.slice(0, 40), tail: clipTail(tail.text), dialogPath, goal };
+            // Хвост — дословная переписка: ключи и ссылки входа скрываются так же,
+            // как в тексте модели (первое сообщение видно на экране и лежит в файле).
+            parts = { brief: ready.brief, changedFiles: changed.slice(0, 40), tail: scrubSecrets(clipTail(tail.text)), dialogPath, goal };
             job.fromPrepared = true;
           }
         }

@@ -11,7 +11,7 @@ import {
   exportDialogFile,
   transcriptLineBoundary,
 } from '@/modules/handoff/handoff-digest.js';
-import { writeBrief } from '@/modules/handoff/handoff.service.js';
+import { scrubSecrets, tailFingerprint, transcriptUnchangedUpTo, writeBrief } from '@/modules/handoff/handoff.service.js';
 
 const SID = '11111111-2222-3333-4444-555555555555';
 const line = (entry: Record<string, unknown>) => JSON.stringify({ sessionId: SID, timestamp: '2026-09-23T10:00:00Z', ...entry });
@@ -149,4 +149,26 @@ test('файл разговора: ответы целиком, без дейс�
   assert.match(text, /Человек\n\nСделай промпт/);
   assert.ok(text.includes(long), 'длинный ответ — целиком, без обрезки');
   assert.doesNotMatch(text, /черновик|вывод команды|служебное|ls/);
+});
+
+test('дословный хвост: ключи и ссылки входа скрыты', () => {
+  const text = scrubSecrets('ЧЕЛОВЕК: вот https://cc.example.ru/enter/nMsKcj_ooYAWE4bhfdzm8A и sk-ant-abcdefghijklmnopqrstuv');
+  assert.doesNotMatch(text, /nMsKcj|abcdefghijkl/);
+  assert.match(text, /enter\/\[скрыто\]/);
+});
+
+test('откат чата после заготовки делает её недействительной', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const a = `${line({ type: 'user', message: { content: 'ветка А' } })}\n`;
+  const b = `${line({ type: 'user', message: { content: 'ответ по ветке А' } })}\n`;
+  await writeFile(file, a + b);
+  const bytes = await transcriptLineBoundary(file);
+  const fingerprint = await tailFingerprint(file, bytes);
+  await writeFile(file, `${a + b}${line({ type: 'user', message: { content: 'дальше' } })}\n`);
+  assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), true, 'дописан — заготовка годна');
+  await writeFile(file, a);
+  assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), false, 'урезан — негодна');
+  await writeFile(file, a + `${line({ type: 'user', message: { content: 'ветка Б, другой текст той же длины!!' } })}\n`.padEnd(b.length + 10, ' '));
+  assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), false, 'переписан после отката — негодна');
 });

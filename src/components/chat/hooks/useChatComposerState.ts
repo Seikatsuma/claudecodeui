@@ -58,7 +58,7 @@ let handoffPolling = false;
 const preparedHandoffSteps = new Map<string, number>();
 
 /** Начатая задача переноса — в браузере, чтобы пережить выгрузку вкладки. */
-type HandoffJobRecord = { sessionId: string; projectId: string; startedAt: number };
+type HandoffJobRecord = { sessionId: string; projectId: string; startedAt: number; goal?: string };
 const HANDOFF_JOB_KEY = 'handoff_job';
 /** Сервер хранит задачу 30 минут после конца; дольше ждать нечего. */
 const HANDOFF_JOB_MAX_AGE_MS = 30 * 60 * 1000;
@@ -1406,7 +1406,7 @@ export function useChatComposerState({
     handoffPolling = true;
     setHandoffStatus('running');
     if (!resume) {
-      writeHandoffJob({ sessionId: sourceSessionId, projectId: sourceProject.projectId, startedAt: Date.now() });
+      writeHandoffJob({ sessionId: sourceSessionId, projectId: sourceProject.projectId, startedAt: Date.now(), goal: goal || undefined });
     }
     const fail = (message: string) => {
       clearHandoffJob();
@@ -1482,7 +1482,13 @@ export function useChatComposerState({
   useEffect(() => {
     if (!canHandoff || !sessionKey || handoffPrepareStep === 0) return;
     if ((preparedHandoffSteps.get(sessionKey) ?? 0) >= handoffPrepareStep) return;
+    preparedHandoffSteps.delete(sessionKey);
     preparedHandoffSteps.set(sessionKey, handoffPrepareStep);
+    // Вкладка живёт неделями (приложение на телефоне) — помним последние 200 чатов.
+    if (preparedHandoffSteps.size > 200) {
+      const oldest = preparedHandoffSteps.keys().next().value;
+      if (oldest) preparedHandoffSteps.delete(oldest);
+    }
     void authenticatedFetch(`/api/handoff/${encodeURIComponent(sessionKey)}/prepare`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1501,7 +1507,8 @@ export function useChatComposerState({
       if (document.visibilityState !== 'visible' || handoffPolling) return;
       const job = readHandoffJob();
       if (!job || !selectedProject || selectedProject.projectId !== job.projectId) return;
-      void runHandoff(selectedProject, job.sessionId, true);
+      // Задача из поля хранится вместе с записью — при сбое вернётся в поле.
+      void runHandoff(selectedProject, job.sessionId, true, job.goal ?? '');
     };
     resume();
     document.addEventListener('visibilitychange', resume);
