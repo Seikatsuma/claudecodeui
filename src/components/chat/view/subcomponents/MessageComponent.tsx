@@ -18,6 +18,7 @@ import ChatMessageImages from './ChatMessageImages';
 import ChatMessageFiles from './ChatMessageFiles';
 import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
+import MessageRewindControl from './MessageRewindControl';
 import MessageSpeakControl from './MessageSpeakControl';
 
 type DiffLine = {
@@ -35,6 +36,11 @@ type MessageComponentProps = {
   onGrantToolPermission?: (suggestion: ClaudePermissionSuggestion) => PermissionGrantResult | null | undefined;
   showRawParameters?: boolean;
   showThinking?: boolean;
+  /**
+   * «Вернуться сюда»: убрать это сообщение и всё после него, текст — в поле
+   * ввода. Нет обработчика — нет и кнопки (другие провайдеры, архив).
+   */
+  onRewindToMessage?: (message: ChatMessage) => void;
   selectedProject?: Project | null;
   provider: Provider | string;
 };
@@ -61,7 +67,7 @@ function toRequestLabel(content: string): string | undefined {
   return cleaned ? cleaned.slice(0, 300) : undefined;
 }
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, onRewindToMessage, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
 
   /*
@@ -176,6 +182,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                   </Markdown>
                 </div>
                 <div className="mt-1 flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                  {onRewindToMessage && (
+                    <MessageRewindControl onRewind={() => onRewindToMessage(message)} />
+                  )}
                   {shouldShowUserCopyControl && (
                     <MessageCopyControl content={userCopyContent} messageType="user" />
                   )}

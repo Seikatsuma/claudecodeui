@@ -6,12 +6,13 @@ import type { SessionActivity } from '../../../hooks/useSessionProtection';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
 import PermissionContext from '../../../contexts/PermissionContext';
-import type { ChatInterfaceProps, PermissionMode, Provider  } from '../types/types';
+import type { ChatInterfaceProps, ChatMessage, PermissionMode, Provider  } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useSessionStore } from '../../../stores/useSessionStore';
+import { authenticatedFetch } from '../../../utils/api';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatRequestBar from './subcomponents/ChatRequestBar';
@@ -437,6 +438,59 @@ function ChatInterface({
 
   // A composer pick becomes the default for new chats and, when a session is
   // open, is recorded against that session so reopening it restores this model.
+  // «Вернуться сюда» под своим сообщением: сервер останавливает ход, убирает
+  // из разговора это сообщение и всё после него (полная копия остаётся рядом
+  // с файлом разговора), а текст возвращается в поле ввода — поправить и
+  // отправить заново. Как «rewind» в Claude Code.
+  const rewindSessionId = currentSessionId || selectedSession?.id || null;
+  const handleRewindToMessage = useCallback(async (message: ChatMessage) => {
+    const sessionId = rewindSessionId;
+    if (!sessionId) return;
+    const confirmed = window.confirm(
+      'Вернуться к этому сообщению?\n\n'
+      + 'Оно и всё, что было после него, уберётся из чата; если агент сейчас работает — он остановится. '
+      + 'Текст сообщения вернётся в поле ввода: поправьте и отправьте заново.\n\n'
+      + 'Изменения в файлах, которые агент уже успел сделать, не откатываются.',
+    );
+    if (!confirmed) return;
+
+    try {
+      const response = await authenticatedFetch(
+        `/api/providers/sessions/${encodeURIComponent(sessionId)}/rewind`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messageId: typeof message.sourceId === 'string' ? message.sourceId : null,
+            text: typeof message.content === 'string' ? message.content : null,
+          }),
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) {
+        window.alert(payload?.error?.message || 'Не получилось вернуться к сообщению. Попробуйте ещё раз.');
+        return;
+      }
+
+      const data = payload.data as { text?: string; queuedTexts?: string[] };
+      // Лента — заново с сервера: живые строки отменённого хода и его поток
+      // иначе остались бы на экране.
+      sessionStore.clearRealtime(sessionId);
+      resetStreamingState();
+      retryHistoryLoad();
+
+      const draft = [data.text ?? '', ...(data.queuedTexts ?? [])]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join('\n\n');
+      setInput(draft);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    } catch (error) {
+      console.error('Rewind to message failed:', error);
+      window.alert('Не получилось вернуться к сообщению: нет связи с сервером. Попробуйте ещё раз.');
+    }
+  }, [rewindSessionId, sessionStore, resetStreamingState, retryHistoryLoad, setInput, textareaRef]);
+
   const handleSelectComposerModel = useCallback(async (model: string) => {
     try {
       await selectProviderModel(provider, model, currentSessionId || selectedSession?.id || null);
@@ -536,6 +590,7 @@ function ChatInterface({
           onGrantToolPermission={handleGrantToolPermission}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
+          onRewindToMessage={provider === 'claude' && rewindSessionId ? handleRewindToMessage : undefined}
           selectedProject={selectedProject}
         />
 
