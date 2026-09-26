@@ -321,6 +321,32 @@ const markdownComponents = {
    */
   p: ({ children }: { children?: React.ReactNode }) => {
     const kids = React.Children.toArray(children);
+    /*
+     * «**Как я понял задачу**» и сразу под ней текст (одна строка переноса) —
+     * это название блока, но разметка видит один абзац с жирным началом, и
+     * название выходило размером с текст (снимок Егора 27.09). Короткую жирную
+     * первую строку, за которой идёт перенос, рисуем заголовком того же
+     * размера, что `##`. Жирное слово внутри строки не трогаем.
+     */
+    const head = kids[0];
+    const brk = kids[1];
+    if (
+      kids.length > 2 &&
+      React.isValidElement(head) && (head as React.ReactElement).type === 'strong' &&
+      React.isValidElement(brk) && (brk as React.ReactElement).type === 'br'
+    ) {
+      const title = childrenToText((head as React.ReactElement<{ children?: React.ReactNode }>).props.children);
+      if (title.length > 0 && title.length <= 60) {
+        const rest = kids.slice(2);
+        if (typeof rest[0] === 'string') rest[0] = (rest[0] as string).replace(/^\n/, '');
+        return (
+          <>
+            <h3 className="mb-2 mt-5 text-[18px] font-bold leading-snug text-foreground first:mt-0">{title}</h3>
+            <div className="mb-2.5 last:mb-0">{rest}</div>
+          </>
+        );
+      }
+    }
     const isSubheading =
       kids.length === 1 && React.isValidElement(kids[0]) && (kids[0] as React.ReactElement).type === 'strong';
     return <div className={`mb-2.5 last:mb-0${isSubheading ? ' md-subheading' : ''}`}>{children}</div>;
