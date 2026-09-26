@@ -87,7 +87,7 @@ function PermissionCard({
   });
 
   return (
-    <Confirmation approval="pending" className={info.danger ? 'border-red-400/60' : undefined}>
+    <Confirmation approval="pending" className={`items-stretch ${info.danger ? 'border-red-400/60' : ''}`}>
       <div className="flex items-start gap-3">
         <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${info.danger ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-primary/10 text-primary'}`}>
           <Icon className="h-4 w-4" />
