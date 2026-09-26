@@ -21,7 +21,9 @@
  *   неё (ровно то, что агент чата сейчас «помнит»), а из части до неё — только
  *   сообщения человека: сводки сжатия теряют поправки чаще всего остального.
  */
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, open, stat } from 'node:fs/promises';
+import path from 'node:path';
 import readline from 'node:readline';
 
 import { isTranscriptServiceText, stripInjectedContext } from '@/shared/utils.js';
@@ -244,10 +246,104 @@ function createDigestBuilder(providerSessionId: string | null) {
   return { add, finish };
 }
 
+/** Кусок файла переписки в байтах: `start` — с начала строки, `end` — не включая. */
+export type TranscriptRange = { start?: number; end?: number };
+
 /** Читает файл переписки построчно (файлы бывают по сотне мегабайт) и разбирает его. */
-export async function digestTranscriptFile(filePath: string, providerSessionId: string | null): Promise<TranscriptDigest> {
+export async function digestTranscriptFile(
+  filePath: string,
+  providerSessionId: string | null,
+  range: TranscriptRange = {},
+): Promise<TranscriptDigest> {
   const builder = createDigestBuilder(providerSessionId);
-  const reader = readline.createInterface({ input: createReadStream(filePath, { encoding: 'utf8' }), crlfDelay: Infinity });
+  const { start = 0, end } = range;
+  if (end !== undefined && end <= start) return builder.finish();
+  const input = createReadStream(filePath, { encoding: 'utf8', start, ...(end !== undefined ? { end: end - 1 } : {}) });
+  const reader = readline.createInterface({ input, crlfDelay: Infinity });
   for await (const line of reader) builder.add(line);
   return builder.finish();
+}
+
+/**
+ * Граница последней ЦЕЛОЙ строки файла: байт сразу после последнего перевода
+ * строки. Чат пишет в файл прямо сейчас, последняя строка может быть
+ * недописана — её дочитает следующий кусок, а не потеряет этот.
+ */
+export async function transcriptLineBoundary(filePath: string): Promise<number> {
+  const handle = await open(filePath, 'r');
+  try {
+    const { size } = await handle.stat();
+    const window = 256 * 1024;
+    for (let to = size; to > 0; to -= window) {
+      const from = Math.max(0, to - window);
+      const buffer = Buffer.alloc(to - from);
+      await handle.read(buffer, 0, buffer.length, from);
+      const lastNewline = buffer.lastIndexOf(0x0a);
+      if (lastNewline >= 0) return from + lastNewline + 1;
+    }
+    return 0;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Весь разговор чата текстом — слова человека и ответы агента ЦЕЛИКОМ, без
+ * размышлений и вывода инструментов. Кладётся файлом рядом с выжимкой.
+ *
+ * Зачем (разбор 26.09.26): выжимка пересказывает, а готовые тексты —
+ * промпт, письмо, список — пересказом не переносятся. В переносе 23.09 новый
+ * чат сам сказал: «промпт целиком остался только в прошлом чате». Сырой файл
+ * переписки для этого не годится: десятки мегабайт служебных записей, в них
+ * не найти нужный ответ. Здесь — только разговор, по порядку, со временем.
+ */
+export async function exportDialogFile(
+  filePath: string,
+  providerSessionId: string | null,
+  outPath: string,
+  title: string,
+): Promise<void> {
+  await mkdir(path.dirname(outPath), { recursive: true });
+  const out = createWriteStream(outPath, { encoding: 'utf8' });
+  const write = (text: string) => new Promise<void>((resolve, reject) => {
+    out.write(text, (error) => (error ? reject(error) : resolve()));
+  });
+  try {
+    await write(`# Разговор чата «${title}» — слова человека и ответы агента целиком\n\n`);
+    const reader = readline.createInterface({ input: createReadStream(filePath, { encoding: 'utf8' }), crlfDelay: Infinity });
+    for await (const line of reader) {
+      if (!line.trim()) continue;
+      let entry: AnyRecord;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (providerSessionId && entry.sessionId && entry.sessionId !== providerSessionId) continue;
+      if (entry.isSidechain || entry.isMeta || entry.isCompactSummary) continue;
+      const at = typeof entry.timestamp === 'string' ? entry.timestamp : null;
+      const content = entry.message?.content;
+      if (entry.type === 'user') {
+        if (entry.toolUseResult !== undefined || (Array.isArray(content) && content.some((p: AnyRecord) => p?.type === 'tool_result'))) continue;
+        const raw = textOfContent(content).trim();
+        if (isTranscriptServiceText(raw)) continue;
+        const text = stripInjectedContext(raw);
+        if (!text) continue;
+        await write(`## ${formatTime(at)}Человек\n\n${text}\n\n`);
+      } else if (entry.type === 'assistant' && Array.isArray(content)) {
+        const text = content
+          .filter((block: AnyRecord) => block?.type === 'text' && typeof block.text === 'string' && block.text.trim())
+          .map((block: AnyRecord) => block.text.trim())
+          .join('\n\n');
+        if (text) await write(`## ${formatTime(at)}Агент\n\n${text}\n\n`);
+      }
+    }
+  } finally {
+    await new Promise<void>((resolve) => out.end(() => resolve()));
+  }
+}
+
+/** Размер файла переписки — сколько байт уже разобрано заготовкой. */
+export async function transcriptSize(filePath: string): Promise<number> {
+  return (await stat(filePath)).size;
 }

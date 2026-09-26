@@ -8,7 +8,7 @@
  */
 import express from 'express';
 
-import { getHandoff, HandoffError, startHandoff, type HandoffJob } from '@/modules/handoff/handoff.service.js';
+import { getHandoff, HandoffError, prepareHandoff, startHandoff, type HandoffJob } from '@/modules/handoff/handoff.service.js';
 
 const router = express.Router();
 
@@ -20,17 +20,40 @@ function present(job: HandoffJob) {
     error: job.status === 'error' ? job.error : undefined,
     projectPath: job.projectPath ?? null,
     elapsedMs: (job.finishedAt ?? Date.now()) - job.startedAt,
+    fromPrepared: Boolean(job.fromPrepared),
   };
 }
 
+/** Сколько POST ждёт готовности: из заготовки выжимка собирается за секунду — сразу и отдаём. */
+const QUICK_WAIT_MS = 2500;
+
 router.post('/:sessionId', async (req, res) => {
   try {
-    const job = await startHandoff(String(req.params.sessionId));
-    return res.status(202).json(present(job));
+    const job = await startHandoff(String(req.params.sessionId), undefined, req.body?.goal);
+    if (job.status === 'running' && job.settled) {
+      await Promise.race([job.settled, new Promise((resolve) => setTimeout(resolve, QUICK_WAIT_MS))]);
+    }
+    return res.status(job.status === 'running' ? 202 : 200).json(present(job));
   } catch (error) {
     if (error instanceof HandoffError) return res.status(error.status).json({ error: error.message });
     console.error('[handoff] не удалось начать перенос:', error);
     return res.status(500).json({ error: 'не удалось начать перенос' });
+  }
+});
+
+/**
+ * Заготовка выжимки фоном: вкладка зовёт, когда чат переходит на новый
+ * десяток процентов окна, начиная с половины (кнопка в этот момент желтеет).
+ */
+router.post('/:sessionId/prepare', async (req, res) => {
+  try {
+    const step = Math.max(0, Math.min(10, Math.floor(Number(req.body?.step) || 0)));
+    const result = await prepareHandoff(String(req.params.sessionId), step);
+    return res.status(202).json({ success: true, ...result });
+  } catch (error) {
+    if (error instanceof HandoffError) return res.status(error.status).json({ error: error.message });
+    console.error('[handoff] не удалось начать заготовку:', error);
+    return res.status(500).json({ error: 'не удалось начать заготовку' });
   }
 });
 

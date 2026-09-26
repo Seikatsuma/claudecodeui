@@ -36,6 +36,7 @@ import ComposerAttachment from './ComposerAttachment';
 import VoiceInputButton from './VoiceInputButton';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import TokenUsageSummary from './TokenUsageSummary';
+import { contextLevel } from '../../utils/contextLevel';
 import MessageQueueDock from './MessageQueueDock';
 import ComposerModelMenu from './ComposerModelMenu';
 import ComposerPermissionMenu from './ComposerPermissionMenu';
@@ -190,6 +191,21 @@ export default function ChatComposer({
   sendByCtrlEnter,
 }: ChatComposerProps) {
   const handoffRunning = handoffStatus === 'running';
+  const handoffLevel = contextLevel(tokenBudget);
+  const handoffTooltip = handoffRunning
+    ? 'Собираю главное для нового чата…'
+    : handoffLevel === 'red'
+      ? 'Чат переполнен — пора продолжить в новом. Можно сначала написать в поле, что делать дальше'
+      : handoffLevel === 'yellow'
+        ? 'Чат большой — лучше продолжить в новом. Можно сначала написать в поле, что делать дальше'
+        : 'Продолжить в новом чате — перенести главное. Можно сначала написать в поле, что делать дальше';
+  const handoffClassName = handoffRunning
+    ? 'text-primary'
+    : handoffLevel === 'red'
+      ? 'bg-red-500/15 text-red-600 hover:bg-red-500/25 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300'
+      : handoffLevel === 'yellow'
+        ? 'bg-amber-400/15 text-amber-600 hover:bg-amber-400/25 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
+        : 'text-muted-foreground/60 hover:text-foreground';
   const { t } = useTranslation('chat');
   const fileDropdownRef = useRef<HTMLDivElement | null>(null);
   const selectedFileRef = useRef<HTMLDivElement | null>(null);
@@ -491,14 +507,18 @@ export default function ChatComposer({
 
             {/* «Продолжить в новом чате» — рядом со счётчиком контекста, как у
                 Cursor: счётчик показывает, что чат разросся, кнопка рядом
-                переносит главное в новый чат. Бледная, пока не нужна. */}
+                переносит главное в новый чат. Бледная, пока не нужна; с
+                половины окна — неярко-жёлтая («скорее всего пора»), с 70% —
+                красная («точно пора»). Других оповещений о размере чата на
+                сайте нет — Егор 27.09.26: «лишних не нужно». */}
             {onStartHandoff && (
               <PromptInputButton
-                tooltip={{ content: handoffRunning ? 'Собираю главное для нового чата…' : 'Продолжить в новом чате — перенести главное' }}
+                tooltip={{ content: handoffTooltip }}
                 onClick={handoffRunning ? undefined : onStartHandoff}
-                aria-label="Продолжить в новом чате"
+                aria-label={handoffTooltip}
                 aria-busy={handoffRunning}
-                className={handoffRunning ? 'text-primary' : 'text-muted-foreground/60 hover:text-foreground'}
+                data-context-level={handoffLevel}
+                className={handoffClassName}
               >
                 {handoffRunning ? <Loader2 className="animate-spin" /> : <MessageSquareShare />}
               </PromptInputButton>
