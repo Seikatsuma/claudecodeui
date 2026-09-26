@@ -45,7 +45,7 @@ function DiffPreview({ removed, added }: { removed?: string; added?: string }) {
     </div>
   ));
   return (
-    <div className={`mt-2 overflow-auto rounded-md border border-border/60 bg-muted/30 py-1 font-mono text-xs leading-5 ${PREVIEW_MAX}`}>
+    <div className={`mt-2 w-full overflow-auto rounded-md border border-border/60 bg-muted/30 py-1 font-mono text-xs leading-5 ${PREVIEW_MAX}`}>
       {removed && lines(removed, '−', 'bg-red-500/10 text-red-700 dark:text-red-300')}
       {added && lines(added, '+', 'bg-green-500/10 text-green-700 dark:text-green-300')}
     </div>
@@ -68,6 +68,13 @@ function PermissionCard({
   const permissionEntry = buildClaudeToolPermissionEntry(request.toolName, rawInput);
   const settings = getClaudeSettings();
   const alreadyAllowed = permissionEntry ? settings.allowedTools.includes(permissionEntry) : false;
+  // «Разрешать всегда» сохраняет правило по началу команды (Bash(cd:*)). Для
+  // составной команды («cd папка && rm файл») такое правило пропускало бы всё,
+  // что начинается с cd, — поэтому только для простой и не опасной команды.
+  const compoundCommand = info.kind === 'command' && /&&|\|\||;|\||`|\$\(/.test(info.code || '');
+  const canAlwaysAllow = Boolean(permissionEntry) && !info.danger && !compoundCommand;
+  const rulePrefix = permissionEntry?.match(/^Bash\((.+?)(?::\*)?\)$/)?.[1];
+  const alwaysLabel = rulePrefix ? `Не спрашивать про «${rulePrefix}»` : info.alwaysLabel;
   const matchingRequestIds = permissionEntry
     ? pendingPermissionRequests
         .filter((item) => buildClaudeToolPermissionEntry(item.toolName, formatToolInputForDisplay(item.input)) === permissionEntry)
@@ -141,16 +148,16 @@ function PermissionCard({
         >
           Запретить
         </ConfirmationAction>
-        {permissionEntry && (
+        {canAlwaysAllow && permissionEntry && (
           <ConfirmationAction
             variant="outline"
-            title={`Больше не спрашивать про такие действия в этой программе (правило ${permissionEntry}). Убрать — в настройках.`}
+            title={`Больше не спрашивать про такие действия (правило ${permissionEntry}). Убрать — «Настройки» → «Агенты» → Claude → «Разрешения».`}
             onClick={() => {
               if (!alreadyAllowed) handleGrantToolPermission({ entry: permissionEntry, toolName: request.toolName });
               handlePermissionDecision(matchingRequestIds, { allow: true, rememberEntry: permissionEntry });
             }}
           >
-            {alreadyAllowed ? 'Разрешено всегда' : info.alwaysLabel}
+            {alreadyAllowed ? 'Разрешено всегда' : alwaysLabel}
           </ConfirmationAction>
         )}
         <ConfirmationAction variant="default" onClick={() => handlePermissionDecision(request.requestId, { allow: true })}>

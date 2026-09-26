@@ -13,8 +13,8 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
     {
       value: 'default',
-      label: 'Default (recommended)',
-      description: 'Use the recommended model for your Claude account and deployment.',
+      label: 'По умолчанию (рекомендуется)',
+      description: 'Модель, которую Claude советует для вашей подписки.',
       effort: {
         default: 'high',
         values: [
@@ -27,7 +27,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
     },
     {
       value: 'best',
-      label: 'Best available',
+      label: 'Лучшая доступная',
       description: 'Use Fable 5 when available, otherwise the latest Opus model.',
       effort: {
         default: 'high',

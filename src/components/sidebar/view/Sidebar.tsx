@@ -224,8 +224,13 @@ function Sidebar({
     document.body.classList.toggle('pwa-mode', isPWA);
   }, [isPWA]);
 
-  const handleProjectCreated = () => {
-    void paletteOps.refreshProjects();
+  // Как «Открыть папку» в Claude Desktop: после выбора папки сразу новый чат в ней.
+  const handleProjectCreated = (project?: Record<string, unknown>) => {
+    void Promise.resolve(paletteOps.refreshProjects()).then(() => {
+      if (project && typeof project.projectId === 'string') {
+        onNewSession(project as unknown as Project);
+      }
+    });
   };
 
   const projectListProps: SidebarProjectListProps = {

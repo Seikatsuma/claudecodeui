@@ -42,6 +42,15 @@ const DESTRUCTIVE = [
   [/\bfind\b[^|;]*\s-delete\b/, 'find -delete'],
 ];
 
+// Названия режимов так, как их видит человек в поле ввода.
+const MODE_NAMES = {
+  default: 'Спрашивать',
+  acceptEdits: 'Правки сам',
+  plan: 'Сначала план',
+  auto: 'Авто',
+  bypassPermissions: 'Без вопросов',
+};
+
 let cached = { dir: null, stamp: null, value: null };
 
 function readText(file) {
@@ -147,10 +156,11 @@ export function applyDesktopBrains(sdkOptions) {
       {
         hooks: [async (input) => {
           if (!shouldAddProtocol(input?.prompt)) return {};
+          const mode = MODE_NAMES[input?.permission_mode] || input?.permission_mode || 'неизвестен';
           return {
             hookSpecificOutput: {
               hookEventName: 'UserPromptSubmit',
-              additionalContext: brains.protocol,
+              additionalContext: `Режим разрешений сейчас: «${mode}».\n${brains.protocol}`,
             },
           };
         }],

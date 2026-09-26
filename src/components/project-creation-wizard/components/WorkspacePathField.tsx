@@ -96,7 +96,7 @@ export default function WorkspacePathField({
           type="button"
           onClick={() => void pickWithSystemDialog()}
           disabled={disabled}
-          className="flex w-full items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-4 text-left transition-colors hover:border-primary/60 hover:bg-primary/5 disabled:opacity-60"
+          className={`flex w-full items-center gap-3 rounded-xl border px-4 py-4 text-left transition-colors disabled:opacity-60 ${value ? 'border-border bg-muted/30 hover:border-primary/60' : 'border-dashed border-primary/50 bg-primary/5 hover:bg-primary/10'}`}
         >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <FolderOpen className="h-5 w-5" />
