@@ -29,14 +29,41 @@ await fs.rm(staging, { recursive: true, force: true });
 await fs.mkdir(staging, { recursive: true });
 const outAppPath = path.join(staging, 'Claude UI.app');
 
+// Пакеты с отдельными папками под каждый процессор (Claude, Codex, нативные
+// модули в bin/darwin-<процессор>-…) в каждой половине есть только «свои».
+// Дополняем половины друг другом, чтобы набор файлов совпал: такие файлы
+// одинаковы в обеих и берутся как есть, а не склеиваются.
+async function listFiles(root, rel = '') {
+  const out = [];
+  for (const entry of await fs.readdir(path.join(root, rel), { withFileTypes: true })) {
+    const child = path.join(rel, entry.name);
+    if (entry.isDirectory()) out.push(...await listFiles(root, child));
+    else out.push(child);
+  }
+  return out;
+}
+const nodeModules = (app) => path.join(path.resolve(app), 'Contents', 'Resources', 'app', 'node_modules');
+const x64Files = new Set(await listFiles(nodeModules(x64AppPath)));
+const armFiles = new Set(await listFiles(nodeModules(arm64AppPath)));
+let synced = 0;
+for (const [from, to, fromSet, toSet] of [[x64AppPath, arm64AppPath, x64Files, armFiles], [arm64AppPath, x64AppPath, armFiles, x64Files]]) {
+  for (const rel of fromSet) {
+    if (toSet.has(rel)) continue;
+    const target = path.join(nodeModules(to), rel);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.cp(path.join(nodeModules(from), rel), target, { preserveTimestamps: true });
+    synced += 1;
+  }
+}
+console.log(`половины дополнены друг другом: ${synced} файлов`);
+
 await makeUniversalApp({
   x64AppPath: path.resolve(x64AppPath),
   arm64AppPath: path.resolve(arm64AppPath),
   outAppPath,
   force: true,
-  // Claude для каждого процессора лежит в обеих половинах своей папкой —
-  // такие файлы берутся как есть, а не склеиваются.
-  x64ArchFiles: '**/node_modules/@anthropic-ai/claude-agent-sdk-darwin-*/**',
+  // Файлы под один процессор (лежат в обеих половинах одинаковыми) — как есть.
+  x64ArchFiles: '**/*{darwin-x64,darwin-arm64,x86_64-apple-darwin,aarch64-apple-darwin}*/**',
 });
 
 // Подпись «для себя»: без неё Mac на M-процессоре не откроет программу.
