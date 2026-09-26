@@ -56,6 +56,20 @@ export type RewindResult = {
 
 /** Текст реплики человека; `null` — это не реплика (результат действия, служебное). */
 function userText(record: JsonlRecord): string | null {
+  // Сообщение, отправленное, пока агент работал, лежит не строкой `user`, а
+  // вставкой `queued_command` (так же его читает лента, claude-sessions.provider).
+  if (record?.type === 'attachment' && record.attachment?.type === 'queued_command') {
+    const attachment = record.attachment;
+    if (attachment.commandMode && attachment.commandMode !== 'prompt') return null;
+    if (typeof attachment.prompt === 'string') return attachment.prompt;
+    if (Array.isArray(attachment.prompt)) {
+      return attachment.prompt
+        .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
+        .map((part: any) => part.text as string)
+        .join('\n');
+    }
+    return null;
+  }
   if (record?.type !== 'user' || record.isMeta === true || record.isSidechain === true) return null;
   const content = record.message?.content;
   if (typeof content === 'string') return content;
@@ -110,7 +124,7 @@ async function locateTarget(
     offset += Buffer.byteLength(line, 'utf8') + 1;
     const index = lineIndex;
     lineIndex += 1;
-    if (byUuid || !line.includes('"user"')) continue;
+    if (byUuid || !(line.includes('"user"') || line.includes('"queued_command"'))) continue;
 
     let record: JsonlRecord;
     try {
@@ -141,7 +155,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * ещё долю секунды дописывает хвост, и дописанное после обрезки вернуло бы в
  * разговор куски отменённой попытки.
  */
-async function stopAndWaitQuiet(appSessionId: string, jsonlPath: string): Promise<void> {
+async function stopRun(appSessionId: string): Promise<void> {
   const run = chatRunRegistry.getRun(appSessionId);
   if (run && run.status === 'running') {
     const stopped = await providerRuntimeService.abort(run.provider, appSessionId);
@@ -149,6 +163,11 @@ async function stopAndWaitQuiet(appSessionId: string, jsonlPath: string): Promis
   } else if (isSurvivorRunning(appSessionId)) {
     stopSurvivor(appSessionId);
   }
+}
+
+async function stopAndWaitQuiet(appSessionId: string, jsonlPath: string): Promise<void> {
+  await stopRun(appSessionId);
+  let lastStopAt = Date.now();
 
   const deadline = Date.now() + STOP_WAIT_MS;
   let lastSize = -1;
@@ -156,6 +175,12 @@ async function stopAndWaitQuiet(appSessionId: string, jsonlPath: string): Promis
   while (Date.now() < deadline) {
     const size = (await fsp.stat(jsonlPath)).size;
     const busy = chatRunRegistry.isProcessing(appSessionId);
+    // Ход завёлся заново (очередь успела отправить сообщение между снятием и
+    // остановкой) — останавливаем и его, не чаще раза в две секунды.
+    if (busy && Date.now() - lastStopAt > 2_000) {
+      await stopRun(appSessionId);
+      lastStopAt = Date.now();
+    }
     if (busy || size !== lastSize) {
       lastSize = size;
       quietSince = Date.now();
@@ -168,6 +193,20 @@ async function stopAndWaitQuiet(appSessionId: string, jsonlPath: string): Promis
     code: 'REWIND_AGENT_BUSY',
     statusCode: 409,
   });
+}
+
+/** Байт `offset` — начало строки записи: перед ним `\n` (или это начало файла), с него идёт `{`. */
+async function isLineStart(jsonlPath: string, offset: number): Promise<boolean> {
+  const handle = await fsp.open(jsonlPath, 'r');
+  try {
+    const buffer = Buffer.alloc(2);
+    const start = Math.max(0, offset - 1);
+    const { bytesRead } = await handle.read(buffer, 0, 2, start);
+    if (offset === 0) return bytesRead >= 1 && buffer[0] === 0x7b;
+    return bytesRead === 2 && buffer[0] === 0x0a && buffer[1] === 0x7b;
+  } finally {
+    await handle.close();
+  }
 }
 
 function backupStamp(): string {
@@ -219,12 +258,31 @@ export const sessionRewindService = {
 
     await stopAndWaitQuiet(input.sessionId, jsonlPath);
 
+    // Второй раз — на случай, если в очередь что-то поставили, пока агент
+    // останавливался.
+    const lateQueued = listChatQueue(input.sessionId)
+      .map((item) => item.content)
+      .filter((content) => typeof content === 'string' && content.trim());
+    if (lateQueued.length > 0) {
+      clearChatQueue(input.sessionId);
+      queuedTexts.push(...lateQueued);
+    }
+
     // Место ищем заново: пока агент останавливался, файл дописался.
     const target = await locateTarget(jsonlPath, uuid, input.text);
     if (!target) {
       throw new AppError('Не нашёл это сообщение в разговоре.', {
         code: 'REWIND_MESSAGE_NOT_FOUND',
         statusCode: 404,
+      });
+    }
+
+    // Страховка сдвига: обрезаем только ровно по началу строки. Иначе
+    // (например, переводы строк `\r\n`) лучше отказать, чем испортить разговор.
+    if (!(await isLineStart(jsonlPath, target.offset))) {
+      throw new AppError('Не удалось точно найти место в разговоре — ничего не менял.', {
+        code: 'REWIND_BAD_OFFSET',
+        statusCode: 500,
       });
     }
 

@@ -25,6 +25,7 @@ const U2 = '33333333-3333-4333-8333-333333333333';
 const T2 = '44444444-4444-4444-8444-444444444444';
 const A2 = '55555555-5555-4555-8555-555555555555';
 const U3 = '66666666-6666-4666-8666-666666666666';
+const Q1 = '77777777-7777-4777-8777-777777777777';
 
 function transcript(): string {
   const rows = [
@@ -34,7 +35,8 @@ function transcript(): string {
     { type: 'user', uuid: U2, parentUuid: A1, sessionId: SESSION_ID, message: { role: 'user', content: [{ type: 'text', text: 'Теперь  разошли\nвсем' }] } },
     { type: 'user', uuid: T2, parentUuid: U2, sessionId: SESSION_ID, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok' }] } },
     { type: 'assistant', uuid: A2, parentUuid: T2, sessionId: SESSION_ID, message: { role: 'assistant', content: [{ type: 'text', text: 'Разослал' }] } },
-    { type: 'user', uuid: U3, parentUuid: A2, sessionId: SESSION_ID, message: { role: 'user', content: 'Спасибо' } },
+    { type: 'attachment', uuid: Q1, parentUuid: A2, sessionId: SESSION_ID, attachment: { type: 'queued_command', prompt: 'пока ты работаешь — добавь итог', commandMode: 'prompt' } },
+    { type: 'user', uuid: U3, parentUuid: Q1, sessionId: SESSION_ID, message: { role: 'user', content: 'Спасибо' } },
   ];
   return rows.map((row) => JSON.stringify(row)).join('\n') + '\n';
 }
@@ -72,7 +74,7 @@ test('по номеру строки: убирается выбранная ре
 
     assert.equal(result.text, 'Теперь  разошли\nвсем');
     assert.deepEqual(result.queuedTexts, []);
-    assert.equal(result.removedLines, 4);
+    assert.equal(result.removedLines, 5);
 
     const after = await readFile(jsonlPath, 'utf8');
     assert.deepEqual(uuidsIn(after), [U1, A1], 'остаются реплики до выбранной');
@@ -91,7 +93,7 @@ test('по тексту (свежее сообщение без номера): �
       messageId: 'local-echo-123',
       text: 'Теперь разошли всем ',
     });
-    assert.equal(result.removedLines, 4);
+    assert.equal(result.removedLines, 5);
     assert.deepEqual(uuidsIn(await readFile(jsonlPath, 'utf8')), [U1, A1]);
   });
 });
@@ -132,5 +134,15 @@ test('очередь чата снимается, её тексты возвра
     const result = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U3, text: null });
     assert.deepEqual(result.queuedTexts, ['и ещё вот это']);
     assert.equal(chatMessageQueueDb.list(SESSION_ID).length, 0);
+  });
+});
+
+test('сообщение, отправленное во время работы агента (queued_command), тоже находится', async () => {
+  await withSession(async (jsonlPath) => {
+    const result = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: Q1, text: null });
+    assert.equal(result.text, 'пока ты работаешь — добавь итог');
+    assert.deepEqual(uuidsIn(await readFile(jsonlPath, 'utf8')), [U1, A1, U2, T2, A2]);
+    const byText = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: null, text: 'Теперь разошли всем' });
+    assert.equal(byText.removedLines, 3);
   });
 });
