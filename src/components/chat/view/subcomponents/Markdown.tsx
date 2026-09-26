@@ -230,8 +230,40 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
   );
 };
 
+/*
+ * Пометка «не проверено» (Егор 27.09.26): ИИ пишет `⚠ *фраза*` — фраза, которую
+ * он прикинул, додумал или не перепроверил. Егор просил видеть её ПОДЧЁРКНУТОЙ,
+ * а не курсивом. Разметка подчёркивания не знает, вставки HTML мы не выполняем,
+ * поэтому курсив сразу после ⚠ переделываем в подчёркнутый фрагмент. Остальной
+ * курсив не трогаем. Правило для ИИ — ~/CLAUDE.md «Пометки точности».
+ */
+const WARN_TAIL = /[\u26A0]\uFE0F?\s*$/;
+function rehypeUncertainUnderline() {
+  const walk = (node: any) => {
+    const kids = node?.children;
+    if (!Array.isArray(kids)) return;
+    kids.forEach((child: any, i: number) => {
+      const prev = kids[i - 1];
+      if (child?.type === 'element' && child.tagName === 'em' && prev?.type === 'text' && WARN_TAIL.test(prev.value || '')) {
+        child.tagName = 'u';
+        child.properties = { ...(child.properties || {}), className: ['md-uncertain'] };
+      }
+      walk(child);
+    });
+  };
+  return (tree: any) => walk(tree);
+}
+
 const markdownComponents = {
   code: CodeBlock,
+  u: ({ children }: { children?: React.ReactNode }) => (
+    <u
+      className="underline decoration-amber-500 decoration-2 underline-offset-[3px] dark:decoration-amber-400"
+      title="Не проверено: нейросеть прикинула или не перепроверила"
+    >
+      {children}
+    </u>
+  ),
   // Fenced/indented code arrives as <pre><code>. Re-render the child CodeBlock
   // with `forceBlock` so it always gets the block treatment (react-markdown v9+
   // no longer passes an `inline` flag), and skip the outer <pre> so Tailwind
@@ -326,6 +358,7 @@ export function Markdown({ children, className }: MarkdownProps) {
   // Модель разбивает мысль на строки осмысленно; склеивать их обратно в
   // сплошной абзац — ровно то, на что было больно смотреть.
   const remarkPlugins = useMemo(() => [remarkGfm, remarkBreaks] as any, []);
+  const rehypePlugins = useMemo(() => [rehypeUncertainUnderline] as any, []);
   const { openFileInEditor } = usePaletteOps();
 
   const components = useMemo(
@@ -369,7 +402,7 @@ export function Markdown({ children, className }: MarkdownProps) {
 
   return (
     <div className={className} {...{ [MARKDOWN_ROOT_ATTR]: '' }}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components as any}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components as any}>
         {content}
       </ReactMarkdown>
     </div>
