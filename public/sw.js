@@ -53,6 +53,7 @@ self.addEventListener('install', event => {
 });
 
 const OFFLINE_PAGE_KEY = '/__last-good-page';
+const NAV_TIMEOUT_MS = 4000;
 
 /**
  * Поход в сеть с одной повторной попыткой.
@@ -147,19 +148,31 @@ self.addEventListener('fetch', event => {
   // которая сама повторяет попытку. Ни одна из них не оставляет человека
   // перед неподвижной надписью.
   if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetchWithRetry(event.request)
-        .then(response => {
-          // Запоминаем последнюю удачную страницу: пригодится, пока сервер
-          // перезапускается. Собранные куски (JS и стили) лежат в том же
-          // кэше и берутся из него, поэтому пара «страница + куски» остаётся
-          // согласованной.
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(OFFLINE_PAGE_KEY, clone));
-          return response;
-        })
-        .catch(() => caches.match(OFFLINE_PAGE_KEY).then(cached => cached || retryingPage()))
-    );
+    // 26.09.26: сеть ждём не дольше NAV_TIMEOUT_MS. Раньше запрос страницы
+    // висел без предела — на слабой мобильной связи до минуты, и всё это
+    // время у Егора был чисто чёрный экран. Теперь через 4 с показываем
+    // последнюю удачную страницу (она откроет приложение из памяти телефона
+    // и сама подключится к серверу) или страницу «Соединяюсь…». Запрос в
+    // сеть не бросаем: он дойдёт и запомнится для следующего открытия.
+    const network = fetchWithRetry(event.request).then(response => {
+      // Запоминаем последнюю удачную страницу: пригодится, пока сервер
+      // перезапускается. Собранные куски (JS и стили) лежат в том же
+      // кэше и берутся из него, поэтому пара «страница + куски» остаётся
+      // согласованной.
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(OFFLINE_PAGE_KEY, clone));
+      }
+      return response;
+    });
+    const fallback = () => caches.match(OFFLINE_PAGE_KEY).then(cached => cached || retryingPage());
+    event.waitUntil(network.catch(() => undefined));
+    event.respondWith(new Promise(resolve => {
+      let settled = false;
+      const finish = response => { if (!settled) { settled = true; clearTimeout(timer); resolve(response); } };
+      const timer = setTimeout(() => { fallback().then(finish); }, NAV_TIMEOUT_MS);
+      network.then(finish, () => { fallback().then(finish); });
+    }));
     return;
   }
 

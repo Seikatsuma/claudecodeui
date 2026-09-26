@@ -57,6 +57,11 @@
           var theme = localStorage.getItem('theme');
           var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
           document.documentElement.style.background = dark ? '#141414' : '#f7f5f1';
+          // Заставке «Открываю…» — те же цвета: тело страницы до запуска
+          // программы красится стилями в светлый, поверх него нужен свой фон.
+          document.documentElement.style.setProperty('--boot-bg', dark ? '#141414' : '#f7f5f1');
+          document.documentElement.style.setProperty('--boot-fg', dark ? '#ececec' : '#1f1f1f');
+          document.documentElement.style.setProperty('--boot-dim', dark ? '#a1a1aa' : '#6b6b6b');
         } catch (e) {}
 
         function report(kind, extra) {
@@ -313,6 +318,28 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Заставка до первого экрана приложения (26.09.26). Раньше до запуска
+         программы экран был пустым, а на iPhone в тёмной теме — чисто чёрным,
+         и Егор не понимал, идёт ли что-то вообще («пусть хоть экран с инфо,
+         что идёт загрузка»). Чистый HTML/CSS, без скриптов: видна, даже если
+         программа не скачалась. Прячется сама, как только в #root появился
+         экран (#root:not(:empty)). Вторая строка — через 4 с, чтобы быстрый
+         запуск не мигал лишним текстом. Страховка запуска (boot-rescue) не
+         затронута: она смотрит только в #root. -->
+    <div id="boot-splash" aria-live="polite">
+      <b>Открываю Claude UI…</b>
+      <p>Загружаю приложение. Если идёт обновление или связь слабая, это займёт до минуты.</p>
+    </div>
+    <style>
+      #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:10px;padding:24px;text-align:center;box-sizing:border-box;pointer-events:none;
+        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        background:var(--boot-bg,#f7f5f1);color:var(--boot-fg,#1f1f1f)}
+      #boot-splash b{font-size:18px;font-weight:600}
+      #boot-splash p{margin:0;max-width:20rem;color:var(--boot-dim,#6b6b6b);opacity:0;animation:boot-splash-hint .3s 4s forwards}
+      @keyframes boot-splash-hint{to{opacity:1}}
+      #root:not(:empty) ~ #boot-splash{display:none}
+    </style>
     <script type="module" src="/src/main.jsx"></script>
     
     <!-- Service Worker Registration -->
