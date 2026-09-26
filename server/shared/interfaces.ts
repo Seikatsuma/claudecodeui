@@ -40,6 +40,11 @@ export interface IProviderRuntime {
    * его конца. Нет у провайдера — сообщение ждёт в очереди.
    */
   steer?(sessionId: string, payload: ProviderSteerPayload): Promise<boolean>;
+  /**
+   * Новое сообщение человека — новым ходом в процесс, который ход закончил, но
+   * удержан ради фоновой работы. null — такого процесса нет, нужен обычный запуск.
+   */
+  adopt?(sessionId: string, payload: ProviderAdoptPayload): Promise<ProviderAdoptedTurn | null>;
   permissions?: ProviderRuntimePermissionGateway;
 }
 
@@ -49,6 +54,17 @@ export type ProviderSteerPayload = {
   files: unknown[];
   cwd?: string;
 };
+
+export type ProviderAdoptPayload = ProviderSteerPayload & {
+  model?: string;
+  permissionMode?: string;
+  effort?: string;
+  appendSystemPrompt?: string;
+  writer: ProviderRuntimeWriter;
+};
+
+/** Ход, принятый живым процессом: `done` — когда он закончился. */
+export type ProviderAdoptedTurn = { done: Promise<void> };
 
 /**
  * Main provider contract for CLI and SDK integrations.

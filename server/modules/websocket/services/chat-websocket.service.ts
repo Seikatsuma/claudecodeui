@@ -37,9 +37,14 @@ import type {
   ProviderRuntimeWriter,
   RealtimeClientConnection,
 } from '@/shared/types.js';
-import type { ProviderSteerPayload } from '@/shared/interfaces.js';
+import type { ProviderAdoptedTurn, ProviderAdoptPayload, ProviderSteerPayload } from '@/shared/interfaces.js';
 import { isPlatformOwnerWebUser, OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
-import { getImageAssetsDirForUser, readRequestUserId, resolveWebUserRuntimeContext } from '@/shared/web-user-runtime.js';
+import {
+  getImageAssetsDirForUser,
+  hasOwnClaudeAccess,
+  readRequestUserId,
+  resolveWebUserRuntimeContext,
+} from '@/shared/web-user-runtime.js';
 
 /**
  * Basic per-user concurrency cap for OPEN_REGISTRATION instances (see
@@ -108,6 +113,7 @@ type ProviderRuntimeGateway = {
   ): Promise<unknown>;
   abort(provider: LLMProvider, sessionId: string): Promise<boolean>;
   steer?(provider: LLMProvider, sessionId: string, payload: ProviderSteerPayload): Promise<boolean>;
+  adopt?(provider: LLMProvider, sessionId: string, payload: ProviderAdoptPayload): Promise<ProviderAdoptedTurn | null>;
   resolveToolApproval(requestId: string, payload: ProviderPermissionDecision): void;
   getPendingApprovalsForSession(sessionId: string): unknown[];
 };
@@ -131,6 +137,10 @@ function sendJson(ws: WebSocket, payload: unknown): void {
  * `error` message kind) so the frontend can distinguish "your request was
  * invalid" from "the model run produced an error" without inspecting text.
  */
+/** Что увидит в чате человек без своего входа в Claude и без ключа API. */
+const CLAUDE_LOGIN_REQUIRED_MESSAGE =
+  'Войдите в Claude: Настройки → Агенты → Claude → «Войти». Или добавьте свой ключ API Anthropic там же.';
+
 function sendProtocolError(
   ws: WebSocket,
   code: string,
@@ -228,16 +238,18 @@ async function handleChatSend(
   // Owner bypass: when the owner's ~/.claude-webuser-<id> is symlinked to
   // their real ~/.claude, the SDK authenticates via the existing OAuth session
   // in that directory — no explicit API key is needed or stored.
+  // Остальным хватает любого СВОЕГО доступа: ключа API или входа подпиской в
+  // командной строке сайта (shared/web-user-runtime.ts, hasOwnClaudeAccess).
   if (
     OPEN_REGISTRATION &&
     provider === 'claude' &&
-    !openRegistrationContext.anthropicApiKey &&
-    !isPlatformOwnerWebUser(numericUserId)
+    !isPlatformOwnerWebUser(numericUserId) &&
+    !(await hasOwnClaudeAccess(openRegistrationContext))
   ) {
     sendProtocolError(
       ws,
-      'ANTHROPIC_API_KEY_REQUIRED',
-      'Add your Anthropic API key in Settings to start chatting with Claude.',
+      'CLAUDE_LOGIN_REQUIRED',
+      CLAUDE_LOGIN_REQUIRED_MESSAGE,
       sessionId,
       clientMessageId,
     );
@@ -459,10 +471,32 @@ async function runProviderTurn(input: {
     // process.env exactly as it always has for Account 1/2.
     claudeConfigDir: runtimeContext.claudeConfigDir ?? undefined,
     anthropicApiKey: runtimeContext.anthropicApiKey ?? undefined,
+    isolateInheritedClaudeAuth: runtimeContext.isolateInheritedClaudeAuth || undefined,
   };
 
   try {
-    await dependencies.runtime.run(provider, content, runtimeOptions, run.writer);
+    // Прошлый ход этого чата закончился, но его процесс удержан ради фоновой
+    // работы (фоновый агент/команда): сообщение уходит в ТОТ ЖЕ процесс новым
+    // ходом. Новый `claude --resume` рядом с живым потерял бы результат фона.
+    const adopted = dependencies.runtime.adopt
+      ? await dependencies.runtime.adopt(provider, sessionId, {
+        content,
+        images: runtimeOptions.images,
+        files: runtimeOptions.files,
+        cwd: runtimeOptions.cwd,
+        model: typeof clientOptions.model === 'string' ? clientOptions.model : undefined,
+        permissionMode: typeof clientOptions.permissionMode === 'string' ? clientOptions.permissionMode : undefined,
+        effort: typeof clientOptions.effort === 'string' ? clientOptions.effort : undefined,
+        appendSystemPrompt: presetSystemPrompt || undefined,
+        writer: run.writer,
+      })
+      : null;
+    if (adopted) {
+      console.log(`[Chat] сообщение передано живому процессу чата ${sessionId} (идёт фоновая работа)`);
+      await adopted.done;
+    } else {
+      await dependencies.runtime.run(provider, content, runtimeOptions, run.writer);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: message });
@@ -532,10 +566,10 @@ async function runQueuedChatMessage(
   if (
     OPEN_REGISTRATION
     && provider === 'claude'
-    && !runtimeContext.anthropicApiKey
     && !isPlatformOwnerWebUser(numericUserId)
+    && !(await hasOwnClaudeAccess(runtimeContext))
   ) {
-    console.warn(`[Очередь чата] у пользователя ${String(userId)} нет ключа — сообщение ${message.id} отброшено`);
+    console.warn(`[Очередь чата] пользователь ${String(userId)} не вошёл в Claude и не добавил ключ — сообщение ${message.id} отброшено`);
     return true;
   }
 
@@ -980,8 +1014,12 @@ export function handleChatConnection(
     }
   });
 
-  ws.on('close', () => {
-    console.log('[INFO] Chat client disconnected');
+  // Код закрытия отличает уход страницы (1001) от её внезапной смерти (1006 —
+  // телефон выгрузил страницу из памяти, не попрощавшись). 25.09.26 белый экран
+  // на iPhone не оставлял следа — этот код один из немногих признаков.
+  const openedAt = Date.now();
+  ws.on('close', (code: number) => {
+    console.log(`[INFO] Chat client disconnected code=${code} livedSec=${Math.round((Date.now() - openedAt) / 1000)}`);
     connectedClients.delete(ws);
   });
 }

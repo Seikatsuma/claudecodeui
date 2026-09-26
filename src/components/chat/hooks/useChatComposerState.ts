@@ -24,6 +24,7 @@ import {
   readDraftInput,
   writeDraftInput,
 } from '../utils/chatStorage';
+import { clearAttachmentDraft, stashAttachmentDraft, takeAttachmentDraft } from '../utils/attachmentDrafts';
 import type {
   ChatAttachment,
   ChatMessage,
@@ -331,6 +332,10 @@ export function useChatComposerState({
     return readDraftInput(initialScope);
   });
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  // Для подмены черновика при смене чата: эффект подмены не должен зависеть
+  // от самих файлов, иначе он срабатывал бы на каждое добавление картинки.
+  const attachedFilesRef = useRef(attachedFiles);
+  attachedFilesRef.current = attachedFiles;
   const [uploadingFiles, setUploadingFiles] = useState<Map<string, number>>(new Map());
   const [fileErrors, setFileErrors] = useState<Map<string, string>>(new Map());
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
@@ -957,9 +962,17 @@ export function useChatComposerState({
           },
         });
 
+        clearDraftInput(submitDraftScope);
+        // Пока грузились вложения, человек мог открыть другой чат — тогда в
+        // поле уже ЕГО черновик, и стирать надо спрятанный черновик исходного.
+        if (draftScopeRef.current !== submitDraftScope) {
+          clearAttachmentDraft(submitDraftScope);
+          return;
+        }
         setInput('');
         inputValueRef.current = '';
         setAttachedFiles([]);
+        carriedUploadedRef.current = [];
         setUploadingFiles(new Map());
         setFileErrors(new Map());
         resetCommandMenuState();
@@ -967,7 +980,6 @@ export function useChatComposerState({
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
         }
-        clearDraftInput(submitDraftScope);
         return;
       }
 
@@ -1131,7 +1143,6 @@ export function useChatComposerState({
         },
       });
 
-      carriedUploadedRef.current = [];
       clearDraftInput(submitDraftScope);
       // Поле очищается, только если человек всё ещё в том чате, откуда
       // отправил. Новый чат к этому моменту уже получил свой id — это тот же
@@ -1145,11 +1156,15 @@ export function useChatComposerState({
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
         }
+        // Вложения — как текст: чистим поле, только если оно всё ещё того чата.
+        setAttachedFiles([]);
+        carriedUploadedRef.current = [];
+        setUploadingFiles(new Map());
+        setFileErrors(new Map());
+      } else {
+        clearAttachmentDraft(submitDraftScope);
       }
       resetCommandMenuState();
-      setAttachedFiles([]);
-      setUploadingFiles(new Map());
-      setFileErrors(new Map());
     },
     [
       selectedSession,
@@ -1202,6 +1217,8 @@ export function useChatComposerState({
 
     if (carried.trim() || carriedFiles.length > 0 || carriedUploaded.length > 0) {
       const carriedId = newDraftId();
+      // Чат фиксируем до загрузки: за время загрузки человек может открыть другой.
+      const carriedSessionId = sessionKeyRef.current;
       queuedFilesRef.current.set(carriedId, carriedFiles);
       void (async () => {
         let uploaded: unknown[] = carriedUploaded;
@@ -1216,7 +1233,7 @@ export function useChatComposerState({
         sendMessage({
           type: 'chat.send',
           clientMessageId: carriedId,
-          sessionId: sessionKeyRef.current,
+          sessionId: carriedSessionId,
           content: carried,
           options: { ...buildSendOptions(carried), attachments: uploaded },
         });
@@ -1295,9 +1312,12 @@ export function useChatComposerState({
     lastNewSessionTriggerRef.current = trigger;
     const newChatScope = draftScopeFor(selectedProjectId, null);
     clearDraftInput(newChatScope);
+    clearAttachmentDraft(newChatScope);
     if (draftOwnerRef.current === newChatScope) {
       inputValueRef.current = '';
       setInput('');
+      setAttachedFiles([]);
+      carriedUploadedRef.current = [];
     }
   }, [newSessionTrigger, selectedProjectId]);
 
@@ -1312,6 +1332,23 @@ export function useChatComposerState({
     writeDraftInput(draftScope, input);
   }, [input, draftScope]);
 
+  // Поле ввода пересоздали (например, ошибка перерисовала чат) — вложения
+  // открытого чата не теряются: при уходе прячутся, при появлении возвращаются.
+  useEffect(() => {
+    const restored = takeAttachmentDraft(draftOwnerRef.current);
+    if (restored.files.length > 0 || restored.uploaded.length > 0) {
+      setAttachedFiles(restored.files);
+      attachedFilesRef.current = restored.files;
+      carriedUploadedRef.current = restored.uploaded;
+    }
+    return () => {
+      stashAttachmentDraft(draftOwnerRef.current, {
+        files: attachedFilesRef.current,
+        uploaded: carriedUploadedRef.current,
+      });
+    };
+  }, []);
+
   // Открыли другой чат — в поле его собственный черновик, а не текст прошлого.
   // Егор 13.09.26: «переключаясь на другой чат, панель должна быть без текста,
   // а если возвращаюсь обратно — старый текст остаётся».
@@ -1319,11 +1356,22 @@ export function useChatComposerState({
     if (draftOwnerRef.current === draftScope) {
       return;
     }
+    // Картинки прошлого чата уходят вместе с его текстом и вернутся, когда
+    // человек откроет тот чат снова (Егор 24.09.26) — см. attachmentDrafts.
+    stashAttachmentDraft(draftOwnerRef.current, {
+      files: attachedFilesRef.current,
+      uploaded: carriedUploadedRef.current,
+    });
     draftOwnerRef.current = draftScope;
     adoptLegacyProjectDraft(selectedProjectId, draftScope);
     const saved = readDraftInput(draftScope);
     inputValueRef.current = saved;
     setInput(saved);
+    const savedAttachments = takeAttachmentDraft(draftScope);
+    setAttachedFiles(savedAttachments.files);
+    carriedUploadedRef.current = savedAttachments.uploaded;
+    setUploadingFiles(new Map());
+    setFileErrors(new Map());
   }, [draftScope, selectedProjectId]);
 
   /*

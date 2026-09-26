@@ -178,6 +178,9 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
               type: 'user',
               content,
               timestamp: msg.timestamp,
+              // Номер строки разговора — для «Вернуться сюда». Не `id`: по `id`
+              // строятся ключи ленты, и строки бы перерисовались.
+              sourceId: msg.id,
               images,
               files,
               ...sharedMetadata,

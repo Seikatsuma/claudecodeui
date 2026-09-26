@@ -1,7 +1,7 @@
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
-import type { IProvider, ProviderSteerPayload } from '@/shared/interfaces.js';
+import type { IProvider, ProviderAdoptedTurn, ProviderAdoptPayload, ProviderSteerPayload } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
   LLMProvider,
@@ -97,6 +97,14 @@ export function createProviderRuntimeService(
         return false;
       }
       return Boolean(await runtime.steer(sessionId, payload));
+    },
+
+    async adopt(providerName: LLMProvider, sessionId: string, payload: ProviderAdoptPayload): Promise<ProviderAdoptedTurn | null> {
+      const runtime = dependencies.resolveProvider(providerName).runtime;
+      if (!runtime.adopt) {
+        return null;
+      }
+      return (await runtime.adopt(sessionId, payload)) ?? null;
     },
 
     resolveToolApproval(requestId: string, decision: ProviderPermissionDecision): void {

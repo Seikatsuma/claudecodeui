@@ -228,7 +228,28 @@
     right: var(--safe-area-inset-right);
     bottom: 0;
   }
-  
+
+  /*
+    Окна поверх экрана при открытой клавиатуре iPhone (26.09.26). Оболочка
+    приложения держит себя над клавиатурой сама (AppContent: --keyboard-height,
+    --app-pan), а окна — переименование чата, настройки, формы — оставались
+    прибиты к низу экрана: низ окна с полем и кнопками уходил под клавиатуру,
+    и Егор видел только размытый фон. Здесь тот же прямоугольник, что у
+    оболочки, для всех закреплённых окон на весь экран. Класс keyboard-open
+    стоит только во время набора, без клавиатуры всё как было. Правило ниже
+    pwa-mode и той же силы — поэтому оно и побеждает.
+  */
+  html.keyboard-open .fixed.inset-0,
+  html.keyboard-open .keyboard-aware-fixed {
+    top: calc(var(--shell-top, 0px) + var(--app-pan, 0px));
+    bottom: calc(var(--keyboard-height, 0px) - var(--app-pan, 0px));
+  }
+  /* Высокие окна (92dvh и т.п.) над клавиатурой не помещаются: по центру
+     их верх ушёл бы под часы. Не выше видимой части. */
+  html.keyboard-open .fixed.inset-0 > [role="dialog"] {
+    max-height: 100%;
+  }
+
   /* Global transition defaults */
   button, 
   a, 

@@ -1304,3 +1304,49 @@ export function findApplicationRoot(startDirectory: string): string {
 export function normalizeServerScope(value: unknown): ServerScope {
   return value === 'second' ? 'second' : 'main';
 }
+
+// ---------------------------
+//----------------- TRANSCRIPT HUMAN-TEXT FILTERS ------------
+
+/**
+ * Начала «сообщений человека», которых человек не писал: уведомления фоновых
+ * задач, вывод локальных команд, вход в терминал, прерывания, отзыв стоп-хука,
+ * продолжение после сжатия. Сравнивается с началом текста после trim.
+ * Потребители: выжимка «Продолжить в новом чате» (handoff) и превью чатов на
+ * главном экране (providers) — обоим нужны только настоящие слова человека.
+ */
+export const TRANSCRIPT_SERVICE_PREFIXES: readonly string[] = [
+  '<task-notification>',
+  '<local-command-stdout>',
+  '<local-command-stderr>',
+  '<local-command-caveat>',
+  '<command-name>',
+  '<command-message>',
+  '<bash-input>',
+  '<bash-stdout>',
+  '<bash-stderr>',
+  '[Request interrupted',
+  'Welcome to Ubuntu',
+  'Last login:',
+  'Stop hook feedback',
+  'This session is being continued from a previous conversation',
+];
+
+/**
+ * true — текст «сообщения человека» служебный (см. TRANSCRIPT_SERVICE_PREFIXES).
+ * Ждёт уже обрезанный по краям текст; пустую строку служебной не считает.
+ */
+export function isTranscriptServiceText(text: string): boolean {
+  return TRANSCRIPT_SERVICE_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+/**
+ * Убирает из сообщения человека вставки хуков и среды (`<system-reminder>`,
+ * `<user-prompt-submit-hook>`) и обрезает края. Остальной текст не трогает.
+ */
+export function stripInjectedContext(text: string): string {
+  return text
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+    .replace(/<user-prompt-submit-hook>[\s\S]*?<\/user-prompt-submit-hook>/g, '')
+    .trim();
+}

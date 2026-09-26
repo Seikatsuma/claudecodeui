@@ -96,7 +96,14 @@ export function useSessionMessageSearch(
           const pr = data.projectResult;
           if (pr.projectId !== projectId) return;
           for (const s of pr.sessions) {
-            if (accumulated.some((i) => i.sessionId === s.sessionId)) continue;
+            const existing = accumulated.find((i) => i.sessionId === s.sessionId);
+            if (existing) {
+              // Чат уже в списке по названию — показать, где слово в переписке.
+              if (!existing.snippet && s.matches[0]?.snippet) {
+                existing.snippet = s.matches[0].snippet;
+              }
+              continue;
+            }
             accumulated.push({
               sessionId: s.sessionId,
               label: s.sessionSummary || s.sessionId,

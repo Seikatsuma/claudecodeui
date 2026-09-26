@@ -83,6 +83,7 @@ function MainContent({
   onProjectsRefresh,
   onSessionArchived,
   onSessionRestored,
+  attentionSessionIds,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { showRawParameters, showThinking, sendByCtrlEnter } = preferences;
@@ -155,6 +156,9 @@ function MainContent({
         projects={projects}
         onProjectSelect={onProjectSelect}
         onSessionSelect={onSessionSelect}
+        onStartNewChat={onStartNewChat}
+        processingSessions={processingSessions}
+        attentionSessionIds={attentionSessionIds}
       />
     );
   }
@@ -177,6 +181,9 @@ function MainContent({
         projects={projects}
         onProjectSelect={onProjectSelect}
         onSessionSelect={onSessionSelect}
+        onStartNewChat={onStartNewChat}
+        processingSessions={processingSessions}
+        attentionSessionIds={attentionSessionIds}
       />
     );
   }

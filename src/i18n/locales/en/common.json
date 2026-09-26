@@ -101,7 +101,15 @@
     "continueLastChat": "Continue last chat",
     "recentProjects": "Recent projects",
     "sessionCount_one": "{{count}} session",
-    "sessionCount_other": "{{count}} sessions"
+    "sessionCount_other": "{{count}} sessions",
+    "newChat": "New chat",
+    "newChatIn": "New chat in “{{name}}”",
+    "recentChats": "Recent chats",
+    "allChats": "All chats",
+    "statusRunning": "working",
+    "statusNewReply": "new reply",
+    "folders": "Folders",
+    "lastChat": "Last chat"
   },
   "fileTree": {
     "loading": "Loading files...",

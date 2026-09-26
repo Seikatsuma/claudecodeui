@@ -31,6 +31,8 @@ type SessionRow = {
    * умолчанию), 'second' — чат живёт во втором блоке верхней панели.
    */
   server_scope: ServerScope | null;
+  /** Ярлык-флажок на чате: 1 — висит, 0 — нет. */
+  is_flagged: number;
   isArchived: number;
   created_at: string;
   updated_at: string;
@@ -42,7 +44,7 @@ type RecentSessionsPage = {
 };
 
 const SESSION_ROW_COLUMNS =
-  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, title_source, model, effort, group_id, group_label, server_scope, isArchived, created_at, updated_at';
+  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, title_source, model, effort, group_id, group_label, server_scope, is_flagged, isArchived, created_at, updated_at';
 
 /**
  * Decides whether a freshly-derived title candidate should replace the
@@ -447,6 +449,19 @@ export const sessionsDb = {
     ).run(serverScope, sessionId);
   },
 
+  /**
+   * Вешает или снимает ярлык-флажок. `updated_at` не трогаем: ярлык — метка,
+   * а не активность, и чат не должен от него подниматься в списке.
+   */
+  setSessionFlagged(sessionId: string, flagged: boolean): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET is_flagged = ?
+       WHERE session_id = ?`
+    ).run(flagged ? 1 : 0, sessionId);
+  },
+
   setSessionGroup(sessionId: string, groupId: string | null, groupLabel: string | null): void {
     const db = getConnection();
     db.prepare(
@@ -692,13 +707,25 @@ export const sessionsDb = {
   getSessionsByProjectPathPage(projectPath: string, limit: number, offset: number): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
+    // Чаты, перенесённые в другой блок поимённо (`server_scope` задан и не
+    // совпадает с блоком папки), идут в первую порцию: панель делит папку по
+    // блокам уже у себя, и старый перенесённый чат за пределами первых 20 не
+    // был бы виден ни в одном блоке. Совпадающий признак не поднимаем — он
+    // занял бы место чужого чата папки. На экране порядок всё равно по дате —
+    // список сортирует клиент.
     const rows = db
       .prepare(
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0` + ACCOUNT_SCOPE_SQL + `
-         ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
+         ORDER BY (
+           sessions.server_scope IS NOT NULL
+           AND sessions.server_scope <> COALESCE(
+             (SELECT projects.server_scope FROM projects WHERE projects.project_path = sessions.project_path),
+             'main'
+           )
+         ) DESC, datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
       .all(normalizedProjectPath, getActiveAccountDir(), limit, offset) as SessionRow[];

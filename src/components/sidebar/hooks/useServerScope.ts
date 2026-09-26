@@ -1,5 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
+import type { Project } from '../../../types/app';
+
 /*
  * Какой блок верхней панели открыт: «Проекты» (этот сервер) или второй
  * сервер. Егор 20.09.26: «есть проекты, а есть проекты 2 сервера; если я
@@ -56,6 +58,50 @@ export function effectiveScope(
   projectScope: ServerScope | null | undefined,
 ): ServerScope {
   return sessionScope ?? projectScope ?? 'main';
+}
+
+/**
+ * Папки и чаты одного блока. Папка попадает в блок, если сама к нему
+ * приписана ИЛИ если в ней есть чат, перенесённый в этот блок поимённо:
+ * перенос чата — признак в базе, файл переписки остаётся в своей папке,
+ * поэтому чат виден там же, где и лежит, но в другом блоке. Без второго
+ * блока (`hasSecondServer` = false) — всё как есть.
+ * Одна функция на панель и главный экран: иначе они разойдутся в том, чей чат.
+ */
+export function scopeProjectsToServer(
+  projects: Project[],
+  serverScope: ServerScope,
+  hasSecondServer: boolean,
+): Project[] {
+  if (!hasSecondServer) {
+    return projects;
+  }
+
+  return projects.reduce<Project[]>((kept, project) => {
+    const projectScope: ServerScope = project.serverScope ?? 'main';
+    const allSessions = project.sessions ?? [];
+    const sessions = allSessions.filter(
+      (session) => effectiveScope(session.serverScope as ServerScope | null | undefined, projectScope) === serverScope,
+    );
+
+    if (projectScope !== serverScope && sessions.length === 0) {
+      return kept;
+    }
+
+    kept.push(
+      sessions.length === allSessions.length
+        ? project
+        : {
+          ...project,
+          sessions,
+          sessionMeta: {
+            hasMore: project.sessionMeta?.hasMore ?? false,
+            total: sessions.length,
+          },
+        },
+    );
+    return kept;
+  }, []);
 }
 
 /*

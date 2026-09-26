@@ -6,6 +6,8 @@ import type { Project, ProjectSession } from '../types/app';
 import { api } from '../utils/api';
 import { getSessionTitle } from '../utils/pageTitle';
 
+import { MAX_OPEN_TABS, capTabs } from './openTabsLimit';
+
 /**
  * A session the user has explicitly opened, rendered as a tab above the chat
  * area (mirrors the open-editor-tabs strip in VS Code's Claude Code
@@ -24,7 +26,10 @@ type StoredTab = {
   projectId?: string;
   provider?: string;
   title?: string;
+  /** Когда вкладку последний раз открывали (мс). */
+  openedAt?: number;
 };
+
 
 /**
  * Вкладки хранятся у КАЖДОГО пользователя отдельно.
@@ -60,6 +65,7 @@ const readStoredTabs = (userKey: string | null): StoredTab[] => {
         projectId: typeof entry.projectId === 'string' ? entry.projectId : undefined,
         provider: typeof entry.provider === 'string' ? entry.provider : undefined,
         title: typeof entry.title === 'string' ? entry.title : undefined,
+        openedAt: typeof entry.openedAt === 'number' && Number.isFinite(entry.openedAt) ? entry.openedAt : undefined,
       }));
   } catch {
     return [];
@@ -121,6 +127,7 @@ const serializeTabs = (tabs: StoredTab[]): string =>
     ...(tab.projectId ? { projectId: tab.projectId } : {}),
     ...(tab.provider ? { provider: tab.provider } : {}),
     ...(tab.title ? { title: tab.title } : {}),
+    ...(tab.openedAt ? { openedAt: tab.openedAt } : {}),
   })));
 
 type ServerTabsState = { version: number; tabs: StoredTab[] };
@@ -193,6 +200,12 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
   activeSessionIdRef.current = activeSessionId;
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+
+  // Сверх 15 — откуда бы ни пришёл список (сервер, другое устройство, старый
+  // кэш) — лишние уходят здесь; дальше обычная отправка на сервер.
+  useEffect(() => {
+    if (tabs.length > MAX_OPEN_TABS) setTabs((previous) => capTabs(previous, activeSessionIdRef.current));
+  }, [tabs]);
   const syncRef = useRef({
     ready: false,
     version: null as number | null,
@@ -212,12 +225,26 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
   // устройстве, — его закрыли на другом: уходим к соседней вкладке, как при
   // закрытии крестиком. Иначе правило «открытый чат всегда во вкладках»
   // вернуло бы вкладку и отменило закрытие на всех устройствах.
-  const applyRemote = useCallback((remote: StoredTab[], followClose = true) => {
+  //
+  // Исключение — список полный (15): тогда чат, скорее всего, не закрыли, а
+  // вытеснил предел, когда на другом устройстве открыли новый. Здесь его
+  // читают прямо сейчас — вкладка остаётся на своём месте, а уходит следующая
+  // по давности (иначе телефон уводил бы Егора из чата, пока он за компьютером).
+  const applyRemote = useCallback((incoming: StoredTab[], followClose = true) => {
+    let remote = incoming;
     const previous = tabsRef.current;
     const activeId = activeSessionIdRef.current;
     const remoteIds = new Set(remote.map((tab) => tab.sessionId));
     if (followClose && activeId && !remoteIds.has(activeId) && previous.some((tab) => tab.sessionId === activeId)) {
       const index = previous.findIndex((tab) => tab.sessionId === activeId);
+      if (remote.length >= MAX_OPEN_TABS) {
+        const kept = [...remote];
+        kept.splice(Math.min(index, kept.length), 0, { ...previous[index], openedAt: Date.now() });
+        remote = capTabs(kept, activeId);
+        tabsRef.current = remote;
+        setTabs(remote);
+        return;
+      }
       const neighbour = [...previous.slice(index + 1), ...previous.slice(0, index).reverse()]
         .find((tab) => remoteIds.has(tab.sessionId));
       navigateRef.current(neighbour ? `/session/${neighbour.sessionId}` : '/');
@@ -375,8 +402,16 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
   // the single funnel that covers sidebar clicks, archived-session opens,
   // search results, notifications and deep links alike, without ever having
   // to enumerate every place session navigation can be triggered from.
+  const stampedSessionIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeSessionId) return;
+    if (!activeSessionId) {
+      stampedSessionIdRef.current = null;
+      return;
+    }
+    // Отметка «открывали» — только при переходе на чат, а не на каждое
+    // обновление списка чатов (иначе вкладки уходили бы на сервер непрерывно).
+    const openedAt = stampedSessionIdRef.current !== activeSessionId ? Date.now() : undefined;
+    stampedSessionIdRef.current = activeSessionId;
 
     setTabs((previous) => {
       const existingIndex = previous.findIndex((tab) => tab.sessionId === activeSessionId);
@@ -392,19 +427,21 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
       const resolvedProvider = liveMatch?.session.__provider ?? activeMatchesSession?.__provider;
 
       if (existingIndex === -1) {
-        return [
+        return capTabs([
           ...previous,
           {
             sessionId: activeSessionId,
             projectId: resolvedProjectId,
             provider: resolvedProvider,
             title: resolvedTitle,
+            openedAt: openedAt ?? Date.now(),
           },
-        ];
+        ], activeSessionId);
       }
 
       const existing = previous[existingIndex];
       const needsUpdate =
+        openedAt !== undefined ||
         (resolvedTitle !== undefined && resolvedTitle !== existing.title) ||
         (resolvedProjectId !== undefined && resolvedProjectId !== existing.projectId) ||
         (resolvedProvider !== undefined && resolvedProvider !== existing.provider);
@@ -418,6 +455,7 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
         title: resolvedTitle ?? existing.title,
         projectId: resolvedProjectId ?? existing.projectId,
         provider: resolvedProvider ?? existing.provider,
+        openedAt: openedAt ?? existing.openedAt,
       };
       return next;
     });

@@ -34,6 +34,7 @@ import {
 } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage, getClaudeConfigDir, getClaudeJsonPath } from '@/shared/utils.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
+import { INHERITED_CLAUDE_AUTH_ENV_KEYS } from '@/shared/claude-login.js';
 import { noteSurvivorProviderSession, spawnSurvivableClaude } from '@/modules/providers/list/claude/survivor-runs.js';
 import { hasTranscriptOnDisk } from '@/modules/providers/list/claude/transcript-presence.js';
 
@@ -66,8 +67,16 @@ const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEO
 // stdin immediately, background work releases it as soon as it reports back, and a
 // new turn supersedes the previous hold. This ceiling only catches background work
 // that never reports at all, so an abandoned session cannot leak a CLI process
-// forever. The timer resets on every message, so it measures silence, not total time.
+// forever. The timer resets on signs of real activity (see signalsBackgroundActivity),
+// so it measures silence, not total time; total time is capped by HELD_BG_MAX_MS below.
 const BG_WAIT_CEILING_MS = 30 * 60 * 1000;
+
+// Абсолютный потолок удержания ввода ради фоновой работы — от НАЧАЛА удержания,
+// ничем не сбрасывается. Без него бесконечный фоновый Agent/Monitor, который то и
+// дело шлёт task_progress, держал бы процесс (~330–440 МБ) без предела. По
+// истечении ввод отпускается: дальше работу ограничивает уже потолок самого CLI
+// (BG_WAIT_CEILING_MS от конца ввода), как было до удержания.
+const HELD_BG_MAX_MS = Math.max(60_000, parseInt(process.env.CLOUDCLI_HELD_BG_MAX_MS, 10) || 2 * 60 * 60 * 1000);
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
@@ -269,6 +278,14 @@ function mapCliOptionsToSDK(options = {}) {
   if (resolvedConfigDir) {
     sdkOptions.env.CLAUDE_CONFIG_DIR = resolvedConfigDir;
   }
+  // Гость площадки с открытой регистрацией работает только своим входом:
+  // ключ Claude из окружения сервера — владельца, и CLI предпочёл бы его
+  // входу из папки гостя (shared/web-user-runtime.ts).
+  if (options.isolateInheritedClaudeAuth) {
+    for (const key of INHERITED_CLAUDE_AUTH_ENV_KEYS) {
+      delete sdkOptions.env[key];
+    }
+  }
   const resolvedApiKey = options.anthropicApiKey
     ?? getRequestRuntimeContext()?.anthropicApiKey
     ?? null;
@@ -391,7 +408,7 @@ function mapCliOptionsToSDK(options = {}) {
  * @param {Object} writer - WebSocket writer for reconnect support
  * @param {Function} releaseInput - Closes the held stdin stream so the CLI can exit
  */
-function addSession(sessionId, queryInstance, writer = null, releaseInput = null, steer = null) {
+function addSession(sessionId, queryInstance, writer = null, releaseInput = null, steer = null, adopt = null) {
   const existing = activeSessions.get(sessionId);
   // A different live instance under the same key means an earlier run was
   // superseded without being stopped (e.g. an abort that raced run setup and
@@ -421,7 +438,10 @@ function addSession(sessionId, queryInstance, writer = null, releaseInput = null
     // Re-registered mid-run once the provider session id lands; keep the closer.
     releaseInput: releaseInput || carried?.releaseInput || null,
     // «Отправить сейчас»: дописывает сообщение человека в идущий ход.
-    steer: steer || carried?.steer || null
+    steer: steer || carried?.steer || null,
+    // Новое сообщение человека — новым ходом в ЭТОТ процесс, пока он удержан
+    // ради фоновой работы (см. adoptTurn в queryClaudeSDK).
+    adopt: adopt || carried?.adopt || null
   });
 }
 
@@ -542,6 +562,55 @@ function extractTokenBudget(sdkMessage, tracker) {
 // Tool calls that leave work running past the end of a turn. Bash only counts
 // when it is explicitly backgrounded; the rest defer or watch work by nature.
 const DEFERRED_WORK_TOOLS = new Set(['Monitor', 'ScheduleWakeup', 'CronCreate', 'TaskCreate']);
+// Инструменты, которые уходят в фон только с run_in_background. Фоновый
+// Agent/Task/Workflow раньше не держал канал: следующее сообщение человека
+// поднимало новый процесс `--resume`, а агент оставался доживать в старом до
+// потолка CLI, и его результат терялся (опыт 25.09.26, ~/cc2-test).
+const BACKGROUNDABLE_TOOLS = new Set(['Bash', 'Agent', 'Task', 'Workflow']);
+
+// Процессы, удержанные ради фоновой работы, — по владельцу: пользователь, а без
+// userId — сам чат (не общий на сервер ключ). Каждый держит ~330–440 МБ; сверх
+// предела отпускается самый старый (его фоновые оболочки CLI гасит через 5 с,
+// агенты доживают до потолка CLI — как было до правки). Чат держит не больше
+// одного процесса (новый ход вытесняет прежний), так что без userId предел
+// фактически — по одному на чат, а время каждого ограничено HELD_BG_MAX_MS.
+const MAX_HELD_BG_PER_USER = Math.max(1, parseInt(process.env.CLOUDCLI_MAX_HELD_BG_PER_USER, 10) || 4);
+const heldBgRuns = new Map(); // token -> { userKey, since, release, label }
+
+function trackHeldRun(token, userKey, release, label) {
+  heldBgRuns.set(token, { userKey, since: Date.now(), release, label });
+  const mine = [...heldBgRuns.entries()]
+    .filter(([, held]) => held.userKey === userKey)
+    .sort((a, b) => a[1].since - b[1].since);
+  while (mine.length > MAX_HELD_BG_PER_USER) {
+    const [oldToken, oldest] = mine.shift();
+    heldBgRuns.delete(oldToken);
+    console.warn(`[Claude SDK] удержано фоновых процессов больше ${MAX_HELD_BG_PER_USER} у владельца ${userKey} — отпускаю самый старый (${oldest.label})`);
+    try { oldest.release(); } catch { /* уже закрыт */ }
+  }
+}
+
+function untrackHeldRun(token) {
+  heldBgRuns.delete(token);
+}
+
+/**
+ * Сообщение CLI после конца хода, которое значит «работа реально идёт» и
+ * отодвигает 30-минутный отсчёт молчания: ход модели (assistant/user, в т.ч.
+ * копия сообщения человека; stream_event) и отчёты фоновых задач
+ * (system/task_started|task_progress|task_updated|task_notification,
+ * system/background_tasks_changed). Служебное — rate_limit_event, system/status,
+ * пульс tool_progress, хуки — отсчёт не сбрасывает. Абсолютный потолок
+ * HELD_BG_MAX_MS не сбрасывает ничто.
+ */
+function signalsBackgroundActivity(message) {
+  if (!message) return false;
+  if (message.type === 'assistant' || message.type === 'user' || message.type === 'stream_event') {
+    return true;
+  }
+  return message.type === 'system' && typeof message.subtype === 'string'
+    && (message.subtype.startsWith('task_') || message.subtype === 'background_tasks_changed');
+}
 
 /**
  * Detects tool calls that keep working after the turn's `result` arrives.
@@ -562,7 +631,7 @@ function startsBackgroundWork(sdkMessage) {
     if (block?.type !== 'tool_use') {
       return false;
     }
-    if (block.name === 'Bash') {
+    if (BACKGROUNDABLE_TOOLS.has(block.name)) {
       return block.input?.run_in_background === true;
     }
     return DEFERRED_WORK_TOOLS.has(block.name);
@@ -798,6 +867,52 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     }
     return true;
   };
+
+  /**
+   * Новое сообщение человека в процесс, который ход уже закончил, но держит
+   * открытым ради фоновой работы. Раньше такое сообщение поднимало второй
+   * процесс `claude --resume`, а фоновый агент оставался в первом и терялся.
+   * Здесь сообщение уходит обычным новым ходом в тот же процесс — фоновая
+   * работа продолжается, её результат придёт в этот же чат.
+   *
+   * @returns {Promise<{done: Promise<void>}|null>} null — усыновить нельзя
+   *   (процесс не удержан, другая модель/режим), пусть идёт обычный запуск.
+   */
+  const adoptTurn = async ({ content, images, files, cwd, model, permissionMode, effort, appendSystemPrompt, writer }) => {
+    if (!turnCompleteSent || !heldForBackgroundWork || !idleReleaseTimer || adoptedTurnDone || heldMaxReached) {
+      return null;
+    }
+    // Модель, режим разрешений, глубина размышлений и приписка пресета — это
+    // настройки процесса, в живой процесс их не передать: изменилось хоть
+    // что-то (в том числе выбрано явно, а процесс шёл на умолчании) — пусть
+    // идёт новый процесс, как раньше, иначе выбор человека молча потеряется.
+    if (model && model !== options.model) return null;
+    if (permissionMode && permissionMode !== options.permissionMode) return null;
+    if (effort && effort !== options.effort) return null;
+    if ((appendSystemPrompt || '') !== (options.appendSystemPrompt || '')) return null;
+    const [message] = await buildPromptMessages(content, images, files, cwd || options.cwd);
+    const uuid = crypto.randomUUID();
+    if (!pushPromptMessage({ ...message, uuid })) {
+      return null;
+    }
+    clearTimeout(idleReleaseTimer);
+    idleReleaseTimer = null;
+    untrackHeldRun(heldToken);
+    // Пока Claude не забрал сообщение, `result` (например, отчёт фоновой
+    // задачи) — не конец этого хода; та же механика, что у «отправить сейчас».
+    pendingSteerIds.add(uuid);
+    ws = writer;
+    turnCompleteSent = false;
+    lastMessageAt = Date.now();
+    let resolve;
+    const done = new Promise((r) => { resolve = r; });
+    adoptedTurnDone = { resolve };
+    if (sessionKey()) {
+      addSession(sessionKey(), queryInstance, ws, releasePromptStream, steerTurn, adoptTurn);
+    }
+    console.log(`[Claude SDK] сообщение принято живым процессом (фоновая работа идёт): ${sessionKey() || 'NEW'}`);
+    return { done };
+  };
   let idleReleaseTimer = null;
   // The client is told the turn is over as soon as `result` lands, even though
   // the process lingers, so the UI never waits out the idle hold.
@@ -810,6 +925,73 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   // True while the process is being held open for background work, so a later
   // `result` can be recognised as that work reporting back.
   let heldForBackgroundWork = false;
+  // Фоновые задачи, о которых CLI сообщил сам (system/task_started|task_updated|
+  // task_notification, system/background_tasks_changed): пока здесь что-то
+  // есть, конец хода не отпускает процесс. Имена инструментов выше — главный
+  // признак; это — страховка на фон, который CLI завёл сам.
+  const liveBgTaskIds = new Set();
+  const bgToolUseIds = new Set();
+  let cliReportedBgCount = 0;
+  const seenBgSubtypes = new Set();
+  const hasLiveBackgroundWork = () => liveBgTaskIds.size > 0 || cliReportedBgCount > 0;
+  // Сторож молчания читает это время; поднят сюда, чтобы adoptTurn мог его сбросить.
+  let lastMessageAt = Date.now();
+  // Ход, усыновлённый удержанным процессом: обещание «ход закончен» для вызывающего.
+  let adoptedTurnDone = null;
+  const settleAdoptedTurn = () => {
+    const done = adoptedTurnDone;
+    adoptedTurnDone = null;
+    done?.resolve();
+  };
+  const heldToken = {};
+  // Ключ предела удержаний: пользователь, а без userId — этот чат (раньше было
+  // общее на сервер 'none' — предел 4 делили все чаты).
+  const heldRunFallbackKey = `run:${crypto.randomUUID()}`;
+  const heldRunOwnerKey = () => (ws?.userId !== undefined && ws?.userId !== null
+    ? `user:${ws.userId}`
+    : `chat:${sessionKey() || heldRunFallbackKey}`);
+  // Абсолютный потолок удержания (HELD_BG_MAX_MS): отсчёт от первого удержания,
+  // не сбрасывается ни сообщениями CLI, ни новыми ходами в этот процесс.
+  let heldSince = 0;
+  let heldMaxTimer = null;
+  let heldMaxReached = false;
+  const releaseHeldAtCeiling = () => {
+    if (idleReleaseTimer) {
+      clearTimeout(idleReleaseTimer);
+      idleReleaseTimer = null;
+    }
+    heldForBackgroundWork = false;
+    untrackHeldRun(heldToken);
+    releasePromptStream();
+  };
+  const onHeldMax = () => {
+    heldMaxTimer = null;
+    heldMaxReached = true;
+    const heldMin = Math.round((Date.now() - heldSince) / 60000);
+    if (!turnCompleteSent) {
+      // Идёт ход (новое сообщение человека в удержанный процесс): не рвём его,
+      // ввод отпустится в конце хода (holdForBackground).
+      console.warn(`[Claude SDK] потолок удержания ${Math.round(HELD_BG_MAX_MS / 60000)} мин истёк посреди хода (${sessionKey() || 'NEW'}, удержан ${heldMin} мин) — отпущу ввод в конце хода`);
+      return;
+    }
+    console.warn(`[Claude SDK] потолок удержания ${Math.round(HELD_BG_MAX_MS / 60000)} мин истёк (${sessionKey() || 'NEW'}, удержан с ${new Date(heldSince).toISOString()}) — отпускаю ввод; фоновую работу дальше ограничивает потолок CLI ${Math.round(BG_WAIT_CEILING_MS / 60000)} мин`);
+    releaseHeldAtCeiling();
+  };
+  const holdForBackground = () => {
+    if (heldMaxReached) {
+      console.warn(`[Claude SDK] потолок удержания истёк — не держу процесс дальше (${sessionKey() || 'NEW'})`);
+      releaseHeldAtCeiling();
+      return;
+    }
+    heldForBackgroundWork = true;
+    scheduleRelease();
+    if (!heldSince) {
+      heldSince = Date.now();
+      heldMaxTimer = setTimeout(onHeldMax, HELD_BG_MAX_MS);
+      heldMaxTimer.unref?.();
+    }
+    trackHeldRun(heldToken, heldRunOwnerKey(), () => releasePromptStream(), sessionKey() || 'NEW');
+  };
 
   // A new turn supersedes any earlier one still holding this session's process
   // open, so held runs cannot stack up across a conversation.
@@ -825,6 +1007,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     }
     idleReleaseTimer = setTimeout(() => {
       idleReleaseTimer = null;
+      console.warn(`[Claude SDK] ${Math.round(BG_WAIT_CEILING_MS / 60000)} мин без признаков фоновой работы — отпускаю ввод (${sessionKey() || 'NEW'})`);
+      untrackHeldRun(heldToken);
       releasePromptStream();
     }, BG_WAIT_CEILING_MS);
     // Never let the hold keep the server process alive on its own.
@@ -1019,7 +1203,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
     // Track the query instance for abort capability
     if (sessionKey()) {
-      addSession(sessionKey(), queryInstance, ws, releasePromptStream, steerTurn);
+      addSession(sessionKey(), queryInstance, ws, releasePromptStream, steerTurn, adoptTurn);
     }
 
     // Process streaming messages
@@ -1038,7 +1222,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     // оборвать живую работу хуже, чем подождать. Сообщение об обрыве —
     // явное, чтобы человек видел причину, а не пустой экран.
     const STALL_SILENCE_MS = Number(process.env.CHAT_STALL_TIMEOUT_MS || 15 * 60 * 1000);
-    let lastMessageAt = Date.now();
+    lastMessageAt = Date.now();
     stallTimer = setInterval(() => {
       if (turnCompleteSent || Date.now() - lastMessageAt < STALL_SILENCE_MS) {
         return;
@@ -1068,6 +1252,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
           sessionId: capturedSessionId || sessionId || null,
           exitCode: 1,
         }));
+        settleAdoptedTurn();
         notifyRunFailed({
           userId: ws?.userId || null,
           provider: 'claude',
@@ -1097,7 +1282,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       if (message.session_id && !capturedSessionId) {
 
         capturedSessionId = message.session_id;
-        addSession(sessionKey(), queryInstance, ws, releasePromptStream, steerTurn);
+        addSession(sessionKey(), queryInstance, ws, releasePromptStream, steerTurn, adoptTurn);
         noteSurvivorProviderSession(sessionId, capturedSessionId);
 
         // Set session ID on writer
@@ -1148,6 +1333,31 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
       if (startsBackgroundWork(message)) {
         backgroundWorkPending = true;
+        for (const block of message.message.content) {
+          if (block?.type === 'tool_use' && block.input?.run_in_background === true && block.id) {
+            bgToolUseIds.add(block.id);
+          }
+        }
+      }
+
+      if (message.type === 'system' && typeof message.subtype === 'string'
+        && (message.subtype.startsWith('task_') || message.subtype === 'background_tasks_changed')) {
+        if (!seenBgSubtypes.has(message.subtype)) {
+          seenBgSubtypes.add(message.subtype);
+          console.log(`[Claude SDK] фон: CLI прислал system/${message.subtype} (${sessionKey() || 'NEW'})`);
+        }
+        if (message.subtype === 'background_tasks_changed' && Array.isArray(message.tasks)) {
+          cliReportedBgCount = message.tasks.filter((task) => task && !task.ambient
+            && (!task.status || task.status === 'running' || task.status === 'pending')).length;
+        } else if (message.subtype === 'task_started' && message.task_id
+          && (message.is_backgrounded === true || bgToolUseIds.has(message.tool_use_id))) {
+          liveBgTaskIds.add(message.task_id);
+        } else if (message.subtype === 'task_updated' && message.task_id && message.patch) {
+          if (message.patch.is_backgrounded === true) liveBgTaskIds.add(message.task_id);
+          if (['completed', 'failed', 'killed'].includes(message.patch.status)) liveBgTaskIds.delete(message.task_id);
+        } else if (message.subtype === 'task_notification' && message.task_id) {
+          liveBgTaskIds.delete(message.task_id);
+        }
       }
 
       if (message.type === 'result' && pendingSteerIds.size > 0
@@ -1164,12 +1374,12 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             turnCompleteSent = true;
             ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
           }
+          settleAdoptedTurn();
           // Как в обычной ветке `result` ниже: начатая в ходе фоновая работа
           // держит канал открытым, иначе её убило бы закрытие канала.
-          if (backgroundWorkPending) {
+          if (backgroundWorkPending || hasLiveBackgroundWork()) {
             backgroundWorkPending = false;
-            heldForBackgroundWork = true;
-            scheduleRelease();
+            holdForBackground();
           } else {
             releasePromptStream();
           }
@@ -1212,21 +1422,24 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
           await generateRealSessionTitle(queryInstance, command);
         }
 
-        if (backgroundWorkPending) {
+        settleAdoptedTurn();
+
+        if (backgroundWorkPending || hasLiveBackgroundWork()) {
           // Work started during this turn is still running. Hold the process
           // open so it can finish and report back in a follow-up turn; the
           // ceiling is only a backstop for work that never reports.
           backgroundWorkPending = false;
-          heldForBackgroundWork = true;
-          scheduleRelease();
+          holdForBackground();
         } else {
           // Either nothing was backgrounded, or the background work just
           // reported in — let the CLI exit now, as it always has.
           heldForBackgroundWork = false;
+          untrackHeldRun(heldToken);
           releasePromptStream();
         }
-      } else if (idleReleaseTimer) {
-        // Background activity after the turn — push the countdown back out.
+      } else if (idleReleaseTimer && signalsBackgroundActivity(message)) {
+        // Real activity after the turn — push the silence countdown back out.
+        // The absolute hold ceiling (heldMaxTimer) is deliberately left alone.
         scheduleRelease();
       }
     }
@@ -1313,10 +1526,16 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       clearTimeout(idleReleaseTimer);
       idleReleaseTimer = null;
     }
+    if (heldMaxTimer) {
+      clearTimeout(heldMaxTimer);
+      heldMaxTimer = null;
+    }
     if (steerFallbackTimer) {
       clearTimeout(steerFallbackTimer);
       steerFallbackTimer = null;
     }
+    untrackHeldRun(heldToken);
+    settleAdoptedTurn();
     releasePromptStream();
   }
 }
@@ -1427,6 +1646,23 @@ async function steerClaudeSDKSession(sessionId, payload) {
   }
 }
 
+/**
+ * Новое сообщение человека — новым ходом в процесс, удержанный ради фоновой
+ * работы (см. adoptTurn). null — такого процесса нет, нужен обычный запуск.
+ */
+async function adoptHeldClaudeTurn(sessionId, payload) {
+  const session = getSession(sessionId);
+  if (!session?.adopt || session.status !== 'active') {
+    return null;
+  }
+  try {
+    return (await session.adopt(payload)) || null;
+  } catch (error) {
+    console.error(`[Claude SDK] не удалось передать сообщение живому процессу ${sessionId}:`, error?.message || error);
+    return null;
+  }
+}
+
 function reconnectSessionWriter(sessionId, newRawWs) {
   const session = getSession(sessionId);
   if (!session?.writer?.updateWebSocket) return false;
@@ -1439,6 +1675,7 @@ export const claudeRuntime = {
   run: queryClaudeSDK,
   abort: abortClaudeSDKSession,
   steer: steerClaudeSDKSession,
+  adopt: adoptHeldClaudeTurn,
   permissions: {
     resolve: resolveToolApproval,
     listPending: getPendingApprovalsForSession,

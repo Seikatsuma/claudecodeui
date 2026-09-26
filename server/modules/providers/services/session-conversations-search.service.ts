@@ -12,8 +12,9 @@ import {
   type RecordExtractor,
   type SearchableRole,
 } from '@/modules/providers/services/session-search-index.service.js';
+import { canonicalizeAccountDir, getActiveAccountDir } from '@/shared/session-scope.js';
 import type { ServerScope } from '@/shared/types.js';
-import { normalizeServerScope } from '@/shared/utils.js';
+import { isTranscriptServiceText, normalizeServerScope, stripInjectedContext } from '@/shared/utils.js';
 
 type AnyRecord = Record<string, any>;
 type SearchableProvider = 'claude' | 'codex';
@@ -425,6 +426,13 @@ function extractClaudeSearchableMessage(entry: AnyRecord): ClaudeSearchableMessa
 
   const rawRole = entry.message.role;
   if (rawRole !== 'user' && rawRole !== 'assistant') {
+    return null;
+  }
+
+  // Служебные вставки от имени человека (подпись к снимку «[Image: …]»,
+  // загрузка навыка, «продолжай с места»): чат их не показывает, значит и
+  // искать в них и показывать их в превью главного экрана нечего.
+  if (rawRole === 'user' && entry.isMeta === true && entry.isCompactSummary !== true) {
     return null;
   }
 
@@ -1128,6 +1136,110 @@ export async function warmSearchIndexes(signal?: AbortSignal): Promise<{ files: 
   return { files: done, ms: Date.now() - startedAt };
 }
 
+// ---------------------------
+// Превью чатов для главного экрана: последние слова человека и последний
+// ответ — чтобы по строке было понятно, что это за чат и на чём остановились.
+// Берутся из хвоста выжимки поиска (она уже держит видимые сообщения каждого
+// чата и дочитывает только новые байты), а не из сырой переписки: хвост
+// выжимки — десятки килобайт, переписка — до сотни мегабайт.
+
+/** Больше за раз не отдаём: главный экран показывает последний чат и пять недавних. */
+const PREVIEW_MAX_SESSIONS = 12;
+/** Хвост выжимки, в котором ищутся последние сообщения. */
+const PREVIEW_TAIL_BYTES = 256 * 1024;
+const PREVIEW_TEXT_LIMIT = 240;
+/** Вставки веб-чата и хуков в сообщении человека: вложения, вставленный текст, напоминания. */
+const PREVIEW_WRAPPER_BLOCKS = /<(files_input|pasted_content|system-reminder|user-prompt-submit-hook)\b[^>]*>[\s\S]*?<\/\1>/g;
+
+type SessionPreview = {
+  lastUserText: string | null;
+  lastAssistantText: string | null;
+};
+
+function previewText(text: string): string {
+  const flat = text.replace(PREVIEW_WRAPPER_BLOCKS, ' ').replace(/\s+/g, ' ').trim();
+  return flat.length > PREVIEW_TEXT_LIMIT ? `${flat.slice(0, PREVIEW_TEXT_LIMIT).trimEnd()}…` : flat;
+}
+
+async function readIndexTail(indexPath: string): Promise<string[]> {
+  const handle = await fsSync.promises.open(indexPath, 'r');
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, PREVIEW_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    // Хвост начался с середины строки — первая строка оборвана.
+    if (length < size) lines.shift();
+    return lines;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readSessionPreview(sessionId: string, projectsRoot: string): Promise<SessionPreview | null> {
+  const row = sessionsDb.getSessionById(sessionId);
+  if (!row || !row.jsonl_path || (row.provider && row.provider !== 'claude')) {
+    return null;
+  }
+  // Номер чата в базе общий на всех пользователей сайта: чужую переписку
+  // отсекает только то, что её файл лежит в папке аккаунта запроса.
+  if (!canonicalizeAccountDir(row.jsonl_path).startsWith(projectsRoot)) {
+    return null;
+  }
+
+  const indexPath = await ensureSearchIndex(row.jsonl_path, 'claude', claudeRecordExtractor);
+  if (!indexPath) {
+    return null;
+  }
+
+  const conversationId = row.provider_session_id || row.session_id;
+  const lines = await readIndexTail(indexPath);
+  const preview: SessionPreview = { lastUserText: null, lastAssistantText: null };
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (preview.lastUserText && preview.lastAssistantText) {
+      break;
+    }
+    let message: IndexedMessage;
+    try {
+      message = JSON.parse(lines[index]) as IndexedMessage;
+    } catch {
+      continue;
+    }
+    if ((message.s && message.s !== conversationId) || typeof message.x !== 'string') {
+      continue;
+    }
+    if (message.r === 'user') {
+      const raw = message.x.trim();
+      // Уведомление фоновой задачи или отзыв хука — не слова человека: ищем выше.
+      if (preview.lastUserText || isTranscriptServiceText(raw)) {
+        continue;
+      }
+      preview.lastUserText = previewText(stripInjectedContext(raw)) || null;
+    } else if (!preview.lastAssistantText) {
+      preview.lastAssistantText = previewText(message.x) || null;
+    }
+  }
+  return preview;
+}
+
+async function readSessionPreviews(sessionIds: string[]): Promise<Record<string, SessionPreview>> {
+  const projectsRoot = path.join(getActiveAccountDir(), 'projects') + path.sep;
+  const ids = Array.from(new Set(sessionIds)).slice(0, PREVIEW_MAX_SESSIONS);
+  const previews: Record<string, SessionPreview> = {};
+  await Promise.all(ids.map(async (sessionId) => {
+    try {
+      const preview = await readSessionPreview(sessionId, projectsRoot);
+      if (preview) {
+        previews[sessionId] = preview;
+      }
+    } catch (error) {
+      console.warn('[session-previews] превью не собрано:', sessionId, error instanceof Error ? error.message : error);
+    }
+  }));
+  return previews;
+}
+
 /**
  * Application service for session-conversation search.
  *
@@ -1148,5 +1260,13 @@ export const sessionConversationsSearchService = {
       input.onTitleResults ?? null,
       { projectId: input.projectId ?? null, serverScope: input.serverScope ?? null },
     );
+  },
+
+  /**
+   * Последние слова человека и последний ответ по списку чатов — для строк
+   * главного экрана. Чаты чужого аккаунта и не Claude пропускаются молча.
+   */
+  readPreviews(sessionIds: string[]): Promise<Record<string, SessionPreview>> {
+    return readSessionPreviews(sessionIds);
   },
 };

@@ -24,6 +24,8 @@
 import { createReadStream } from 'node:fs';
 import readline from 'node:readline';
 
+import { isTranscriptServiceText, stripInjectedContext } from '@/shared/utils.js';
+
 /** Потолок одного сообщения человека: длинные вставки (логи, тексты) режутся. */
 const HUMAN_MESSAGE_MAX_CHARS = 6000;
 /** Потолок одного текстового ответа агента. */
@@ -55,35 +57,11 @@ export type TranscriptDigest = {
   hadCompaction: boolean;
 };
 
-const SERVICE_PREFIXES = [
-  '<task-notification>',
-  '<local-command-stdout>',
-  '<local-command-stderr>',
-  '<local-command-caveat>',
-  '<command-name>',
-  '<command-message>',
-  '<bash-input>',
-  '<bash-stdout>',
-  '<bash-stderr>',
-  '[Request interrupted',
-  'Welcome to Ubuntu',
-  'Last login:',
-  'Stop hook feedback',
-  'This session is being continued from a previous conversation',
-];
-
 function clip(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)} …[обрезано, всего ${text.length} зн.]`;
 }
 
-/** Убирает вставки хуков и среды: человек их не писал. */
-function stripInjected(text: string): string {
-  return text
-    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
-    .replace(/<user-prompt-submit-hook>[\s\S]*?<\/user-prompt-submit-hook>/g, '')
-    .trim();
-}
 
 function textOfContent(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -179,7 +157,7 @@ function createDigestBuilder(providerSessionId: string | null) {
 
     if (entry.type === 'user') {
       if (entry.isCompactSummary) {
-        const summary = stripInjected(textOfContent(content));
+        const summary = stripInjectedContext(textOfContent(content));
         if (summary) entries.push({ kind: 'compact', at, text: clip(summary, COMPACT_SUMMARY_MAX_CHARS) });
         return;
       }
@@ -197,8 +175,8 @@ function createDigestBuilder(providerSessionId: string | null) {
         return;
       }
       const raw = textOfContent(content).trim();
-      if (SERVICE_PREFIXES.some((prefix) => raw.startsWith(prefix))) return;
-      const text = stripInjected(raw);
+      if (isTranscriptServiceText(raw)) return;
+      const text = stripInjectedContext(raw);
       if (!text && !hasImage(content)) return;
       const withImage = hasImage(content) ? `${text}${text ? ' ' : ''}[приложено изображение]` : text;
       entries.push({ kind: 'human', at, text: clip(withImage, HUMAN_MESSAGE_MAX_CHARS) });

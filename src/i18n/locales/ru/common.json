@@ -103,7 +103,15 @@
     "sessionCount_one": "{{count}} сеанс",
     "sessionCount_few": "{{count}} сеанса",
     "sessionCount_many": "{{count}} сеансов",
-    "sessionCount_other": "{{count}} сеанса"
+    "sessionCount_other": "{{count}} сеанса",
+    "newChat": "Новый чат",
+    "newChatIn": "Новый чат в папке «{{name}}»",
+    "recentChats": "Недавние чаты",
+    "allChats": "Все чаты",
+    "statusRunning": "работает",
+    "statusNewReply": "новый ответ",
+    "folders": "Папки",
+    "lastChat": "Последний чат"
   },
   "fileTree": {
     "loading": "Загрузка файлов...",

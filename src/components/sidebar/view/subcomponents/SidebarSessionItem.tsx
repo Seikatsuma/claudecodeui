@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Edit2, Loader2, MoreHorizontal, Server, Trash2, X } from 'lucide-react';
+import { Check, Copy, Edit2, Flag, FlagOff, Loader2, MoreHorizontal, Server, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { ActionMenu, Badge, Dialog, DialogContent, DialogTitle, Tooltip, buttonVariants } from '../../../../shared/view/ui';
@@ -125,6 +125,29 @@ export default function SidebarSessionItem({
     }
   };
 
+  // Ярлык-флажок. Меняем сразу на экране, не дожидаясь сервера; при
+  // следующей загрузке списка значение придёт из базы. Ошибка — возвращаем
+  // как было.
+  const [flaggedOverride, setFlaggedOverride] = useState<boolean | null>(null);
+  const isFlagged = flaggedOverride ?? Boolean(session.flagged);
+  useEffect(() => {
+    setFlaggedOverride(null);
+  }, [session.flagged]);
+  const flagLabel = isFlagged
+    ? t('sessions.removeFlag', { defaultValue: 'Снять ярлык' })
+    : t('sessions.addFlag', { defaultValue: 'Повесить ярлык' });
+  const toggleFlag = async () => {
+    const next = !isFlagged;
+    setFlaggedOverride(next);
+    try {
+      const response = await api.setSessionFlagged(session.id, next);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      setFlaggedOverride(!next);
+      console.error('[Sidebar] Не удалось изменить ярлык чата:', error);
+    }
+  };
+
   // Sessions are owned by a project identified by `projectId` (DB primary key)
   // after the projectName → projectId migration.
   const selectMobileSession = () => {
@@ -224,6 +247,20 @@ export default function SidebarSessionItem({
           : `${providerLabel} session ID unavailable`
         : `Copy ${providerLabel} session ID`;
 
+  // Ярлык встаёт на место значка Claude слева: квадратик тот же, поэтому
+  // название чата не становится короче ни на пиксель.
+  const flagTileContent = isFlagged ? (
+    <Flag
+      className="h-3 w-3 text-white"
+      fill="currentColor"
+      strokeWidth={2.5}
+      role="img"
+      aria-label={t('sessions.flagged', { defaultValue: 'С ярлыком' })}
+    />
+  ) : (
+    <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
+  );
+
   return (
     <div className="group relative">
       {(showAttentionIndicator || showRecentIndicator) && (
@@ -258,6 +295,7 @@ export default function SidebarSessionItem({
               : !isSelected && sessionView.isActive
               ? 'border-green-500/30 bg-green-50/5 dark:bg-green-900/5'
               : 'border-border/30',
+            isFlagged && 'border-red-500/50',
           )}
           onClick={selectMobileSession}
         >
@@ -265,10 +303,10 @@ export default function SidebarSessionItem({
             <div
               className={cn(
                 'w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0',
-                isSelected ? 'bg-primary/10' : 'bg-muted/50',
+                isFlagged ? 'bg-red-500' : isSelected ? 'bg-primary/10' : 'bg-muted/50',
               )}
             >
-              <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
+              {flagTileContent}
             </div>
 
             <div className="min-w-0 flex-1">
@@ -418,6 +456,20 @@ export default function SidebarSessionItem({
                   </span>
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileOptionsOpen(false);
+                    void toggleFlag();
+                  }}
+                  className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-border bg-muted/35 px-4 py-3 text-left text-foreground transition-colors active:bg-muted"
+                >
+                  {isFlagged
+                    ? <FlagOff className="h-5 w-5 flex-shrink-0" />
+                    : <Flag className="h-5 w-5 flex-shrink-0" />}
+                  <span className="text-sm font-medium">{flagLabel}</span>
+                </button>
+
                 {!isProcessing && (
                   <button
                     type="button"
@@ -459,6 +511,7 @@ export default function SidebarSessionItem({
               : !isSelected && sessionView.isActive
                 ? 'border-green-500/30 bg-green-50/5 hover:bg-green-50/10 dark:bg-green-900/5 dark:hover:bg-green-900/10'
                 : 'hover:bg-accent/50',
+            isFlagged && 'border-red-500/50',
           )}
           // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click and the
           // native right-click menu use the href to open a new tab/window.
@@ -472,10 +525,10 @@ export default function SidebarSessionItem({
             <div
               className={cn(
                 'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md',
-                isSelected ? 'bg-primary/10' : 'bg-muted/50',
+                isFlagged ? 'bg-red-500' : isSelected ? 'bg-primary/10' : 'bg-muted/50',
               )}
             >
-              <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
+              {flagTileContent}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -594,6 +647,12 @@ export default function SidebarSessionItem({
                     loading: isCopyPending,
                     closeOnSelect: false,
                     onSelect: handleCopyAction,
+                  },
+                  {
+                    key: 'flag',
+                    label: flagLabel,
+                    icon: isFlagged ? FlagOff : Flag,
+                    onSelect: () => { void toggleFlag(); },
                   },
                   ...(secondServerLabel ? [{
                     key: 'server-scope',

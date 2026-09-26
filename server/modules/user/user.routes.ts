@@ -86,6 +86,24 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
     res.json({ ok: true });
   });
 
+  // Сбой запуска страницы на телефоне — только в журнал службы (`[boot-probe]`).
+  // Белый экран на iPhone (25.09.26) не оставлял следа: страница не дошла до
+  // подключения, а сервер об этом не знал. Страховка в index.html шлёт сюда, что
+  // случилось — упала программа, не загрузился файл, телефон выгрузил страницу.
+  // Ключ входа приходит в адресе: в момент сбоя страница шлёт маяком без заголовков.
+  router.post('/boot-probe', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const fields: Record<string, number | boolean | string | string[]> = {};
+    for (const [key, value] of Object.entries(body).slice(0, 30)) {
+      if (typeof value === 'number' && Number.isFinite(value)) fields[key] = Math.round(value);
+      else if (typeof value === 'boolean') fields[key] = value;
+      else if (typeof value === 'string') fields[key] = value.slice(0, 300);
+      else if (Array.isArray(value)) fields[key] = value.slice(0, 8).map((item) => String(item).slice(0, 300));
+    }
+    console.log(`[boot-probe] user=${readUserId(req)} ${JSON.stringify(fields)}`);
+    res.json({ ok: true });
+  });
+
   router.get('/usage-limits', async (req, res, next) => {
     try {
       res.json(await service.getUsageLimits(readUserId(req)));

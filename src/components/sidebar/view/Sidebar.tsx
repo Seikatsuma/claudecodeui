@@ -7,7 +7,7 @@ import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useAuth } from '../../auth/context/AuthContext';
 import { authenticatedFetch } from '../../../utils/api';
 import { useSidebarController } from '../hooks/useSidebarController';
-import { effectiveScope, setSecondServerLabel, useSecondServerLabel, useServerScope } from '../hooks/useServerScope';
+import { scopeProjectsToServer, setSecondServerLabel, useSecondServerLabel, useServerScope } from '../hooks/useServerScope';
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
@@ -108,41 +108,12 @@ function Sidebar({
   const [storedServerScope] = useServerScope();
   const serverScope: ServerScope = secondServerLabel ? storedServerScope : 'main';
 
-  // Панель показывает дела одного блока за раз. Папка попадает в блок, если
-  // сама к нему приписана ИЛИ если в ней есть чат, перенесённый в этот блок
-  // поимённо: перенос чата — признак в базе, файл переписки остаётся в своей
-  // папке, поэтому чат виден там же, где и лежит, но в другом блоке.
-  const scopedProjects = useMemo(() => {
-    if (!secondServerLabel) {
-      return projects;
-    }
-
-    return projects.reduce<Project[]>((kept, project) => {
-      const projectScope: ServerScope = project.serverScope ?? 'main';
-      const allSessions = project.sessions ?? [];
-      const sessions = allSessions.filter(
-        (session) => effectiveScope(session.serverScope as ServerScope | null | undefined, projectScope) === serverScope,
-      );
-
-      if (projectScope !== serverScope && sessions.length === 0) {
-        return kept;
-      }
-
-      kept.push(
-        sessions.length === allSessions.length
-          ? project
-          : {
-            ...project,
-            sessions,
-            sessionMeta: {
-              hasMore: project.sessionMeta?.hasMore ?? false,
-              total: sessions.length,
-            },
-          },
-      );
-      return kept;
-    }, []);
-  }, [projects, serverScope, secondServerLabel]);
+  // Панель показывает дела одного блока за раз (правило отбора — в
+  // scopeProjectsToServer, общее с главным экраном).
+  const scopedProjects = useMemo(
+    () => scopeProjectsToServer(projects, serverScope, Boolean(secondServerLabel)),
+    [projects, serverScope, secondServerLabel],
+  );
   const { preferences, setPreference } = useUiPreferences();
   const { sidebarVisible } = preferences;
   const { setCurrentProject, mcpServerStatus } = useTaskMaster() as TaskMasterSidebarContext;

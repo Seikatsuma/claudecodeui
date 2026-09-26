@@ -529,6 +529,18 @@ const addServerScopeColumns = (db: Database): void => {
 };
 
 /**
+ * Добавляет `is_flagged` чатам — ярлык-флажок, который Егор вешает на чат
+ * из меню «…», чтобы тот был заметен в списке. На порядок чатов не влияет.
+ */
+const addSessionFlagColumn = (db: Database): void => {
+  if (!tableExists(db, 'sessions')) {
+    return;
+  }
+  const columnNames = getTableInfo(db, 'sessions').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'is_flagged', 'INTEGER NOT NULL DEFAULT 0');
+};
+
+/**
  * Adds `account_dir` (which Claude account a transcript belongs to) and
  * `origin` (terminal / web / auto — see server/shared/session-scope.ts).
  *
@@ -648,6 +660,7 @@ export const runMigrations = (db: Database) => {
     addSessionGroupColumns(db);
     addSessionAccountAndOriginColumns(db);
     addServerScopeColumns(db);
+    addSessionFlagColumn(db);
     ensureProjectsForSessionPaths(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');

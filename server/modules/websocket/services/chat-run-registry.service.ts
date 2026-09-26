@@ -102,6 +102,7 @@ async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<vo
       // Блок верхней панели: без него живое обновление вернуло бы
       // перенесённый чат в «Проекты» до перезагрузки страницы.
       serverScope: row.server_scope ?? null,
+      flagged: Boolean(row.is_flagged),
     },
     project: project
       ? {

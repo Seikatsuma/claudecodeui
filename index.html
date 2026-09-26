@@ -7,6 +7,269 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Claude UI</title>
 
+    <!--
+      Страховка запуска: страница никогда не остаётся белой молча.
+
+      25.09.26, в который раз: приложение с экрана «Домой» на iPhone открылось
+      белым. Сервер в это время был свободен, страница не дошла даже до
+      подключения, и никакого следа не осталось — ни у сервера, ни на экране.
+      iPhone выгружает страницу из памяти в фоне или при нехватке памяти и
+      потом поднимает её заново; если в этот момент программа не загрузилась
+      или упала, остаётся пустой лист без единой кнопки.
+
+      Этот кусок стоит в самой странице, до программы, поэтому работает, даже
+      когда программа не загрузилась вовсе:
+        · программа не нарисовала экран за 15 с (пока файлы качаются без ошибок — до минуты), упала при запуске или её экран
+          опустел — страница сама перезапускается (не больше двух раз подряд),
+          дальше показывает экран с кнопками вместо белого листа;
+        · при возврате в приложение с пустым экраном — перезапуск сразу;
+        · каждый такой случай и каждый «телефон выгрузил страницу, не
+          попрощавшись» уходит в журнал службы строкой [boot-probe].
+    -->
+    <script>
+      (function () {
+        var ATTEMPTS_KEY = 'boot-guard-attempts';
+        var BEAT_KEY = 'boot-guard-beat';
+        // 15 с — первая проверка; пока файлы программы ещё качаются без ошибок
+        // (медленная мобильная сеть, холодный запуск после выкатки ~10 с), ждём
+        // дальше, до минуты. Перезапуск — только при ошибке или когда всё
+        // скачалось, а экрана нет.
+        var START_TIMEOUT_MS = 15000;
+        var LOADING_GRACE_MS = 60000;
+        var MAX_AUTO_RELOADS = 2;
+        var guard = (window.__bootGuard = { started: Date.now(), errors: [], mountedOnce: false, done: false });
+
+        function store(key, value) {
+          try { if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } catch (e) {}
+        }
+        function load(key) {
+          try { return sessionStorage.getItem(key); } catch (e) { return null; }
+        }
+        // Без хранилища (Safari с запретом данных сайтов) счётчик перезапусков
+        // не переживёт перезагрузку — автоперезапуск там был бы вечным циклом.
+        var storageWorks = (function () {
+          try { sessionStorage.setItem('boot-guard-probe', '1'); return sessionStorage.getItem('boot-guard-probe') === '1'; }
+          catch (e) { return false; }
+        })();
+
+        // Фон до программы — под тему, чтобы запуск не вспыхивал белым.
+        try {
+          var theme = localStorage.getItem('theme');
+          var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.style.background = dark ? '#141414' : '#f7f5f1';
+          // Заставке «Открываю…» — те же цвета: тело страницы до запуска
+          // программы красится стилями в светлый, поверх него нужен свой фон.
+          document.documentElement.style.setProperty('--boot-bg', dark ? '#141414' : '#f7f5f1');
+          document.documentElement.style.setProperty('--boot-fg', dark ? '#ececec' : '#1f1f1f');
+          document.documentElement.style.setProperty('--boot-dim', dark ? '#a1a1aa' : '#6b6b6b');
+        } catch (e) {}
+
+        function report(kind, extra) {
+          try {
+            var token = localStorage.getItem('auth-token');
+            if (!token || !window.fetch) return;
+            var nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || {};
+            var body = {
+              kind: kind,
+              sinceStartMs: Date.now() - guard.started,
+              nav: nav.type || '',
+              standalone: !!navigator.standalone,
+              visible: document.visibilityState,
+              online: navigator.onLine,
+              path: location.pathname.slice(0, 60),
+              mountedOnce: guard.mountedOnce,
+              errors: guard.errors.slice(-6),
+              ua: navigator.userAgent.slice(0, 160),
+            };
+            for (var key in extra || {}) body[key] = extra[key];
+            // keepalive доносит запрос и при уходе со страницы, а ключ идёт
+            // заголовком — в адресе он попал бы в журнал веб-сервера.
+            fetch('/api/user/boot-probe', {
+              method: 'POST',
+              keepalive: true,
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+              body: JSON.stringify(body),
+            }).catch(function () {});
+          } catch (e) {}
+        }
+        guard.report = report;
+
+        window.addEventListener('error', function (event) {
+          var target = event.target;
+          if (target && target !== window && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+            var file = (target.src || target.href || '').replace(location.origin, '');
+            guard.errors.push('не загрузился файл ' + file);
+            // Ждать дальше бессмысленно, только если не пришёл файл самой
+            // программы; упавшая картинка или чужой скрипт — не повод.
+            if (file.indexOf('/assets/') === 0) guard.fatalLoad = true;
+          } else {
+            guard.errors.push(String(event.message || event.error || 'ошибка').slice(0, 240));
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event.reason;
+          guard.errors.push('promise: ' + String((reason && reason.message) || reason).slice(0, 240));
+        });
+
+        function rootFilled() {
+          var root = document.getElementById('root');
+          return !!(root && root.firstElementChild);
+        }
+
+        function attempts() {
+          var raw = load(ATTEMPTS_KEY);
+          if (!raw) return 0;
+          var parts = raw.split(':');
+          // Давняя серия не считается: лимит защищает от цикла, а не от сбоя раз в день.
+          return Date.now() - Number(parts[1]) < 120000 ? Number(parts[0]) || 0 : 0;
+        }
+
+        function showRescue(reason) {
+          if (document.getElementById('boot-rescue')) return;
+          var dark = document.documentElement.style.background !== 'rgb(247, 245, 241)';
+          var fg = dark ? '#e7e7ea' : '#1c1c1e';
+          var muted = dark ? '#a1a1aa' : '#5b5b60';
+          var box = document.createElement('div');
+          box.id = 'boot-rescue';
+          box.setAttribute('style',
+            'position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;' +
+            'justify-content:center;gap:14px;padding:24px;text-align:center;box-sizing:border-box;' +
+            'background:' + (dark ? '#141414' : '#f7f5f1') + ';color:' + fg + ';' +
+            'font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif');
+          var button = 'padding:12px 20px;border:0;border-radius:12px;font-size:16px;width:100%;max-width:300px;';
+          box.innerHTML =
+            '<b style="font-size:18px;font-weight:600">Приложение не запустилось</b>' +
+            '<p style="margin:0;max-width:22rem;color:' + muted + '">Два перезапуска подряд не помогли. ' +
+            'Нажмите «Открыть заново». Если снова так — «Сбросить и открыть»: телефон забудет ' +
+            'сохранённую копию сайта и скачает свежую, вход и чаты останутся.</p>' +
+            '<button id="boot-rescue-reload" style="' + button + 'background:#3b82f6;color:#fff">Открыть заново</button>' +
+            '<button id="boot-rescue-reset" style="' + button + 'background:transparent;color:' + fg +
+            ';border:1px solid ' + muted + '">Сбросить и открыть</button>' +
+            '<small style="color:' + muted + ';max-width:22rem;word-break:break-word">' +
+            String(reason).replace(/[<>&]/g, '') + '</small>';
+          document.body.appendChild(box);
+          document.getElementById('boot-rescue-reload').onclick = function () {
+            store(ATTEMPTS_KEY, null);
+            location.reload();
+          };
+          document.getElementById('boot-rescue-reset').onclick = function () {
+            store(ATTEMPTS_KEY, null);
+            report('rescue-reset', {});
+            var jobs = [];
+            try {
+              if (navigator.serviceWorker) {
+                jobs.push(navigator.serviceWorker.getRegistrations().then(function (list) {
+                  return Promise.all(list.map(function (r) { return r.unregister(); }));
+                }));
+              }
+              if (window.caches) {
+                jobs.push(caches.keys().then(function (keys) {
+                  return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+                }));
+              }
+            } catch (e) {}
+            Promise.all(jobs).catch(function () {}).then(function () { location.reload(); });
+            setTimeout(function () { location.reload(); }, 3000);
+          };
+        }
+
+        // Одна точка решения: перезапустить самим или показать экран с кнопками.
+        function recover(reason) {
+          if (guard.done) return;
+          guard.done = true;
+          var n = attempts();
+          if (storageWorks && n < MAX_AUTO_RELOADS) {
+            store(ATTEMPTS_KEY, (n + 1) + ':' + Date.now());
+            report('auto-reload', { reason: reason, attempt: n + 1 });
+            setTimeout(function () { location.reload(); }, 300);
+          } else {
+            report('rescue-screen', { reason: reason, attempt: n });
+            showRescue(reason);
+          }
+        }
+        guard.recover = recover;
+
+        function check(why) {
+          if (guard.done) return;
+          if (rootFilled()) return;
+          var last = guard.errors[guard.errors.length - 1];
+          recover(why + (last ? ' · ' + last : ''));
+        }
+
+        // Программа не нарисовала экран — ждём, пока страница видна: в фоне iOS
+        // замораживает всё, и секунды там ничего не значат.
+        // Докачка ещё идёт — или только что закончилась: программе нужно
+        // мгновение, чтобы нарисовать первый экран после загрузки файлов.
+        window.addEventListener('load', function () { guard.loadedAt = Date.now(); });
+        function stillLoading() {
+          if (guard.fatalLoad || Date.now() - guard.started >= LOADING_GRACE_MS) return false;
+          return document.readyState !== 'complete' || !guard.loadedAt || Date.now() - guard.loadedAt < 5000;
+        }
+        function armStartTimer(delay) {
+          setTimeout(function () {
+            if (guard.mountedOnce || guard.done) return;
+            if (document.visibilityState === 'hidden') return;
+            if (stillLoading()) { armStartTimer(3000); return; }
+            check('экран не появился за ' + Math.round((Date.now() - guard.started) / 1000) + ' с');
+          }, delay);
+        }
+        armStartTimer(START_TIMEOUT_MS);
+
+        document.addEventListener('DOMContentLoaded', function () {
+          var root = document.getElementById('root');
+          if (!root || !window.MutationObserver) return;
+          var emptyTimer = null;
+          new MutationObserver(function () {
+            if (root.firstElementChild) {
+              if (!guard.mountedOnce) {
+                guard.mountedOnce = true;
+                // Удачный запуск, проживший 20 с, обнуляет серию перезапусков.
+                setTimeout(function () { if (rootFilled()) store(ATTEMPTS_KEY, null); }, 20000);
+              }
+              if (emptyTimer) { clearTimeout(emptyTimer); emptyTimer = null; }
+            } else if (guard.mountedOnce && !emptyTimer) {
+              // Экран был и опустел — так выглядит падение программы без перехвата.
+              emptyTimer = setTimeout(function () { check('экран программы опустел'); }, 1500);
+            }
+          }).observe(root, { childList: true });
+        });
+
+        // Возврат в приложение: белый лист — перезапуск сразу, без ожидания.
+        function onReturn() {
+          if (document.visibilityState !== 'visible') return;
+          if (!guard.mountedOnce && Date.now() - guard.started > START_TIMEOUT_MS && !stillLoading()) {
+            check('возврат в приложение, экрана нет');
+          } else if (guard.mountedOnce && !rootFilled()) {
+            check('возврат в приложение, экран пуст');
+          }
+        }
+        document.addEventListener('visibilitychange', onReturn);
+        // pageshow приходит и в конце обычной загрузки — возвратом считается
+        // только восстановление страницы из памяти браузера (persisted).
+        window.addEventListener('pageshow', function (event) { if (event.persisted) onReturn(); });
+
+        // Выгрузил ли телефон прошлую страницу, не попрощавшись. Пульс пишется
+        // раз в 5 с, прощание — в pagehide. Пульс без прощания = страницу убили.
+        var beat = load(BEAT_KEY);
+        if (beat && beat.indexOf('bye') === -1) {
+          var lastBeat = Number(beat.split(':')[0]);
+          guard.previousKilled = true;
+          setTimeout(function () {
+            report('page-was-killed', { silentForSec: Math.round((Date.now() - lastBeat) / 1000), lastState: beat.split(':')[1] || '' });
+          }, 4000);
+        }
+        // После прощания пульс молчит: браузер шлёт «страница скрыта» уже после
+        // pagehide, и без этого обычная перезагрузка выглядела бы как убийство.
+        var leaving = false;
+        function pulse() { if (!leaving) store(BEAT_KEY, Date.now() + ':' + document.visibilityState); }
+        pulse();
+        setInterval(pulse, 5000);
+        document.addEventListener('visibilitychange', pulse);
+        window.addEventListener('pagehide', function () { leaving = true; store(BEAT_KEY, Date.now() + ':bye'); });
+        window.addEventListener('pageshow', function () { leaving = false; pulse(); });
+      })();
+    </script>
+
     <!-- Fonts: Encode Sans (UI) + Merriweather (chat), self-hosted.
          These used to come straight from fonts.googleapis.com as a
          render-blocking stylesheet, so on any network where Google Fonts is
@@ -55,6 +318,28 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Заставка до первого экрана приложения (26.09.26). Раньше до запуска
+         программы экран был пустым, а на iPhone в тёмной теме — чисто чёрным,
+         и Егор не понимал, идёт ли что-то вообще («пусть хоть экран с инфо,
+         что идёт загрузка»). Чистый HTML/CSS, без скриптов: видна, даже если
+         программа не скачалась. Прячется сама, как только в #root появился
+         экран (#root:not(:empty)). Вторая строка — через 4 с, чтобы быстрый
+         запуск не мигал лишним текстом. Страховка запуска (boot-rescue) не
+         затронута: она смотрит только в #root. -->
+    <div id="boot-splash" aria-live="polite">
+      <b>Открываю Claude UI…</b>
+      <p>Загружаю приложение. Если идёт обновление или связь слабая, это займёт до минуты.</p>
+    </div>
+    <style>
+      #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:10px;padding:24px;text-align:center;box-sizing:border-box;pointer-events:none;
+        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        background:var(--boot-bg,#f7f5f1);color:var(--boot-fg,#1f1f1f)}
+      #boot-splash b{font-size:18px;font-weight:600}
+      #boot-splash p{margin:0;max-width:20rem;color:var(--boot-dim,#6b6b6b);opacity:0;animation:boot-splash-hint .3s 4s forwards}
+      @keyframes boot-splash-hint{to{opacity:1}}
+      #root:not(:empty) ~ #boot-splash{display:none}
+    </style>
     <script type="module" src="/src/main.jsx"></script>
     
     <!-- Service Worker Registration -->

@@ -1228,6 +1228,8 @@ export function useProjectsState({
     refreshProjectsSilently,
     registerOptimisticSession,
     sidebarSharedProps,
+    // Главному экрану — метка «новый ответ» у недавних чатов.
+    attentionSessionIds,
     handleProjectSelect,
     handleSessionSelect,
     handleNewSession,

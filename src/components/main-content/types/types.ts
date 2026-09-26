@@ -79,6 +79,8 @@ export type MainContentProps = {
   onSessionArchived?: (sessionId: string) => void;
   /** Чат возвращён из архива — список слева перечитать. */
   onSessionRestored?: (sessionId: string) => void;
+  /** Чаты, где пришёл ответ, пока их не смотрели, — метка «новый ответ» на главном экране. */
+  attentionSessionIds?: ReadonlySet<string>;
 };
 
 export type MainContentHeaderProps = {
@@ -98,11 +100,18 @@ export type MainContentHeaderProps = {
 export type MainContentStateViewProps = {
   mode: 'loading' | 'empty';
   isMobile: boolean;
+  /** Открывает панель слева — у главного экрана это ещё и строка «Все чаты». */
   onMenuClick: () => void;
-  /** Recently active projects offered as quick-launch cards on the empty state. */
+  /** Все папки с их первыми чатами: из них главный экран берёт последний и недавние чаты. */
   projects: Project[];
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: ProjectSession) => void;
+  /** Кнопка «Новый чат» главного экрана. */
+  onStartNewChat?: (project: Project) => void;
+  /** Метка «работает» у строк чатов. */
+  processingSessions?: SessionActivityMap;
+  /** Метка «новый ответ» у строк чатов. */
+  attentionSessionIds?: ReadonlySet<string>;
 };
 
 export type MobileMenuButtonProps = {

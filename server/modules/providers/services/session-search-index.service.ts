@@ -61,7 +61,8 @@ export type ExtractedRecord =
 
 export type RecordExtractor = (entry: Record<string, any>) => ExtractedRecord | null;
 
-const INDEX_VERSION = 1;
+// 2 — служебные строки человека (isMeta) в выжимку больше не попадают.
+const INDEX_VERSION = 2;
 const HEAD_BYTES = 512;
 const SUMMARY_TEXT_LIMIT = 300;
 const MAX_PENDING_SUMMARIES = 200;
