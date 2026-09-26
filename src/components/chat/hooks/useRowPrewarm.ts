@@ -41,6 +41,13 @@ const START_DELAY_MS = 300;
  * успевали доехать до экрана непрогретыми).
  */
 const NEXT_BATCH_DELAY_MS = 50;
+/**
+ * Греем только рядом с экраном: столько экранов вверх (туда листают) и вниз.
+ * Остальное — по мере листания. Иначе «показать всю переписку» заставила бы
+ * разметить в фоне тысячи строк, до которых человек может и не дойти.
+ */
+const RANGE_SCREENS_UP = 6;
+const RANGE_SCREENS_DOWN = 2;
 /** Без requestIdleCallback (Safari) — пауза между заходами. */
 const FALLBACK_GAP_MS = 50;
 
@@ -126,6 +133,8 @@ export function useRowPrewarm({ scrollContainerRef, enabled, contentKey }: UseRo
 
       const rows = Array.from(container.querySelectorAll<HTMLElement>(ROW_SELECTOR));
       const pivot = firstRowOnScreen(rows, container.scrollTop);
+      const rangeTop = container.scrollTop - RANGE_SCREENS_UP * container.clientHeight;
+      const rangeBottom = container.scrollTop + (RANGE_SCREENS_DOWN + 1) * container.clientHeight;
       const budget = deadline
         ? Math.max(1, Math.min(SLICE_BUDGET_MS, deadline.timeRemaining()))
         : SLICE_BUDGET_MS;
@@ -145,9 +154,15 @@ export function useRowPrewarm({ scrollContainerRef, enabled, contentKey }: UseRo
         held.push(el);
         return true;
       };
-      for (let i = pivot - 1; i >= 0 && visit(rows[i]); i -= 1) { /* вверх */ }
+      for (let i = pivot - 1; i >= 0; i -= 1) {
+        const row = rows[i];
+        if (row.offsetTop + row.offsetHeight < rangeTop || !visit(row)) break;
+      }
       if (!left) {
-        for (let i = pivot; i < rows.length && visit(rows[i]); i += 1) { /* вниз */ }
+        for (let i = pivot; i < rows.length; i += 1) {
+          const row = rows[i];
+          if (row.offsetTop > rangeBottom || !visit(row)) break;
+        }
       }
 
       if (held.length > 0) {
@@ -158,10 +173,15 @@ export function useRowPrewarm({ scrollContainerRef, enabled, contentKey }: UseRo
       if (left) schedule(typeof window.requestIdleCallback === 'function' ? 0 : FALLBACK_GAP_MS);
     }
 
+    // Листают — в зону входят новые строки; заход назначается не чаще одного за раз.
+    const onScroll = () => schedule(NEXT_BATCH_DELAY_MS);
+
     schedule(startedRef.current ? NEXT_BATCH_DELAY_MS : START_DELAY_MS);
     startedRef.current = true;
+    container.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       cancelled = true;
+      container.removeEventListener('scroll', onScroll);
       cancelHandle();
       release();
     };

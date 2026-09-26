@@ -165,6 +165,7 @@ export function useScrollAnchor({
       anchorRef.current = null;
       lastHeightRef.current = -1;
       lastClientHeightRef.current = -1;
+      wasAtBottomRef.current = false;
       return;
     }
     const wrapper = wrapperOf(container);
@@ -177,7 +178,14 @@ export function useScrollAnchor({
     const clientHeight = container.clientHeight;
     const paneResized = lastClientHeightRef.current >= 0 && clientHeight !== lastClientHeightRef.current;
     lastClientHeightRef.current = clientHeight;
-    if (paneResized && wasAtBottomRef.current && enabledRef.current && !inMotion(container)) {
+    if (
+      paneResized
+      && wasAtBottomRef.current
+      && enabledRef.current
+      && !suspendedRef.current
+      && deferredRef.current === 0
+      && !inMotion(container)
+    ) {
       writeScrollTop(container, container.scrollHeight - clientHeight);
       lastHeightRef.current = height;
       record(container);
@@ -296,6 +304,7 @@ export function useScrollAnchor({
       anchorRef.current = null;
       lastHeightRef.current = -1;
       lastClientHeightRef.current = -1;
+      wasAtBottomRef.current = false;
     };
   }, [clearDeferredShift, enabled, flush, reconcile, scheduleFlush, scrollContainerRef]);
 
