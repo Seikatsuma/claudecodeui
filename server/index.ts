@@ -335,6 +335,40 @@ app.use(express.static(path.join(APP_ROOT, 'dist'), {
     }
 }));
 
+// Файлы прошлых сборок. Страница, открытая до выкатки (приложение на iPhone
+// вернулось из фона), догружает куски по СВОИМ старым именам; выкатка
+// подменяет dist целиком, и без архива эти куски отвечали 404 — страница
+// оставалась пустой, в тёмной теме чёрной (Егор 26.09.26 утром: «не
+// открывается, чёрный экран»). При каждом запуске сервер откладывает свои
+// файлы в архив и отдаёт оттуда то, чего нет в текущей сборке. Имена с
+// хешем, поэтому новое старым не подменится. Старше 14 дней — убираются.
+const ASSET_ARCHIVE = path.join(APP_ROOT, '.assets-archive');
+const ASSET_ARCHIVE_DAYS = 14;
+try {
+    fs.mkdirSync(ASSET_ARCHIVE, { recursive: true });
+    const current = path.join(APP_ROOT, 'dist', 'assets');
+    const now = Date.now();
+    if (fs.existsSync(current)) {
+        for (const name of fs.readdirSync(current)) {
+            const target = path.join(ASSET_ARCHIVE, name);
+            if (fs.existsSync(target)) {
+                fs.utimesSync(target, new Date(now), new Date(now)); // ещё в ходу
+            } else {
+                fs.copyFileSync(path.join(current, name), target);
+            }
+        }
+    }
+    for (const name of fs.readdirSync(ASSET_ARCHIVE)) {
+        const file = path.join(ASSET_ARCHIVE, name);
+        if (now - fs.statSync(file).mtimeMs > ASSET_ARCHIVE_DAYS * 86400000) fs.unlinkSync(file);
+    }
+} catch (error) {
+    console.warn('[assets-archive] архив файлов прошлых сборок не обновлён:', error);
+}
+app.use('/assets', express.static(ASSET_ARCHIVE, {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
+}));
+
 // API Routes (protected)
 // /api/config endpoint removed - no longer needed
 // Frontend now uses window.location for WebSocket URLs
