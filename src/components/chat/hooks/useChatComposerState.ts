@@ -37,6 +37,7 @@ import { usePromptPresetsContext } from '../../../contexts/PromptPresetsContext'
 import { isTouchKeyboard } from '../../../utils/touchKeyboard';
 import type { Project, ProjectSession, LLMProvider, ProviderModelOption } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
+import { prepareStep } from '../utils/contextLevel';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -53,6 +54,8 @@ const COMPOSER_ROOM_FLOOR_PX = 96;
 let pendingHandoff: { projectId: string; message: string } | null = null;
 /** Идёт ли опрос задачи — один на вкладку, даже если экран чата пересоздан. */
 let handoffPolling = false;
+/** На каком десятке процентов окна этой вкладкой уже просили заготовку — по чатам. */
+const preparedHandoffSteps = new Map<string, number>();
 
 /** Начатая задача переноса — в браузере, чтобы пережить выгрузку вкладки. */
 type HandoffJobRecord = { sessionId: string; projectId: string; startedAt: number };
@@ -1398,7 +1401,7 @@ export function useChatComposerState({
    * Опрос задачи до готовности. `resumeSessionId` — продолжить уже начатую
    * (вкладку выгрузили, пока модель писала): тогда без нового POST.
    */
-  const runHandoff = useCallback(async (sourceProject: Project, sourceSessionId: string, resume: boolean) => {
+  const runHandoff = useCallback(async (sourceProject: Project, sourceSessionId: string, resume: boolean, goal = '') => {
     if (!onStartNewChat || handoffPolling) return;
     handoffPolling = true;
     setHandoffStatus('running');
@@ -1408,16 +1411,28 @@ export function useChatComposerState({
     const fail = (message: string) => {
       clearHandoffJob();
       setHandoffStatus('idle');
+      // Задача, взятая из поля, не пропадает: возвращается туда же, если
+      // человек всё ещё в этом чате и ничего нового не набрал.
+      if (goal && sessionKeyRef.current === sourceSessionId && !inputValueRef.current.trim()) {
+        inputValueRef.current = goal;
+        setInput(goal);
+      }
       addMessage({ type: 'error', content: `Не получилось продолжить в новом чате: ${message}`, timestamp: new Date() });
     };
     try {
       const url = `/api/handoff/${encodeURIComponent(sourceSessionId)}`;
-      let response = await authenticatedFetch(url, resume ? undefined : { method: 'POST' });
+      let response = await authenticatedFetch(url, resume ? undefined : {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal: goal || undefined }),
+      });
       let body = await response.json().catch(() => ({}));
       if (!response.ok) return fail(body?.error || `ошибка ${response.status}`);
       const deadline = Date.now() + 12 * 60 * 1000;
+      let polls = 0;
       while (body?.status === 'running' && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        // Из заготовки выжимка готова за секунды — первые опросы чаще.
+        await new Promise((resolve) => setTimeout(resolve, polls++ < 5 ? 1000 : 3000));
         response = await authenticatedFetch(url);
         body = await response.json().catch(() => ({}));
         if (!response.ok) return fail(body?.error || `ошибка ${response.status}`);
@@ -1441,11 +1456,43 @@ export function useChatComposerState({
     }
   }, [addMessage, onStartNewChat]);
 
+  /*
+   * Текст, набранный в поле перед нажатием, — задача нового чата (Amp:
+   * «цель нового треда задаёт человек»; Anthropic: сжатие портится, когда
+   * модель не знает, куда пойдёт работа). Поле очищается: текст переезжает.
+   */
   const startHandoff = useCallback(() => {
     const sourceSessionId = sessionKeyRef.current;
     if (!sourceSessionId || !selectedProject || handoffStatus === 'running') return;
-    void runHandoff(selectedProject, sourceSessionId, false);
+    const goal = inputValueRef.current.trim();
+    if (goal) {
+      inputValueRef.current = '';
+      setInput('');
+    }
+    void runHandoff(selectedProject, sourceSessionId, false, goal);
   }, [handoffStatus, runHandoff, selectedProject]);
+
+  /*
+   * Заготовка выжимки заранее: чат перешёл на половину окна (кнопка
+   * пожелтела) или на следующий десяток процентов — сервер собирает выжимку
+   * фоном, и нажатие потом берёт готовую за секунду вместо полутора-двух
+   * минут. Повтор того же десятка сервер отбрасывает сам.
+   */
+  const handoffPrepareStep = prepareStep(tokenBudget);
+  useEffect(() => {
+    if (!canHandoff || !sessionKey || handoffPrepareStep === 0) return;
+    if ((preparedHandoffSteps.get(sessionKey) ?? 0) >= handoffPrepareStep) return;
+    preparedHandoffSteps.set(sessionKey, handoffPrepareStep);
+    void authenticatedFetch(`/api/handoff/${encodeURIComponent(sessionKey)}/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ step: handoffPrepareStep }),
+    }).then(async (response) => {
+      const body = await response.json().catch(() => ({}));
+      // Сервер занят другими заготовками — попробуем на следующем шаге.
+      if (!response.ok || body?.status === 'busy') preparedHandoffSteps.delete(sessionKey);
+    }).catch(() => preparedHandoffSteps.delete(sessionKey));
+  }, [canHandoff, sessionKey, handoffPrepareStep]);
 
   // iPhone выгружает свёрнутое приложение, и опрос в памяти вкладки умирает.
   // Начатая задача записана в браузере: вернулись — опрос продолжается.

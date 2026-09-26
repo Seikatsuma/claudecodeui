@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { digestTranscriptLines } from '@/modules/handoff/handoff-digest.js';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import {
+  digestTranscriptFile,
+  digestTranscriptLines,
+  exportDialogFile,
+  transcriptLineBoundary,
+} from '@/modules/handoff/handoff-digest.js';
 import { writeBrief } from '@/modules/handoff/handoff.service.js';
 
 const SID = '11111111-2222-3333-4444-555555555555';
@@ -50,15 +59,19 @@ test('после сжатия: до сводки — только слова ч�
   assert.match(digest.text, /поздний ответ/);
 });
 
-test('короткая переписка — один вызов модели', async () => {
+test('короткая переписка — две половины одновременно, «куда идём» первой', async () => {
   const prompts: string[] = [];
   const brief = await writeBrief('ЧЕЛОВЕК: привет', '/acc', async (prompt) => {
     prompts.push(prompt);
-    return '## Цель\nx';
+    return prompt.includes('## Цель —') ? '## Цель\nx' : '## Что сделано\ny';
   });
-  assert.equal(brief, '## Цель\nx');
-  assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /<transcript>\nЧЕЛОВЕК: привет\n<\/transcript>/);
+  assert.equal(brief, '## Цель\nx\n\n## Что сделано\ny');
+  assert.equal(prompts.length, 2);
+  for (const prompt of prompts) assert.match(prompt, /<transcript>\nЧЕЛОВЕК: привет\n<\/transcript>/);
+  assert.match(prompts[0], /## Следующий шаг/);
+  assert.doesNotMatch(prompts[0], /## Что сделано/);
+  assert.match(prompts[1], /## Где искать/);
+  assert.doesNotMatch(prompts[1], /## Где остановились/);
 });
 
 test('длинная переписка — части, затем сводка с последней частью целиком', async () => {
@@ -72,8 +85,8 @@ test('длинная переписка — части, затем сводка 
   const maps = prompts.filter((prompt) => prompt.includes('Это часть'));
   const reduces = prompts.filter((prompt) => prompt.includes('<transcript part="last">'));
   assert.ok(maps.length >= 2, `частей ${maps.length}`);
-  assert.equal(reduces.length, 1);
-  assert.equal(prompts[prompts.length - 1], reduces[0], 'сводка — последним вызовом');
+  assert.equal(reduces.length, 2, 'сводка — двумя половинами');
+  assert.deepEqual(prompts.slice(-2), reduces, 'сводка — последними вызовами');
   assert.match(reduces[0], /<notes part="1">/);
 });
 
@@ -81,14 +94,59 @@ test('опись вырезается, ссылки входа и ключи с�
   const brief = await writeBrief('ЧЕЛОВЕК: привет', '/acc', async () => [
     '<опись>\n- черновик описи\n</опись>',
     '---',
-    '## Цель',
+    '## Цель — чего добивается человек',
     'Сайт: https://cc.example.ru/enter/nMsKcj_ooYAWE4bhfdzm8A, ключ sk-ant-abcdefghijklmnopqrstuv',
     '---',
     '## Следующий шаг',
     'ждать',
   ].join('\n'));
   assert.doesNotMatch(brief, /опись|черновик|nMsKcj|abcdefghijkl|^---$/m);
-  assert.match(brief, /^## Цель/);
+  assert.match(brief, /^## Цель$/m, 'подсказка из задания в заголовке срезана');
   assert.match(brief, /enter\/\[скрыто\]/);
   assert.match(brief, /\[ключ скрыт\]/);
+});
+
+test('задача нового чата попадает в задание модели', async () => {
+  let seen = '';
+  await writeBrief('ЧЕЛОВЕК: привет', '/acc', async (prompt) => {
+    seen ||= prompt;
+    return '## Цель\nX';
+  }, 'допиши отчёт для Славы');
+  assert.match(seen, /Человек уже написал, что делать в новом чате: «допиши отчёт для Славы»/);
+  assert.match(seen, /не больше ~\d+ слов/);
+});
+
+test('хвост после заготовки читается с границы строки, недописанная строка не теряется', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const first = `${line({ type: 'user', message: { content: 'первое' } })}\n`;
+  await writeFile(file, `${first}${line({ type: 'user', message: { content: 'второе' } }).slice(0, 20)}`);
+  const cut = await transcriptLineBoundary(file);
+  assert.equal(cut, Buffer.byteLength(first));
+  await writeFile(file, `${first}${line({ type: 'user', message: { content: 'второе' } })}\n`);
+  const head = await digestTranscriptFile(file, SID, { end: cut });
+  const tail = await digestTranscriptFile(file, SID, { start: cut, end: await transcriptLineBoundary(file) });
+  assert.match(head.text, /первое/);
+  assert.doesNotMatch(head.text, /второе/);
+  assert.match(tail.text, /ЧЕЛОВЕК: второе/);
+  assert.doesNotMatch(tail.text, /первое/);
+});
+
+test('файл разговора: ответы целиком, без действий и служебного', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const long = 'Промпт: '.padEnd(9000, 'я');
+  await writeFile(file, [
+    line({ type: 'user', message: { content: 'Сделай промпт' } }),
+    line({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'черновик' }, { type: 'text', text: long }, { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } }),
+    line({ type: 'user', toolUseResult: {}, message: { content: [{ type: 'tool_result', content: 'вывод команды' }] } }),
+    line({ type: 'user', isMeta: true, message: { content: 'служебное' } }),
+  ].join('\n'));
+  const out = path.join(dir, 'sub', 'dialog.md');
+  await exportDialogFile(file, SID, out, 'Тест');
+  const text = await readFile(out, 'utf8');
+  assert.match(text, /^# Разговор чата «Тест»/);
+  assert.match(text, /Человек\n\nСделай промпт/);
+  assert.ok(text.includes(long), 'длинный ответ — целиком, без обрезки');
+  assert.doesNotMatch(text, /черновик|вывод команды|служебное|ls/);
 });
