@@ -257,6 +257,16 @@ function rehypeUncertainUnderline() {
   return (tree: any) => walk(tree);
 }
 
+// Абзацы верхнего уровня ответа (не в цитате и не в пункте списка) — только там
+// жирная строка-название превращается в заголовок.
+function rehypeMarkTopLevel() {
+  return (tree: any) => {
+    (tree?.children || []).forEach((n: any) => {
+      if (n?.type === 'element' && n.tagName === 'p') n.properties = { ...(n.properties || {}), dataTop: '1' };
+    });
+  };
+}
+
 const markdownComponents = {
   code: CodeBlock,
   u: ({ children }: { children?: React.ReactNode }) => (
@@ -319,7 +329,8 @@ const markdownComponents = {
    * рвало абзац на три куска. Здесь же видны настоящие потомки: один
    * элемент `strong` и ничего больше — значит подзаголовок.
    */
-  p: ({ children }: { children?: React.ReactNode }) => {
+  p: ({ children, ...rest }: { children?: React.ReactNode; 'data-top'?: string }) => {
+    const topLevel = rest['data-top'] === '1';
     const kids = React.Children.toArray(children);
     /*
      * «**Как я понял задачу**» и сразу под ней текст (одна строка переноса) —
@@ -331,18 +342,20 @@ const markdownComponents = {
     const head = kids[0];
     const brk = kids[1];
     if (
+      topLevel &&
       kids.length > 2 &&
       React.isValidElement(head) && (head as React.ReactElement).type === 'strong' &&
       React.isValidElement(brk) && (brk as React.ReactElement).type === 'br'
     ) {
-      const title = childrenToText((head as React.ReactElement<{ children?: React.ReactNode }>).props.children);
+      const titleNodes = (head as React.ReactElement<{ children?: React.ReactNode }>).props.children;
+      const title = childrenToText(titleNodes);
       if (title.length > 0 && title.length <= 60) {
-        const rest = kids.slice(2);
-        if (typeof rest[0] === 'string') rest[0] = (rest[0] as string).replace(/^\n/, '');
+        const restKids = kids.slice(2);
+        if (typeof restKids[0] === 'string') restKids[0] = (restKids[0] as string).replace(/^\n/, '');
         return (
           <>
-            <h3 className="mb-2 mt-5 text-[18px] font-bold leading-snug text-foreground first:mt-0">{title}</h3>
-            <div className="mb-2.5 last:mb-0">{rest}</div>
+            <h3 className="mb-2 mt-5 text-[18px] font-bold leading-snug text-foreground first:mt-0">{titleNodes}</h3>
+            <div className="mb-2.5 last:mb-0">{restKids}</div>
           </>
         );
       }
@@ -387,7 +400,7 @@ export function Markdown({ children, className }: MarkdownProps) {
   // Модель разбивает мысль на строки осмысленно; склеивать их обратно в
   // сплошной абзац — ровно то, на что было больно смотреть.
   const remarkPlugins = useMemo(() => [remarkGfm, remarkBreaks] as any, []);
-  const rehypePlugins = useMemo(() => [rehypeUncertainUnderline] as any, []);
+  const rehypePlugins = useMemo(() => [rehypeUncertainUnderline, rehypeMarkTopLevel] as any, []);
   const { openFileInEditor } = usePaletteOps();
 
   const components = useMemo(
