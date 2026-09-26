@@ -48,6 +48,12 @@ const NEXT_BATCH_DELAY_MS = 50;
  */
 const RANGE_SCREENS_UP = 6;
 const RANGE_SCREENS_DOWN = 2;
+/**
+ * Лента движется (палец, инерция, колесо) — не греем: работа в паузах, а не
+ * посреди листания. Замер 27.09.26: заходы во время листания вернули 21 смену
+ * высоты на ходу против 6, когда грели только в паузах.
+ */
+const MOTION_IDLE_MS = 150;
 /** Без requestIdleCallback (Safari) — пауза между заходами. */
 const FALLBACK_GAP_MS = 50;
 
@@ -101,6 +107,7 @@ export function useRowPrewarm({ scrollContainerRef, enabled, contentKey }: UseRo
     const held: HTMLElement[] = [];
     let handle: IdleHandle | null = null;
     let cancelled = false;
+    let lastScrollAt = 0;
 
     const release = () => {
       for (const el of held.splice(0)) el.classList.remove(WARM_CLASS);
@@ -130,6 +137,10 @@ export function useRowPrewarm({ scrollContainerRef, enabled, contentKey }: UseRo
       if (cancelled) return;
       // Вкладка скрыта (display: none) — размеры нулевые; вернёмся при показе.
       if (container.clientHeight === 0) return;
+      if (performance.now() - lastScrollAt < MOTION_IDLE_MS) {
+        schedule(MOTION_IDLE_MS);
+        return;
+      }
 
       const rows = Array.from(container.querySelectorAll<HTMLElement>(ROW_SELECTOR));
       const pivot = firstRowOnScreen(rows, container.scrollTop);
@@ -173,8 +184,11 @@ export function useRowPrewarm({ scrollContainerRef, enabled, contentKey }: UseRo
       if (left) schedule(typeof window.requestIdleCallback === 'function' ? 0 : FALLBACK_GAP_MS);
     }
 
-    // Листают — в зону входят новые строки; заход назначается не чаще одного за раз.
-    const onScroll = () => schedule(NEXT_BATCH_DELAY_MS);
+    // Листают — в зону входят новые строки: заход после остановки.
+    const onScroll = () => {
+      lastScrollAt = performance.now();
+      schedule(MOTION_IDLE_MS);
+    };
 
     schedule(startedRef.current ? NEXT_BATCH_DELAY_MS : START_DELAY_MS);
     startedRef.current = true;
