@@ -42,6 +42,8 @@ interface Anchor {
   row: HTMLElement;
   /** Положение строки внутри ленты без временного отступа. */
   top: number;
+  /** Прокрутка в момент, когда опора запомнена. */
+  scrollTop: number;
 }
 
 interface UseScrollAnchorArgs {
@@ -90,6 +92,9 @@ export function useScrollAnchor({
   const anchorRef = useRef<Anchor | null>(null);
   const deferredRef = useRef(0);
   const lastHeightRef = useRef(-1);
+  // Высота самого окна ленты и «стояли в самом низу» — на момент последней сверки.
+  const lastClientHeightRef = useRef(-1);
+  const wasAtBottomRef = useRef(false);
   const touchingRef = useRef(false);
   const lastTouchAtRef = useRef(0);
   // Последнее движение начато пальцем. Колесо и полоса прокрутки ничего не
@@ -109,7 +114,11 @@ export function useScrollAnchor({
 
   const record = useCallback((container: HTMLDivElement) => {
     const row = pickAnchorRow(container);
-    anchorRef.current = row ? { row, top: row.offsetTop + deferredRef.current } : null;
+    anchorRef.current = row
+      ? { row, top: row.offsetTop + deferredRef.current, scrollTop: container.scrollTop }
+      : null;
+    wasAtBottomRef.current = deferredRef.current === 0
+      && container.scrollHeight - container.scrollTop - container.clientHeight <= 2;
   }, []);
 
   const inMotion = useCallback((container: HTMLDivElement) => (
@@ -155,10 +164,33 @@ export function useScrollAnchor({
     if (container.clientHeight === 0) {
       anchorRef.current = null;
       lastHeightRef.current = -1;
+      lastClientHeightRef.current = -1;
+      wasAtBottomRef.current = false;
       return;
     }
     const wrapper = wrapperOf(container);
     const height = wrapper ? wrapper.offsetHeight : container.scrollHeight;
+
+    // Изменилось само окно ленты (над ним догрузилась полоса шапки, открылась
+    // клавиатура), а человек стоял в самом низу — остаёмся в самом низу. Опора
+    // держит верх окна, поэтому без этого текст на кадр-другой уезжал вниз,
+    // пока догон в низ не вернёт (замер 27.09.26: +28 px на 30 мс при открытии).
+    const clientHeight = container.clientHeight;
+    const paneResized = lastClientHeightRef.current >= 0 && clientHeight !== lastClientHeightRef.current;
+    lastClientHeightRef.current = clientHeight;
+    if (
+      paneResized
+      && wasAtBottomRef.current
+      && enabledRef.current
+      && !suspendedRef.current
+      && deferredRef.current === 0
+      && !inMotion(container)
+    ) {
+      writeScrollTop(container, container.scrollHeight - clientHeight);
+      lastHeightRef.current = height;
+      record(container);
+      return;
+    }
     const anchor = anchorRef.current;
     if (
       enabledRef.current
@@ -174,7 +206,16 @@ export function useScrollAnchor({
           wrapper.style.marginTop = `${-deferredRef.current}px`;
           scheduleFlush();
         } else {
-          writeScrollTop(container, container.scrollTop + delta);
+          // Лента стояла в самом низу, а выше что-то стало короче: браузер уже
+          // сам подтянул прокрутку к новому низу. Прибавлять сдвиг к ней —
+          // вернуть его дважды: лента уезжала от низа (замер 27.09.26: строка
+          // 96 → 28 px над экраном — 65 px от низа). Считаем от прокрутки,
+          // при которой опора запомнена.
+          const maxScrollTop = container.scrollHeight - container.clientHeight;
+          const clampedByBrowser = container.scrollTop < anchor.scrollTop
+            && container.scrollTop >= maxScrollTop - 1;
+          const base = clampedByBrowser ? anchor.scrollTop : container.scrollTop;
+          writeScrollTop(container, base + delta);
         }
       }
     }
@@ -244,6 +285,7 @@ export function useScrollAnchor({
     if (wrapper && typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(() => reconcile());
       observer.observe(wrapper);
+      observer.observe(container);
     }
     reconcile();
 
@@ -261,6 +303,8 @@ export function useScrollAnchor({
       clearDeferredShift();
       anchorRef.current = null;
       lastHeightRef.current = -1;
+      lastClientHeightRef.current = -1;
+      wasAtBottomRef.current = false;
     };
   }, [clearDeferredShift, enabled, flush, reconcile, scheduleFlush, scrollContainerRef]);
 

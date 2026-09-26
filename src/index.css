@@ -916,6 +916,12 @@
     content-visibility: visible;
   }
 
+  /* Прогрев строки в паузе (useRowPrewarm): один кадр разметки, чтобы
+     браузер запомнил настоящую высоту до того, как к строке долистают. */
+  .chat-message.chat-message--warm {
+    content-visibility: visible;
+  }
+
   /* Safe area support for iOS devices */
   .ios-bottom-safe {
     padding-bottom: env(safe-area-inset-bottom);
