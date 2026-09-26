@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
@@ -301,6 +301,22 @@ export class LocalServerController {
     if (!text) return;
     const timestamp = new Date().toLocaleTimeString();
     this.startupLogs.push(`[${timestamp}] ${text}`);
+    // Журнал сервера для поддержки: <userData>/logs/server.log, не больше 5 МБ.
+    try {
+      const logFile = path.join(path.dirname(this.settingsPath), 'logs', 'server.log');
+      if (!this.logReady) {
+        mkdirSync(path.dirname(logFile), { recursive: true });
+        try {
+          if (statSync(logFile).size > 5 * 1024 * 1024) renameSync(logFile, `${logFile}.old`);
+        } catch {
+          // файла ещё нет
+        }
+        this.logReady = true;
+      }
+      appendFileSync(logFile, `${new Date().toISOString()} ${text}\n`);
+    } catch {
+      // журнал — не повод ломать запуск
+    }
     if (this.startupLogs.length > MAX_STARTUP_LOG_LINES) {
       this.startupLogs.splice(0, this.startupLogs.length - MAX_STARTUP_LOG_LINES);
     }

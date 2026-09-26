@@ -36,6 +36,27 @@ let cloud = null;
 let desktopNotifications = null;
 let brains = null;
 let localAuth = null;
+// Тема интерфейса (тёмная/светлая) — от страницы «Этого компьютера», запоминается.
+let uiTheme = null;
+function getUiThemePath() {
+  return path.join(app.getPath('userData'), 'ui-theme.json');
+}
+async function loadUiTheme() {
+  try {
+    const stored = JSON.parse(await fs.readFile(getUiThemePath(), 'utf8'));
+    uiTheme = stored.theme === 'light' ? 'light' : 'dark';
+  } catch {
+    uiTheme = 'dark'; // интерфейс по умолчанию тёмный
+  }
+}
+function setUiTheme(theme) {
+  const next = theme === 'light' ? 'light' : 'dark';
+  if (next === uiTheme) return;
+  uiTheme = next;
+  fs.writeFile(getUiThemePath(), JSON.stringify({ theme: next }), 'utf8').catch(() => {});
+  desktopWindow?.applyChromeTheme(next);
+  syncDesktopState();
+}
 let isQuitting = false;
 let isRefreshingCloud = false;
 let pendingCloudConnectStartedAt = 0;
@@ -139,6 +160,7 @@ function getDesktopState() {
     environments: cloud.getEnvironments().map(serializeEnvironment),
     desktopNotifications: desktopNotifications?.getState() || { enabled: false, supported: false, connectedCount: 0, targetCount: 0 },
     brainsVersion: brains?.getVersion() || null,
+    uiTheme,
     platform: process.platform,
     appVersion: app.getVersion(),
   };
@@ -854,6 +876,14 @@ function registerIpcHandlers() {
     });
     return result.canceled || !result.filePaths?.[0] ? null : result.filePaths[0];
   });
+  ipcMain.on('claudeui:ui-theme', (event, theme) => {
+    try {
+      if (!localAuth?.getTokenForOrigin(new URL(event.sender.getURL()).origin)) return;
+    } catch {
+      return;
+    }
+    setUiTheme(theme);
+  });
   ipcMain.on('claudeui:local-auth-token', (event) => {
     let origin = null;
     try {
@@ -962,6 +992,7 @@ async function createDesktopWindow() {
     getRemoteEnvironmentMenuItems,
     getCloudState,
     getLocalState,
+    getUiTheme: () => uiTheme || 'dark',
     tabs,
     actions: {
       copyDiagnostics,
@@ -1068,6 +1099,7 @@ async function bootstrap() {
   await localServer.loadDesktopSettings();
   await cloud.loadCloudAccount();
   await desktopNotifications.loadSettings();
+  await loadUiTheme();
   await brains.ensureInstalled().catch((error) => console.warn('[Brains] не разложились:', error?.message || error));
   await localAuth.prepare();
 

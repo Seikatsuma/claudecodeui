@@ -343,7 +343,8 @@
       "disconnected": "Отключен",
       "checkingAuth": "Проверка статуса аутентификации...",
       "loggedInAs": "Вошли как {{email}}",
-      "authenticatedUser": "аутентифицированный пользователь"
+      "authenticatedUser": "аутентифицированный пользователь",
+      "signedInNoEmail": "Вход выполнен"
     },
     "account": {
       "claude": {

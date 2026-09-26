@@ -135,8 +135,9 @@ svg {
   gap: 12px;
   height: 44px;
   padding: 0 12px;
+  /* Одно целое с интерфейсом, как у Claude Desktop: цвет фона чатов, тонкая линия. */
   border-bottom: 1px solid var(--b-subtle);
-  background: color-mix(in srgb, var(--s1) 90%, transparent);
+  background: var(--bg);
   flex: 0 0 auto;
 }
 

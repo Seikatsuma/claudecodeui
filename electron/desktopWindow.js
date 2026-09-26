@@ -27,8 +27,16 @@ function getWebContentsProcessId(contents) {
   };
 }
 
+// Цвета интерфейса Claude UI (src/index.css: --background тёмной и светлой темы).
+function chromeColors(theme) {
+  return theme === 'light'
+    ? { background: '#f7f5f0', symbol: '#5b5a55' }
+    : { background: '#141414', symbol: '#b5b5b0' };
+}
+
 export class DesktopWindowManager {
   constructor({
+    getUiTheme = () => 'dark',
     appName,
     getWindowIconPath,
     getLauncherPath,
@@ -42,6 +50,7 @@ export class DesktopWindowManager {
     actions,
     tabs,
   }) {
+    this.getUiTheme = getUiTheme;
     this.appName = appName;
     this.getWindowIconPath = getWindowIconPath;
     this.getLauncherPath = getLauncherPath;
@@ -679,6 +688,21 @@ export class DesktopWindowManager {
     this.buildTrayMenu();
   }
 
+  // Верхняя полоса и кнопки окна — в цвет интерфейса (как одно окно у Claude Desktop).
+  applyChromeTheme(theme) {
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed()) return;
+    const colors = chromeColors(theme);
+    win.setBackgroundColor(colors.background);
+    if (process.platform !== 'darwin' && typeof win.setTitleBarOverlay === 'function') {
+      try {
+        win.setTitleBarOverlay({ color: colors.background, symbolColor: colors.symbol, height: 44 });
+      } catch {
+        // старые системы без наложения кнопок — не страшно
+      }
+    }
+  }
+
   async createWindow() {
     this.mainWindow = new BrowserWindow({
       width: 1440,
@@ -688,7 +712,7 @@ export class DesktopWindowManager {
       minWidth: 420,
       minHeight: 520,
       show: false,
-      backgroundColor: '#0f172a',
+      backgroundColor: chromeColors(this.getUiTheme()).background,
       title: this.appName,
       icon: this.getWindowIconPath(),
       titleBarStyle: 'hidden',
@@ -696,8 +720,8 @@ export class DesktopWindowManager {
         ? { trafficLightPosition: { x: 18, y: 14 } }
         : {
             titleBarOverlay: {
-              color: nativeTheme.shouldUseDarkColors ? '#111111' : '#f7f8fa',
-              symbolColor: nativeTheme.shouldUseDarkColors ? '#a1a1a1' : '#5b6470',
+              color: chromeColors(this.getUiTheme()).background,
+              symbolColor: chromeColors(this.getUiTheme()).symbol,
               height: 44,
             },
           }),

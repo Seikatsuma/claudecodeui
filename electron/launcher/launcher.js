@@ -160,6 +160,7 @@ window.__MOCK_STATE__ = {
     var settings = state && state.desktopSettings ? state.desktopSettings : {};
     var mode = settings.themeMode || 'system';
     if (mode === 'light' || mode === 'dark') return mode;
+    if (state && (state.uiTheme === 'dark' || state.uiTheme === 'light')) return state.uiTheme;
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
@@ -454,9 +455,9 @@ window.__MOCK_STATE__ = {
 
   CC.buildThemeSection = function (state) {
     var settings = state.desktopSettings || {};
-    return CC.renderSection('ОФОРМЛЕНИЕ', 'Тема верхней полосы и окон программы', '' +
+    return CC.renderSection('ОФОРМЛЕНИЕ', 'Цвет верхней полосы и окон программы', '' +
       '<div class="cc-surface cc-choice-group">' +
-      CC.renderRadioOption('desktop-theme', 'system', settings.themeMode === 'system', 'Как в системе', 'Светлая днём, тёмная вечером — как настроен компьютер.') +
+      CC.renderRadioOption('desktop-theme', 'system', settings.themeMode === 'system', 'Как в интерфейсе', 'Полоса сверху того же цвета, что и чаты.') +
       CC.renderRadioOption('desktop-theme', 'light', settings.themeMode === 'light', 'Светлая', 'Всегда светлая.') +
       CC.renderRadioOption('desktop-theme', 'dark', settings.themeMode === 'dark', 'Тёмная', 'Всегда тёмная.') +
       '</div>'

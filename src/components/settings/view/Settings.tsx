@@ -37,6 +37,15 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
       : ((window as any).cloudcliDesktopNotifications || null)
   ), []);
   const [desktopNotificationsState, setDesktopNotificationsState] = useState<DesktopNotificationsState | null>(null);
+  // Esc закрывает настройки, как любое окно на компьютере.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
   const {
     activeTab,
     setActiveTab,

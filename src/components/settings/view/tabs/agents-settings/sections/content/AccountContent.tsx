@@ -85,9 +85,10 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
                 {authStatus.loading ? (
                   t('agents.authStatus.checkingAuth')
                 ) : authStatus.authenticated ? (
-                  t('agents.authStatus.loggedInAs', {
-                    email: authStatus.email || t('agents.authStatus.authenticatedUser'),
-                  })
+                  // Сервер пишет «Authenticated», когда почта входа неизвестна.
+                  authStatus.email && authStatus.email !== 'Authenticated'
+                    ? t('agents.authStatus.loggedInAs', { email: authStatus.email })
+                    : t('agents.authStatus.signedInNoEmail', { defaultValue: 'Вход выполнен' })
                 ) : (
                   t('agents.authStatus.notConnected')
                 )}

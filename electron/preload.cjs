@@ -28,6 +28,17 @@ if (window.location.protocol === 'http:'
     const token = ipcRenderer.sendSync('claudeui:local-auth-token');
     if (token) window.localStorage.setItem('auth-token', token);
     if (token) {
+      // Тема интерфейса → программе: верхняя полоса и кнопки окна того же цвета,
+      // как одно целое окно у Claude Desktop (без светлой рамки над тёмным).
+      const reportTheme = () => {
+        const root = document.documentElement;
+        if (!root) return;
+        ipcRenderer.send('claudeui:ui-theme', root.classList.contains('dark') ? 'dark' : 'light');
+      };
+      window.addEventListener('DOMContentLoaded', () => {
+        reportTheme();
+        new MutationObserver(reportTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+      });
       // Возможности программы для интерфейса этого компьютера.
       contextBridge.exposeInMainWorld('claudeUiDesktop', {
         platform: process.platform,

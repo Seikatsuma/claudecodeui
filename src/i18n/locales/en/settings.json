@@ -358,7 +358,8 @@
       "disconnected": "Disconnected",
       "checkingAuth": "Checking authentication status...",
       "loggedInAs": "Logged in as {{email}}",
-      "authenticatedUser": "authenticated user"
+      "authenticatedUser": "authenticated user",
+      "signedInNoEmail": "Signed in"
     },
     "account": {
       "claude": {
