@@ -93,6 +93,16 @@ export default function ComposerPermissionMenu({
     return null;
   }
 
+  // Названия и описания — точные для Claude (как в Claude Desktop); для других
+  // помощников — их собственные подписи.
+  const isClaude = /claude/i.test(providerLabel);
+  const modeLabel = (mode: string) => (isClaude
+    ? t(`claudeModes.${mode}.label`, { defaultValue: t(`codex.modes.${mode}`, { defaultValue: mode }) })
+    : t(`codex.modes.${mode}`, { defaultValue: mode }));
+  const modeDescription = (mode: string) => (isClaude
+    ? t(`claudeModes.${mode}.description`, { defaultValue: '' })
+    : t(`codex.descriptions.${mode}`, { defaultValue: '' })) || undefined;
+
   const activeAppearance = getAppearance(permissionMode);
   const ActiveIcon = activeAppearance.icon;
   const heading = t('composer.permissionHeading', {
@@ -109,13 +119,15 @@ export default function ComposerPermissionMenu({
           updateAnchor();
           setIsOpen((current) => !current);
         }}
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors ${activeAppearance.trigger}`}
+        className={`flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-2 transition-colors ${activeAppearance.trigger}`}
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={heading}
         title={t('input.clickToChangeMode')}
       >
         <ActiveIcon className="h-4 w-4" />
+        {/* Название режима (от 768 точек) — видно, спрашивает ли Claude. */}
+        <span className="hidden text-xs font-medium md:inline">{modeLabel(String(permissionMode))}</span>
       </button>
 
       {isOpen && anchor && createPortal(
@@ -128,8 +140,8 @@ export default function ComposerPermissionMenu({
               <ComposerMenuItem
                 key={mode}
                 icon={<ModeIcon className="h-4 w-4" />}
-                label={t(`codex.modes.${mode}`, { defaultValue: mode })}
-                description={t(`codex.descriptions.${mode}`, { defaultValue: '' }) || undefined}
+                label={modeLabel(mode)}
+                description={modeDescription(mode)}
                 isSelected={mode === permissionMode}
                 onSelect={() => {
                   onSelectPermissionMode(mode);

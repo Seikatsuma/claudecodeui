@@ -162,6 +162,9 @@ export function applyDesktopBrains(sdkOptions) {
     {
       matcher: 'Bash|PowerShell',
       hooks: [async (input) => {
+        // «Спрашивать» и «План»: каждое действие и так подтверждает человек в
+        // окне разрешения (там удаление подсвечено) — второй стоп был бы лишним.
+        if (input?.permission_mode === 'default' || input?.permission_mode === 'plan') return {};
         const label = findDestructive(input?.tool_input?.command);
         if (!label) return {};
         return {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ErrorBanner from './components/ErrorBanner';
@@ -10,6 +10,7 @@ import { useGithubTokens } from './hooks/useGithubTokens';
 import { cloneWorkspaceWithProgress, createProjectRequest } from './data/workspaceApi';
 import { isCloneWorkflow, shouldShowGithubAuthentication } from './utils/pathUtils';
 import type { TokenMode, WizardFormState, WizardStep } from './types';
+import { isDesktopApp } from '../../lib/desktopBridge';
 
 type ProjectCreationWizardProps = {
   onClose: () => void;
@@ -34,6 +35,15 @@ export default function ProjectCreationWizard({
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cloneProgress, setCloneProgress] = useState('');
+
+  // Esc закрывает окно, как любое окно на компьютере (кроме момента создания).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isCreating) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isCreating, onClose]);
 
   const shouldLoadTokens =
     step === 1 && shouldShowGithubAuthentication(formState.githubUrl);
@@ -138,7 +148,7 @@ export default function ProjectCreationWizard({
               <FolderPlus className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             </div>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {t('projectWizard.title')}
+              {isDesktopApp() ? t('projectWizard.desktop.title') : t('projectWizard.title')}
             </h3>
           </div>
           <button

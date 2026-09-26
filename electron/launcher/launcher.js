@@ -391,7 +391,7 @@ window.__MOCK_STATE__ = {
       '<div class="cc-sheet cc-modal">' +
       '<div class="cc-sheet-header">' +
       '<div class="cc-sheet-copy"><div class="cc-sheet-title">' + esc(title) + '</div><div class="cc-sheet-subtitle">' + esc(subtitle || '') + '</div></div>' +
-      '<button class="icon-btn cc-sheet-close" data-cc-action="settings-close" title="Close">' + icon('x', 16) + '</button>' +
+      '<button class="icon-btn cc-sheet-close" data-cc-action="settings-close" title="Закрыть">' + icon('x', 16) + '</button>' +
       '</div>' +
       '<div class="cc-sheet-body">' + sections.join('') + '</div>' +
       (footer ? '<div class="cc-sheet-footer">' + footer + '</div>' : '') +
@@ -439,56 +439,41 @@ window.__MOCK_STATE__ = {
     overlay.classList.remove('open');
   };
 
-  CC.buildLocalServerSection = function (state, options) {
-    options = options || {};
+  CC.buildLocalServerSection = function (state) {
     var settings = state.desktopSettings || {};
-    var url = localUrl(state) || 'starts on demand';
+    var running = !!state.localServerRunning;
     var body = '<div class="cc-surface">' +
-      '<div class="cc-meta mono">' + esc(url) + '</div>' +
-      '<div class="cc-row2"><button class="btn sm" data-cc-action="open-web">' + icon('arrow', 14) + 'Open in browser</button><button class="btn sm" data-cc-action="copy-web">' + icon('copy', 14) + 'Copy URL</button></div>';
-    if (options.includePreferences) {
-      body +=
-        '<label class="cc-toggle"><input type="checkbox" data-cc-setting="keepLocalServerRunning"' + (settings.keepLocalServerRunning ? ' checked' : '') + '><span><b>Keep server running</b><br>Leave Local CloudCLI available after you quit the app.</span></label>' +
-        '<label class="cc-toggle"><input type="checkbox" data-cc-setting="exposeLocalServerOnNetwork"' + (settings.exposeLocalServerOnNetwork ? ' checked' : '') + '><span><b>Allow LAN access</b><br>Use the copied URL from another device on this network.</span></label>';
-    }
-    body += '</div>';
-    return CC.renderSection(
-      options.eyebrow || 'LOCAL SERVER',
-      options.title || 'Run Local CloudCLI on this machine',
-      body
-    );
+      '<div class="cc-meta">' + (running ? 'Работает' : 'Запустится, когда вы откроете «Этот компьютер»') + '</div>' +
+      '<div class="cc-row2"><button class="btn sm" data-cc-action="open-web">' + icon('arrow', 14) + 'Открыть в браузере</button><button class="btn sm" data-cc-action="copy-web">' + icon('copy', 14) + 'Скопировать адрес</button></div>' +
+      '<label class="cc-toggle"><input type="checkbox" data-cc-setting="keepLocalServerRunning"' + (settings.keepLocalServerRunning ? ' checked' : '') + '><span><b>Не выключать после закрытия программы</b><br>Чаты можно будет открыть в браузере этого компьютера и без окна программы.</span></label>' +
+      '<label class="cc-toggle"><input type="checkbox" data-cc-setting="exposeLocalServerOnNetwork"' + (settings.exposeLocalServerOnNetwork ? ' checked' : '') + '><span><b>Доступ из домашней сети</b><br>Открывать чаты с телефона или другого компьютера в той же сети Wi‑Fi. Включайте только дома: в общей сети адрес увидят чужие.</span></label>' +
+      '</div>';
+    return CC.renderSection('ЭТОТ КОМПЬЮТЕР', 'Где работает Claude UI', body);
   };
 
   CC.buildThemeSection = function (state) {
     var settings = state.desktopSettings || {};
-    return CC.renderSection('APPEARANCE', 'Desktop theme', '' +
+    return CC.renderSection('ОФОРМЛЕНИЕ', 'Тема верхней полосы и окон программы', '' +
       '<div class="cc-surface cc-choice-group">' +
-      CC.renderRadioOption('desktop-theme', 'system', settings.themeMode === 'system', 'System', 'Follow the operating system appearance.') +
-      CC.renderRadioOption('desktop-theme', 'light', settings.themeMode === 'light', 'Light', 'Use the light interface appearance.') +
-      CC.renderRadioOption('desktop-theme', 'dark', settings.themeMode === 'dark', 'Dark', 'Use the dark interface appearance.') +
+      CC.renderRadioOption('desktop-theme', 'system', settings.themeMode === 'system', 'Как в системе', 'Светлая днём, тёмная вечером — как настроен компьютер.') +
+      CC.renderRadioOption('desktop-theme', 'light', settings.themeMode === 'light', 'Светлая', 'Всегда светлая.') +
+      CC.renderRadioOption('desktop-theme', 'dark', settings.themeMode === 'dark', 'Тёмная', 'Всегда тёмная.') +
       '</div>'
     );
   };
 
   CC.renderLocalSettings = function () {
-    var state = CC.state || {};
-    var sections = [
-      CC.buildLocalServerSection(state, { includePreferences: false }),
-      CC.renderSection('PREFERENCES', 'How the local service behaves', '' +
-        '<div class="cc-surface">' +
-        '<label class="cc-toggle"><input type="checkbox" data-cc-setting="keepLocalServerRunning"' + ((state.desktopSettings || {}).keepLocalServerRunning ? ' checked' : '') + '><span><b>Keep server running</b><br>Leave Local CloudCLI available after you quit the app.</span></label>' +
-        '<label class="cc-toggle"><input type="checkbox" data-cc-setting="exposeLocalServerOnNetwork"' + ((state.desktopSettings || {}).exposeLocalServerOnNetwork ? ' checked' : '') + '><span><b>Allow LAN access</b><br>Use the copied URL from another device on this network.</span></label>' +
-        '</div>'
-      ),
-    ];
-    CC.renderSheet('Local Settings', 'Manage how Local CloudCLI runs on this computer.', sections);
+    CC.renderSheet('Настройки программы', 'Оформление и работа на этом компьютере', [
+      CC.buildLocalServerSection(CC.state || {}),
+      CC.buildThemeSection(CC.state || {}),
+    ]);
   };
 
   CC.renderDesktopSettings = function () {
-    var sections = [
+    CC.renderSheet('Настройки программы', 'Оформление и работа на этом компьютере', [
       CC.buildThemeSection(CC.state || {}),
-    ];
-    CC.renderSheet('Desktop Settings', 'Manage the desktop app appearance.', sections);
+      CC.buildLocalServerSection(CC.state || {}),
+    ]);
   };
 
   CC.render = function (state) {

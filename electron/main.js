@@ -648,11 +648,10 @@ function getServerEnv() {
     VOICE_API_BASE_URL: '',
     VOICE_API_KEY: '',
   };
-  // Владельцу — как на его сайте: новый чат без вопросов перед каждым действием.
-  // Остальным — встроенное осторожное поведение: Claude спрашивает разрешения.
-  if (account?.plan === 'owner') {
-    env.DEFAULT_PERMISSION_MODE = 'bypassPermissions';
-  }
+  // Как в Claude Desktop: новый чат начинается в режиме «Спрашивать» — Claude
+  // читает файлы папки сам, а перед изменением файла, командой, интернетом и
+  // чтением за пределами папки спрашивает. Режим меняется в поле ввода.
+  env.DEFAULT_PERMISSION_MODE = 'default';
   return env;
 }
 
@@ -833,6 +832,25 @@ function registerIpcHandlers() {
 
   ipcMain.handle('claudeui:sign-in', async (_event, fields) => signIn('login', fields));
   ipcMain.handle('claudeui:register', async (_event, fields) => signIn('register', fields));
+  // Выбор папки проекта системным окном (как «Открыть папку» в Claude Desktop):
+  // только для страницы интерфейса этого компьютера.
+  ipcMain.handle('claudeui:pick-folder', async (event, options = {}) => {
+    let origin = null;
+    try {
+      origin = new URL(event.sender.getURL()).origin;
+    } catch {
+      origin = null;
+    }
+    if (!localAuth?.getTokenForOrigin(origin)) return null;
+    const result = await dialog.showOpenDialog(desktopWindow?.getMainWindow() || undefined, {
+      title: 'Папка проекта',
+      buttonLabel: 'Открыть',
+      message: 'Выберите папку, с которой будет работать Claude',
+      defaultPath: typeof options.defaultPath === 'string' && options.defaultPath ? options.defaultPath : app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+    });
+    return result.canceled || !result.filePaths?.[0] ? null : result.filePaths[0];
+  });
   ipcMain.on('claudeui:local-auth-token', (event) => {
     let origin = null;
     try {

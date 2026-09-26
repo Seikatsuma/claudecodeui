@@ -221,6 +221,16 @@
       "providePath": "Please provide a workspace path",
       "failedToCreate": "Failed to create workspace",
       "failedToCreateFolder": "Failed to create folder"
+    },
+    "desktop": {
+      "title": "Open folder",
+      "folderLabel": "Project folder",
+      "pick": "Choose folder…",
+      "pickHint": "Opens the system folder picker",
+      "change": "Change",
+      "typePath": "Type a path instead",
+      "access": "Claude works inside this folder: it reads files on its own, but editing them, running commands and looking outside the folder need your approval. You can change the mode in the message box.",
+      "githubToggle": "Clone from GitHub (optional)"
     }
   },
   "notifications": {

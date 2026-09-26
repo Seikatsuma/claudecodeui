@@ -27,6 +27,13 @@ if (window.location.protocol === 'http:'
   try {
     const token = ipcRenderer.sendSync('claudeui:local-auth-token');
     if (token) window.localStorage.setItem('auth-token', token);
+    if (token) {
+      // Возможности программы для интерфейса этого компьютера.
+      contextBridge.exposeInMainWorld('claudeUiDesktop', {
+        platform: process.platform,
+        pickFolder: (options) => ipcRenderer.invoke('claudeui:pick-folder', options || {}),
+      });
+    }
   } catch {
     // Нет входа — страница покажет свой экран входа.
   }

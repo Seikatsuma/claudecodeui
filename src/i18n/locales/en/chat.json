@@ -274,5 +274,27 @@
   },
   "tasks": {
     "nextTaskPrompt": "Start the next task"
+  },
+  "claudeModes": {
+    "default": {
+      "label": "Ask",
+      "description": "Reads files in the project folder on its own. Asks before editing files, running commands, going online or reading outside the folder."
+    },
+    "acceptEdits": {
+      "label": "Edit automatically",
+      "description": "Edits and creates files in the project folder on its own. Commands and anything outside the folder still need your approval."
+    },
+    "plan": {
+      "label": "Plan first",
+      "description": "Changes nothing: explores and proposes a plan for you to approve."
+    },
+    "auto": {
+      "label": "Auto",
+      "description": "Acts on its own; a second model reviews risky steps and still asks about them."
+    },
+    "bypassPermissions": {
+      "label": "Bypass permissions",
+      "description": "Does everything without asking, including outside the folder. Only for tasks you fully trust."
+    }
   }
 }

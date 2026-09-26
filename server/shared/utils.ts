@@ -329,7 +329,7 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
     if (!normalizedRequestedPath) {
       return {
         valid: false,
-        error: 'Workspace path is required',
+        error: 'Укажите папку проекта.',
       };
     }
 
@@ -339,7 +339,7 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
     if (FORBIDDEN_WORKSPACE_PATHS.includes(normalizedPath) || normalizedPath === '/') {
       return {
         valid: false,
-        error: 'Cannot use system-critical directories as workspace locations',
+        error: 'Системную папку нельзя сделать проектом — выберите свою папку (например, в «Документах»).',
       };
     }
 
@@ -359,7 +359,7 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
 
         return {
           valid: false,
-          error: `Cannot create workspace in system directory: ${forbiddenPath}`,
+          error: `Папка внутри системной (${forbiddenPath}) — выберите свою папку, например в «Документах».`,
         };
       }
     }
@@ -388,13 +388,18 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
 
     const workspacesRoot = getWorkspacesRoot();
     const resolvedWorkspaceRoot = normalizeProjectPath(await realpath(workspacesRoot));
+    // Программа на компьютере: человек сам выбрал папку системным окном — можно
+    // любую, кроме системных (другой диск, внешний диск, папка вне домашней).
+    // На сервере рамка остаётся: проекты только внутри рабочей области.
+    const isDesktopApp = process.env.CLAUDE_UI_DESKTOP === '1';
     if (
-      !resolvedPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
+      !isDesktopApp
+      && !resolvedPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
       && resolvedPath !== resolvedWorkspaceRoot
     ) {
       return {
         valid: false,
-        error: `Workspace path must be within the allowed workspace root: ${workspacesRoot}`,
+        error: `Папка должна быть внутри ${workspacesRoot}`,
       };
     }
 
@@ -406,12 +411,12 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
         const resolvedSymlinkPath = path.resolve(path.dirname(absolutePath), symlinkTarget);
         const realSymlinkPath = await realpath(resolvedSymlinkPath);
         if (
-          !realSymlinkPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
+          !isDesktopApp && !realSymlinkPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
           && realSymlinkPath !== resolvedWorkspaceRoot
         ) {
           return {
             valid: false,
-            error: 'Symlink target is outside the allowed workspace root',
+            error: 'Эта папка — ярлык на место вне рабочей области',
           };
         }
       }

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FolderOpen } from 'lucide-react';
 import { Button, Input } from '../../../shared/view/ui';
 import { browseFilesystemFolders } from '../data/workspaceApi';
 import { getSuggestionRootPath } from '../utils/pathUtils';
 import type { FolderSuggestion } from '../types';
 import FolderBrowserModal from './FolderBrowserModal';
+import { getDesktopBridge } from '../../../lib/desktopBridge';
 
 type WorkspacePathFieldProps = {
   value: string;
@@ -22,6 +24,14 @@ export default function WorkspacePathField({
   const [pathSuggestions, setPathSuggestions] = useState<FolderSuggestion[]>([]);
   const [showPathDropdown, setShowPathDropdown] = useState(false);
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+  const { t } = useTranslation();
+  // Программа на компьютере: папку выбирают системным окном Mac/Windows.
+  const desktop = getDesktopBridge();
+  const [showManualPath, setShowManualPath] = useState(false);
+  const pickWithSystemDialog = useCallback(async () => {
+    const picked = await desktop?.pickFolder({ defaultPath: value || undefined });
+    if (picked) onChange(picked);
+  }, [desktop, onChange, value]);
 
   useEffect(() => {
     if (value.trim().length <= 2) {
@@ -77,6 +87,55 @@ export default function WorkspacePathField({
     },
     [onAdvanceToConfirm, onChange],
   );
+
+  if (desktop) {
+    const folderName = value.split(/[\\/]/).filter(Boolean).pop() || value;
+    return (
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => void pickWithSystemDialog()}
+          disabled={disabled}
+          className="flex w-full items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-4 text-left transition-colors hover:border-primary/60 hover:bg-primary/5 disabled:opacity-60"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <FolderOpen className="h-5 w-5" />
+          </span>
+          {value ? (
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-foreground">{folderName}</span>
+              <span className="block truncate text-xs text-muted-foreground">{value}</span>
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-foreground">{t('projectWizard.desktop.pick')}</span>
+              <span className="block text-xs text-muted-foreground">{t('projectWizard.desktop.pickHint')}</span>
+            </span>
+          )}
+          {value && <span className="shrink-0 text-sm font-medium text-primary">{t('projectWizard.desktop.change')}</span>}
+        </button>
+        {showManualPath ? (
+          <Input
+            type="text"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={desktop.platform === 'win32' ? 'C:\\Users\\Имя\\Documents\\Проект' : '/Users/имя/Documents/Проект'}
+            className="w-full"
+            disabled={disabled}
+            autoFocus
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowManualPath(true)}
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            {t('projectWizard.desktop.typePath')}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>
