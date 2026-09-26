@@ -243,7 +243,10 @@ function rehypeUncertainUnderline() {
     const kids = node?.children;
     if (!Array.isArray(kids)) return;
     kids.forEach((child: any, i: number) => {
-      const prev = kids[i - 1];
+      // Перенос строки между ⚠ и фразой (remark-breaks даёт <br>) — смотрим сквозь него.
+      let j = i - 1;
+      while (j >= 0 && ((kids[j]?.type === 'element' && kids[j].tagName === 'br') || (kids[j]?.type === 'text' && !String(kids[j].value).trim()))) j -= 1;
+      const prev = kids[j];
       if (child?.type === 'element' && child.tagName === 'em' && prev?.type === 'text' && WARN_TAIL.test(prev.value || '')) {
         child.tagName = 'u';
         child.properties = { ...(child.properties || {}), className: ['md-uncertain'] };
@@ -258,7 +261,7 @@ const markdownComponents = {
   code: CodeBlock,
   u: ({ children }: { children?: React.ReactNode }) => (
     <u
-      className="underline decoration-amber-500 decoration-2 underline-offset-[3px] dark:decoration-amber-400"
+      className="underline decoration-amber-600 decoration-2 underline-offset-[3px] dark:decoration-amber-400"
       title="Не проверено: нейросеть прикинула или не перепроверила"
     >
       {children}
