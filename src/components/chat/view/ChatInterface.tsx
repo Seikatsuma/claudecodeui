@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownIcon } from 'lucide-react';
 
@@ -18,6 +18,7 @@ import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatRequestBar from './subcomponents/ChatRequestBar';
 import ChatComposer from './subcomponents/ChatComposer';
 import CommandResultModal from './subcomponents/CommandResultModal';
+import RewindConfirmDialog from './subcomponents/RewindConfirmDialog';
 import { knownRunStartedAt } from '../utils/liveRunCursor';
 
 /**
@@ -443,17 +444,27 @@ function ChatInterface({
   // с файлом разговора), а текст возвращается в поле ввода — поправить и
   // отправить заново. Как «rewind» в Claude Code.
   const rewindSessionId = currentSessionId || selectedSession?.id || null;
-  const handleRewindToMessage = useCallback(async (message: ChatMessage) => {
-    const sessionId = rewindSessionId;
-    if (!sessionId) return;
-    const confirmed = window.confirm(
-      'Вернуться к этому сообщению?\n\n'
-      + 'Оно и всё, что было после него, уберётся из чата; если агент сейчас работает — он остановится. '
-      + 'Текст сообщения вернётся в поле ввода: поправьте и отправьте заново.\n\n'
-      + 'Изменения в файлах, которые агент уже успел сделать, не откатываются.',
-    );
-    if (!confirmed) return;
+  // Сообщение, к которому просят вернуться: пока задано — открыто окно подтверждения.
+  const [rewindTarget, setRewindTarget] = useState<ChatMessage | null>(null);
+  const [rewindBusy, setRewindBusy] = useState(false);
+  const [rewindError, setRewindError] = useState<string | null>(null);
 
+  const handleRewindToMessage = useCallback((message: ChatMessage) => {
+    setRewindError(null);
+    setRewindTarget(message);
+  }, []);
+
+  const cancelRewind = useCallback(() => {
+    setRewindTarget(null);
+    setRewindError(null);
+  }, []);
+
+  const confirmRewind = useCallback(async () => {
+    const sessionId = rewindSessionId;
+    const message = rewindTarget;
+    if (!sessionId || !message) return;
+    setRewindBusy(true);
+    setRewindError(null);
     try {
       const response = await authenticatedFetch(
         `/api/providers/sessions/${encodeURIComponent(sessionId)}/rewind`,
@@ -468,7 +479,7 @@ function ChatInterface({
       );
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) {
-        window.alert(payload?.error?.message || 'Не получилось вернуться к сообщению. Попробуйте ещё раз.');
+        setRewindError(payload?.error?.message || 'Не получилось вернуться к сообщению. Попробуйте ещё раз.');
         return;
       }
 
@@ -484,12 +495,15 @@ function ChatInterface({
         .filter(Boolean)
         .join('\n\n');
       setInput(draft);
+      setRewindTarget(null);
       requestAnimationFrame(() => textareaRef.current?.focus());
     } catch (error) {
       console.error('Rewind to message failed:', error);
-      window.alert('Не получилось вернуться к сообщению: нет связи с сервером. Попробуйте ещё раз.');
+      setRewindError('Нет связи с сервером. Попробуйте ещё раз.');
+    } finally {
+      setRewindBusy(false);
     }
-  }, [rewindSessionId, sessionStore, resetStreamingState, retryHistoryLoad, setInput, textareaRef]);
+  }, [rewindSessionId, rewindTarget, sessionStore, resetStreamingState, retryHistoryLoad, setInput, textareaRef]);
 
   const handleSelectComposerModel = useCallback(async (model: string) => {
     try {
@@ -593,6 +607,16 @@ function ChatInterface({
           onRewindToMessage={provider === 'claude' && rewindSessionId ? handleRewindToMessage : undefined}
           selectedProject={selectedProject}
         />
+
+        {rewindTarget && (
+          <RewindConfirmDialog
+            text={typeof rewindTarget.content === 'string' ? rewindTarget.content : ''}
+            busy={rewindBusy}
+            error={rewindError}
+            onCancel={cancelRewind}
+            onConfirm={confirmRewind}
+          />
+        )}
 
         <div className="relative flex-shrink-0">
           {isUserScrolledUp && chatMessages.length > 0 && (

@@ -1,7 +1,7 @@
 import { Undo2 } from 'lucide-react';
 
 /**
- * Кнопка «Вернуться сюда» под своим сообщением — рядом с копированием.
+ * Кнопка «Back» (Егор 26.09.26: название — Back) под своим сообщением — рядом с копированием.
  *
  * Сама ничего не решает: сообщает наверх, к какому сообщению человек хочет
  * вернуться. Подтверждение, запрос к серверу и текст в поле ввода — забота
@@ -24,7 +24,7 @@ export default function MessageRewindControl({ onRewind, disabled = false }: Pro
       className="inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
     >
       <Undo2 className="h-3.5 w-3.5" />
-      <span>Вернуться</span>
+      <span>Back</span>
     </button>
   );
 }
