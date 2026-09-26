@@ -26,8 +26,31 @@
 - Узкое окно — `src/components/app/AppContent.tsx`: 768–1023 точки → полоска значков, панель выезжает
   поверх чата; уже 768 — телефонная раскладка. Окно сжимается до 420 (`desktopWindow.js`).
 
+## Доступ к файлам и подтверждения (26.09.26, как в Claude Desktop)
+- Папка проекта — системным окном («Открыть папку» → «Выбрать папку…»: `claudeui:pick-folder` в main.js,
+  мост `window.claudeUiDesktop` в preload.cjs, `src/lib/desktopBridge.ts`, мастер `project-creation-wizard`).
+  Любая папка, кроме системных (`validateWorkspacePath` при CLAUDE_UI_DESKTOP=1 не держит в домашней).
+  После выбора сразу новый чат в папке (Sidebar.handleProjectCreated).
+- Новый чат — режим «Спрашивать» (DEFAULT_PERMISSION_MODE=default). Режимы и описания — `claudeModes` в
+  ru/en chat.json, порядок как в Claude Desktop (ComposerPermissionMenu). Название режима видно на кнопке.
+- Окно разрешения: PermissionRequestsBanner + describePermission.ts — вопрос человеческим языком, файл или
+  команда, для правки — что уберётся/добавится, опасное — красным. «Разрешать всегда» только для простой и
+  не опасной команды (составная «cd … && rm» давала бы правило Bash(cd:*) на всё). «Запретить» — сразу;
+  «Запретить и подсказать» — пояснение уходит Claude. Окно ждёт ответа сутки (CLAUDE_TOOL_APPROVAL_TIMEOUT_MS;
+  на сайте 55 с — запрос отклонялся сам).
+- Мозги: в «Спрашивать»/«План» защита от удаления не стопорит (подтверждает окно), Claude не просит «да» в
+  чате; в остальных режимах — «да» текстом и USER_CONFIRMED=da. Режим подкладывается к каждому сообщению.
+
+## Один Mac-файл и Windows 10/11 (26.09.26)
+- Mac: половины M и Intel собираются на своих машинах (в каждую докачан Claude другого процессора), затем
+  `scripts/release/make-mac-universal.mjs`: половины дополняются друг другом (Codex, нативные модули в
+  bin/darwin-*), склейка @electron/universal, подпись «для себя», .dmg с «Программами». Нижняя граница macOS 13
+  (ниже не работает Claude Code). Windows: один установщик x64; Windows 11 на ARM запускает его эмуляцией.
+- Проверка из установщиков: macOS 14/15/26 (M), 15 (Intel), Windows Server 2022/2025 (ядра 10/11), Windows 11 ARM.
+  На ARM-машине GitHub экран закрыт первичной настройкой Windows — там доказательство по журналу пробы.
+
 ## Сборка и проверка
-- `.github/workflows/claudeui-desktop.yml` — Mac (M и Intel) и Windows на машинах GitHub, пуш в
+- `.github/workflows/claudeui-desktop.yml` — сборка половин и склейка Mac, установщик Windows, проверка на 7 системах; пуш в
   `desktop-app` или вручную. `scripts/release/build-claudeui-desktop.mjs` кладёт сервер со всеми
   пакетами внутрь (нативные пересобраны под Electron), `smoke-claudeui-desktop.mjs` запускает
   собранную программу там же, входит пробным аккаунтом (секреты CLAUDEUI_SMOKE_*; аккаунт
