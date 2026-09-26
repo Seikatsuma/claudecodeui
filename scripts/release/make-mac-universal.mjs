@@ -24,7 +24,7 @@ function run(command, args) {
 }
 
 await fs.mkdir(outDir, { recursive: true });
-const staging = path.join(outDir, 'universal');
+const staging = path.resolve(outDir, 'universal');
 await fs.rm(staging, { recursive: true, force: true });
 await fs.mkdir(staging, { recursive: true });
 const outAppPath = path.join(staging, 'Claude UI.app');
@@ -46,7 +46,7 @@ run('lipo', ['-archs', path.join(outAppPath, 'Contents', 'MacOS', 'Claude UI')])
 
 // .dmg: программа + ярлык «Программы», чтобы перетащить.
 await fs.symlink('/Applications', path.join(staging, 'Applications'));
-const dmgPath = path.join(outDir, `Claude-UI-${version}-mac.dmg`);
+const dmgPath = path.resolve(outDir, `Claude-UI-${version}-mac.dmg`);
 await fs.rm(dmgPath, { force: true });
 run('hdiutil', ['create', '-volname', 'Claude UI', '-srcfolder', staging, '-ov', '-format', 'UDZO', dmgPath]);
 console.log(`Готово: ${dmgPath}`);
