@@ -238,12 +238,52 @@ export default function ChatComposer({
     if (voiceErrorTimer.current) clearTimeout(voiceErrorTimer.current);
   }, []);
   const noopTranscript = useCallback(() => {}, []);
-  const { state: voiceState, toggle: voiceToggle, stop: voiceStop } = useVoiceInput(
+  const { state: voiceState, toggle: voiceToggle, stop: voiceStop, requestSend: voiceRequestSend } = useVoiceInput(
     onVoiceTranscript ?? noopTranscript,
     handleVoiceError,
   );
   const isRecording = voiceState === 'recording';
   const isTranscribing = voiceState === 'transcribing';
+
+  // Enter is "send", never "record" (25.09.26: Enter after a dictation started a new
+  // one). While recording it stops and sends, like the Send button; while the
+  // transcript is on its way it sends the transcript once it lands.
+  const handleVoiceSendKey = useCallback(() => {
+    if (voiceState === 'recording') voiceStop({ send: true });
+    else if (voiceState === 'transcribing') voiceRequestSend();
+    else textareaRef.current?.focus();
+  }, [voiceState, voiceStop, voiceRequestSend, textareaRef]);
+
+  // On a computer the mic click leaves the caret in the text box, so the next Enter
+  // lands there. Not on a phone: focusing the box would pop the on-screen keyboard.
+  const handleVoiceToggle = useCallback(() => {
+    if (!isTouchKeyboard()) textareaRef.current?.focus();
+    voiceToggle();
+  }, [voiceToggle, textareaRef]);
+
+  const handleComposerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (
+        (isRecording || isTranscribing) &&
+        event.key === 'Enter' &&
+        !event.nativeEvent.isComposing &&
+        !isCommandMenuOpen &&
+        !showFileDropdown
+      ) {
+        // Same keys that send a message (see handleKeyDown in useChatComposerState).
+        const plainEnter =
+          !event.shiftKey && !event.ctrlKey && !event.metaKey && !sendByCtrlEnter && !isTouchKeyboard();
+        const modEnter = (event.ctrlKey || event.metaKey) && !event.shiftKey;
+        if (plainEnter || modEnter) {
+          event.preventDefault();
+          handleVoiceSendKey();
+          return;
+        }
+      }
+      onTextareaKeyDown(event);
+    },
+    [isRecording, isTranscribing, isCommandMenuOpen, showFileDropdown, sendByCtrlEnter, handleVoiceSendKey, onTextareaKeyDown],
+  );
 
   // Detect if the AskUserQuestion interactive panel is active
   const hasQuestionPanel = pendingPermissionRequests.some(
@@ -452,7 +492,7 @@ export default function ChatComposer({
               value={input}
               onChange={onInputChange}
               onClick={onTextareaClick}
-              onKeyDown={onTextareaKeyDown}
+              onKeyDown={handleComposerKeyDown}
               onPaste={onTextareaPaste}
               onScroll={(event) => onTextareaScrollSync(event.target as HTMLTextAreaElement)}
               onFocus={() => onInputFocusChange?.(true)}
@@ -484,7 +524,12 @@ export default function ChatComposer({
             </PromptInputButton>
 
             {onVoiceTranscript && voiceAvailable && (
-              <VoiceInputButton state={voiceState} onToggle={voiceToggle} errorMsg={voiceError} />
+              <VoiceInputButton
+                state={voiceState}
+                onToggle={handleVoiceToggle}
+                onEnter={handleVoiceSendKey}
+                errorMsg={voiceError}
+              />
             )}
 
             <TokenUsageSummary usage={tokenBudget} onClick={onShowTokenUsage} />

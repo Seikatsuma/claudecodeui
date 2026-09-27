@@ -1,3 +1,4 @@
+import type { KeyboardEvent, MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mic, Square, Loader2 } from 'lucide-react';
 
@@ -7,13 +8,20 @@ import type { VoiceInputState } from '../../hooks/useVoiceInput';
 type Props = {
   state: VoiceInputState;
   onToggle: () => void;
+  // Enter while the button itself has keyboard focus. Must never start a recording.
+  onEnter: () => void;
   errorMsg?: string | null;
 };
 
 // Push-to-talk mic button (presentational). Recording state and the stop-and-send action
 // are owned by the composer so the main Send button can drive them too. This button just
 // starts recording and, while recording, stops and drops the transcript into the input box.
-export default function VoiceInputButton({ state, onToggle, errorMsg }: Props) {
+//
+// Recording starts only from a click/tap. 25.09.26: a mouse click left keyboard focus on
+// this button, so the Enter pressed afterwards to send the message "clicked" it again and
+// started a new recording. Now a mouse press keeps focus where it was (the text box), and
+// Enter on the button is routed to the composer instead of the browser's click.
+export default function VoiceInputButton({ state, onToggle, onEnter, errorMsg }: Props) {
   const { t } = useTranslation('chat');
 
   const icon =
@@ -35,6 +43,13 @@ export default function VoiceInputButton({ state, onToggle, errorMsg }: Props) {
       <PromptInputButton
         aria-label={state === 'recording' ? t('voice.stopRecording') : t('voice.input')}
         tooltip={{ content: state === 'recording' ? t('voice.stopRecording') : t('voice.input') }}
+        onMouseDown={(e: MouseEvent<HTMLButtonElement>) => e.preventDefault()}
+        onKeyDown={(e: KeyboardEvent<HTMLButtonElement>) => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          e.stopPropagation();
+          onEnter();
+        }}
         onClick={(e: { preventDefault: () => void }) => {
           e.preventDefault();
           onToggle();
