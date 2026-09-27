@@ -576,7 +576,7 @@ function composeMessage(source: HandoffSource, parts: ComposeParts, now: Date): 
   }
   lines.push('', '## Прошлый чат');
   if (parts.dialogPath) {
-    lines.push(`- Весь разговор целиком (слова человека и ответы агента, без служебного): \`${parts.dialogPath}\`. Готовые тексты — промпты, письма, списки — бери оттуда дословно, не восстанавливай по выжимке.`);
+    lines.push(`- Весь разговор целиком (слова человека и ответы агента, без служебного): \`${parts.dialogPath}\`. Готовые тексты — промпты, письма, списки — бери оттуда дословно, не восстанавливай по выжимке. Файл хранится ${DIALOG_TTL_DAYS} дней; нет его — ищи в сырой переписке ниже.`);
   }
   lines.push(`- Сырая переписка со всеми действиями: \`${source.transcriptPath}\`. Целиком не читай — ищи нужное по словам (grep).`);
   if (source.projectPath) lines.push(`- Папка, в которой шёл чат: \`${source.projectPath}\``);
@@ -612,6 +612,43 @@ function clipTail(text: string): string {
 function dialogPathFor(source: HandoffSource, now: Date): string {
   const day = now.toLocaleDateString('sv-SE', { timeZone: 'Europe/Moscow' });
   return path.join(source.accountDir, 'handoffs', `${day}-${source.sessionId.slice(0, 8)}.md`);
+}
+
+/** Сколько живёт файл разговора (Егор 27.09.26 «да» на уборку через 30 дней). */
+const DIALOG_TTL_DAYS = 30;
+/** Только файлы, которые пишет сама кнопка: «ГГГГ-ММ-ДД-xxxxxxxx.md». */
+const DIALOG_FILE_NAME = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{8}\.md$/;
+
+/**
+ * Уборка файлов разговоров старше 30 дней в папке аккаунта. Ничего
+ * невосполнимого не теряется: полная переписка остаётся на сервере, файл из
+ * неё собирается заново следующим нажатием. Трогает только файлы с именем
+ * кнопки — чужое в той же папке не удаляется.
+ */
+export async function sweepOldDialogs(accountDir: string, now = Date.now(), ttlDays = DIALOG_TTL_DAYS): Promise<number> {
+  const dir = path.join(accountDir, 'handoffs');
+  let names: string[] = [];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (!DIALOG_FILE_NAME.test(name)) continue;
+    const file = path.join(dir, name);
+    try {
+      const info = await stat(file);
+      if (info.isFile() && now - info.mtimeMs > ttlDays * 24 * 60 * 60 * 1000) {
+        await unlink(file);
+        removed += 1;
+      }
+    } catch {
+      // Файл уже убран параллельной уборкой — не ошибка.
+    }
+  }
+  if (removed > 0) console.log(`[handoff] убрано файлов разговоров старше ${ttlDays} дней: ${removed} (${dir})`);
+  return removed;
 }
 
 /** Путь к переписке чата — только внутри папки аккаунта того, кто нажал кнопку. */
@@ -844,6 +881,7 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
   const dialogPath = dialogPathFor(source, now);
   // Файл разговора пишется рядом и не держит нажатие: новый чат откроет его
   // не раньше своего первого ответа, а это секунды.
+  void sweepOldDialogs(source.accountDir);
   const dialogReady = exportDialogFile(source.transcriptPath, source.providerSessionId, dialogPath, source.title)
     .then(() => true)
     .catch((error) => {
