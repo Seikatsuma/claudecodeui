@@ -58,6 +58,8 @@ import { sessionsDb } from '@/modules/database/index.js';
 import {
   digestTranscriptFile,
   exportDialogFile,
+  formatRecentEdits,
+  recentEdits,
   transcriptLineBoundary,
   type TouchedFile,
   type TranscriptDigest,
@@ -129,7 +131,7 @@ const BRIEF_HALVES = [
   {
     words: 550,
     sections: `## Цель — 1–2 предложения: чего человек добивается и что должен увидеть в итоге.
-## Где остановились — последний запрос человека дословно в кавычках и что агент успел по нему сделать.
+## Где остановились — последний запрос человека дословно в кавычках и что агент успел по нему сделать. Если шла правка кода — какие файлы и функции уже тронуты и что осталось (смотри блок «ПОСЛЕДНИЕ ПРАВКИ КОДА» в конце переписки; сам код не переписывай — он будет приложен дословно).
 ## Следующий шаг — что делать дальше; если развилка — варианты и чем отличаются.
 ## Поправки и требования человека — почти дословно, в кавычках.
 ## Решения — что выбрано и почему; отвергнутое — с причиной.`,
@@ -542,6 +544,8 @@ type ComposeParts = {
   guides: string[];
   /** Файлы, тронутые уже после заготовки: в карте модели их нет. */
   lateFiles: FileMapEntry[];
+  /** Последние правки кода дословно — чтобы новый чат продолжил правку с того же места. */
+  edits: string;
 };
 
 /** Первое сообщение нового чата: выжимка модели между шапкой и указателями, которые пишет сервер. */
@@ -561,6 +565,14 @@ function composeMessage(source: HandoffSource, parts: ComposeParts, now: Date): 
       'Самое свежее: эта часть разговора шла уже после того, как выжимка была собрана. Где она расходится с выжимкой — верна она.',
       '',
       parts.tail.trim(),
+    );
+  }
+  if (parts.edits.trim()) {
+    lines.push(
+      '',
+      '## Последние правки кода — дословно',
+      'Так файлы выглядели после последних правок прошлого чата. Прежде чем продолжать правку, открой файл — его могли менять и после.',
+      parts.edits.trim(),
     );
   }
   if (parts.lateFiles.length > 0) {
@@ -831,7 +843,7 @@ export async function prepareHandoff(
       const digest = await digestTranscriptFile(source.transcriptPath, source.providerSessionId, { end: bytes });
       if (!digest.text.trim()) throw new Error('в переписке нет сообщений');
       const fileMap = await buildFileMap(digest.touchedFiles);
-      item.brief = await writeBrief(digest.text, source.accountDir, ask, null, formatFileList(fileMap));
+      item.brief = await writeBrief(await digestWithEdits(digest.text, source), source.accountDir, ask, null, formatFileList(fileMap));
       item.changedFiles = digest.changedFiles;
       item.mapPaths = fileMap.map((entry) => entry.path);
       item.guides = await folderGuides(fileMap);
@@ -846,6 +858,14 @@ export async function prepareHandoff(
     }
   })();
   return { status: 'started' };
+}
+
+/** Последние правки кода блоком в конец переписки — модель видит, где остановилась работа над кодом. */
+async function digestWithEdits(digestText: string, source: HandoffSource): Promise<string> {
+  const edits = await recentEdits(source.transcriptPath, source.providerSessionId).catch(() => []);
+  return edits.length > 0
+    ? `${digestText}\n\nПОСЛЕДНИЕ ПРАВКИ КОДА (дословно, свежие в конце):\n${formatRecentEdits(edits)}`
+    : digestText;
 }
 
 /** Задача нового чата: только текст, без переводов строк по краям и не длиннее разумного. */
@@ -912,6 +932,7 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
               goal,
               guides,
               lateFiles: late,
+              edits: '',
             };
             job.fromPrepared = true;
           }
@@ -921,7 +942,7 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
         const digest = await digestTranscriptFile(source.transcriptPath, source.providerSessionId);
         if (!digest.text.trim()) throw new Error('в переписке нет сообщений');
         const fileMap = await buildFileMap(digest.touchedFiles);
-        const brief = await writeBrief(digest.text, source.accountDir, ask, goal, formatFileList(fileMap));
+        const brief = await writeBrief(await digestWithEdits(digest.text, source), source.accountDir, ask, goal, formatFileList(fileMap));
         parts = {
           brief,
           changedFiles: digest.changedFiles,
@@ -930,12 +951,15 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
           goal,
           guides: await folderGuides(fileMap),
           lateFiles: [],
+          edits: '',
         };
       }
       // Файл разговора пишется целиком в конце (оглавление в начале), поэтому
       // ждём его до конца: замер 27.09.26 — переписка 98 МБ за 2,2 с, 19 МБ за
       // 0,4 с. Ссылка на ещё не записанный файл хуже пары секунд ожидания.
       if (!(await dialogReady)) parts.dialogPath = null;
+      // Правки берутся на момент нажатия: заготовка могла быть собрана раньше.
+      parts.edits = scrubSecrets(formatRecentEdits(await recentEdits(source.transcriptPath, source.providerSessionId).catch(() => [])));
       job.message = composeMessage(source, parts, now);
       job.status = 'done';
       console.log(`[handoff] ${sessionId}: ${job.fromPrepared ? 'из заготовки' : 'заново'}${goal ? ', с задачей' : ''} — ${job.message.length} зн. за ${((Date.now() - job.startedAt) / 1000).toFixed(1)} с`);

@@ -9,7 +9,9 @@ import {
   digestTranscriptFile,
   digestTranscriptLines,
   exportDialogFile,
+  formatRecentEdits,
   pathsInCommand,
+  recentEdits,
   transcriptLineBoundary,
 } from '@/modules/handoff/handoff-digest.js';
 import {
@@ -283,4 +285,23 @@ test('уборка: файлы разговоров старше 30 дней у�
   assert.equal(await sweepOldDialogs(acc), 1);
   assert.deepEqual((await readdir(dir)).sort(), ['2026-08-01-notmine.md', '2026-09-27-bbbbbbbb.md', 'заметки.md'].sort());
   assert.equal(await sweepOldDialogs(path.join(acc, 'нет-такой')), 0, 'нет папки — не ошибка');
+});
+
+test('последние правки кода — дословно, свежие последними, не больше лимита', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const edit = (n: number) => line({ type: 'assistant', message: { content: [
+    { type: 'tool_use', name: 'Edit', input: { file_path: `/p/f${n}.ts`, old_string: 'x', new_string: `function f${n}() {}` } },
+  ] } });
+  await writeFile(file, [
+    edit(1), edit(2),
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: '/p/new.md', content: 'строка\n'.repeat(60) } }] } }),
+    edit(3),
+  ].join('\n'));
+  const edits = await recentEdits(file, SID, 3);
+  assert.deepEqual(edits.map((e) => e.file), ['/p/f2.ts', '/p/new.md', '/p/f3.ts']);
+  assert.match(edits[1].text, /обрезано, всего 61 строк/);
+  const text = formatRecentEdits(edits);
+  assert.match(text, /правка: `\/p\/f3\.ts`\n```\nfunction f3\(\) \{\}\n```/);
+  assert.match(text, /файл записан целиком: `\/p\/new\.md`/);
 });
