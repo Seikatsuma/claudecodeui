@@ -293,7 +293,8 @@ export default function CommandMenu({
                 <div className="min-w-0 flex-1 pr-1">
                   <div className={`flex min-w-0 items-center gap-2 ${command.description ? 'mb-1' : 'mb-0'}`}>
                     <span
-                      className="min-w-0 truncate font-mono text-[13px] font-semibold text-foreground"
+                      // С подсказкой параметров имя не сжимаем — обрезается подсказка.
+                      className={`${command.argumentHint ? 'shrink-0' : 'min-w-0 truncate'} font-mono text-[13px] font-semibold text-foreground`}
                       title={command.name}
                     >
                       {command.name}
