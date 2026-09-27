@@ -59,6 +59,7 @@ import {
   digestTranscriptFile,
   exportDialogFile,
   transcriptLineBoundary,
+  type TouchedFile,
   type TranscriptDigest,
 } from '@/modules/handoff/handoff-digest.js';
 import { canonicalizeAccountDir, getActiveAccountDir } from '@/shared/session-scope.js';
@@ -139,15 +140,18 @@ const BRIEF_HALVES = [
 ## Что сделано — по пунктам, с пометками (проверено)/(со слов).
 ## Цифры и факты — настоящие числа, адреса, имена, версии.
 ## Ждёт решения человека — открытые вопросы к нему.
-## Где искать — пути к файлам, документам, страницам дела и заметкам, которые упоминаются в переписке как источник.`,
+## Где искать — карта для нового агента: каждый путь — отдельной строкой «\`полный путь\` — что там и когда туда смотреть» (одна строка, конкретно: «код бота, разбор голосовых — строки 120–300», а не «файл проекта»). Сначала — пути из списка «Файлы, с которыми работал чат» (сервер проверил, что они есть), от самых нужных для продолжения; ненужные для продолжения из списка пропускай. Затем — другие места из переписки, которых нет в списке (другой сервер, сайт, документ) — с пометкой, где они. Пути пиши полностью, как в списке, без сокращений.`,
   },
 ] as const;
 
 type Half = (typeof BRIEF_HALVES)[number];
 
-function halfTask(half: Half): string {
-  return `Напиши ТОЛЬКО эти разделы (заголовки ##, в этом порядке). Остальные разделы одновременно пишет другой составитель — их не пиши и не повторяй. Объём твоей части — не больше ~${half.words} слов: лишнее новый агент найдёт в файле разговора.
-${half.sections}`;
+function halfTask(half: Half, fileList: string): string {
+  const files = half.sections.includes('## Где искать') && fileList
+    ? `\n\nФайлы, с которыми работал чат (сервер проверил, что они есть на диске; «правился» — агент менял файл, «открывался N» — сколько раз читал):\n${fileList}`
+    : '';
+  return `Напиши ТОЛЬКО эти разделы (заголовки ##, в этом порядке). Остальные разделы одновременно пишет другой составитель — их не пиши и не повторяй. Объём твоей части — не больше ~${half.words} слов: лишнее новый агент найдёт в файлах по карте и в файле разговора.
+${half.sections}${files}`;
 }
 
 /** Задача нового чата, если человек её написал, — выжимка отбирается под неё. */
@@ -157,12 +161,12 @@ function goalBlock(goal: string | null): string {
     : '';
 }
 
-function singlePassPrompt(digest: string, goal: string | null, half: Half): string {
+function singlePassPrompt(digest: string, goal: string | null, half: Half, fileList: string): string {
   return `Ты готовишь передачу дела. Разговор человека с ИИ-агентом (Claude Code) разросся, и работа продолжится в НОВОМ чате, где у агента этой переписки не будет. Новый агент увидит выжимку и сможет при нужде открыть весь разговор файлом. Твоя часть выжимки должна дать ему продолжить без потерь и без переспросов.
 ${goalBlock(goal)}
 ${BRIEF_RULES}
 
-${halfTask(half)}
+${halfTask(half, fileList)}
 
 ${INVENTORY_STEP}
 
@@ -182,13 +186,13 @@ ${chunk}
 </transcript>`;
 }
 
-function reducePrompt(notes: string[], lastChunk: string, goal: string | null, half: Half): string {
+function reducePrompt(notes: string[], lastChunk: string, goal: string | null, half: Half, fileList: string): string {
   const joined = notes.map((note, i) => `<notes part="${i + 1}">\n${note}\n</notes>`).join('\n\n');
   return `Ты готовишь передачу дела. Разговор человека с ИИ-агентом (Claude Code) разросся, и работа продолжится в НОВОМ чате, где у агента этой переписки не будет. Переписка очень длинная, поэтому ниже — заметки по её частям в хронологическом порядке, а последняя часть дана целиком. Сведи всё в свою часть выжимки, по которой новый агент продолжит без потерь.
 ${goalBlock(goal)}
 ${BRIEF_RULES}
 
-${halfTask(half)}
+${halfTask(half, fileList)}
 
 ${INVENTORY_STEP}
 
@@ -350,10 +354,16 @@ type Ask = (prompt: string, accountDir: string) => Promise<string>;
  * Пишет выжимку: одним вызовом или частями со сводкой. Выставлена для тестов
  * этого модуля (разбор частями проверяется подставной моделью).
  */
-export async function writeBrief(digest: string, accountDir: string, ask: Ask = askModelOnce, goal: string | null = null): Promise<string> {
+export async function writeBrief(
+  digest: string,
+  accountDir: string,
+  ask: Ask = askModelOnce,
+  goal: string | null = null,
+  fileList = '',
+): Promise<string> {
   const joinHalves = (halves: string[]) => scrubBrief(halves.map((text) => stripInventory(text)).join('\n\n'));
   if (digest.length <= SINGLE_PASS_MAX_CHARS) {
-    return joinHalves(await Promise.all(BRIEF_HALVES.map((half) => ask(singlePassPrompt(digest, goal, half), accountDir))));
+    return joinHalves(await Promise.all(BRIEF_HALVES.map((half) => ask(singlePassPrompt(digest, goal, half, fileList), accountDir))));
   }
   const chunks = splitIntoChunks(digest, CHUNK_CHARS).slice(-MAX_CHUNKS);
   const lastChunk = chunks[chunks.length - 1];
@@ -367,7 +377,137 @@ export async function writeBrief(digest: string, accountDir: string, ask: Ask = 
     }
   };
   await Promise.all(Array.from({ length: Math.min(MAP_CONCURRENCY, earlier.length) }, worker));
-  return joinHalves(await Promise.all(BRIEF_HALVES.map((half) => ask(reducePrompt(notes, lastChunk, goal, half), accountDir))));
+  return joinHalves(await Promise.all(BRIEF_HALVES.map((half) => ask(reducePrompt(notes, lastChunk, goal, half, fileList), accountDir))));
+}
+
+/** Сколько файлов давать в карту — самые нужные: правленые, потом самые читаемые. */
+const FILE_MAP_LIMIT = 30;
+/** Описание папки: ищется в папке файла и выше, не дальше этого числа уровней. */
+const GUIDE_DEPTH = 3;
+const GUIDE_NAMES = ['agent.md', 'AGENTS.md', 'CLAUDE.md', 'README.md'];
+/** Эти места — служебные или временные: в карту не идут. */
+const FILE_MAP_SKIP = /\/(node_modules|dist|dist-server|\.git|\.cache|tool-results)(\/|$)|^\/tmp(\/|$)|\/projects\/[^/]+\/[0-9a-f-]{36}(\.jsonl$|\/)/;
+/** Резервные копии — не описание живой папки. */
+const GUIDE_SKIP = /\/(backups?|\.bak[^/]*)\//;
+
+export type FileMapEntry = {
+  path: string;
+  edited: boolean;
+  reads: number;
+  mentions: number;
+  /** Папка (из команд) — в карту идёт как место, где лежит дело. */
+  dir: boolean;
+  size: number;
+  mtimeMs: number;
+};
+
+/** Системные места — не дело человека: в карту не идут. */
+const SYSTEM_PREFIX = /^\/(proc|dev|sys|usr|bin|sbin|lib|lib64|run|var\/lib|var\/run|snap|boot)\//;
+/** Сколько папок, упомянутых в командах, давать в карту. */
+const DIR_LIMIT = 8;
+
+/**
+ * Карта «где что лежит» для нового чата (Егор 27.09.26: «собирать не только
+ * общую информацию, а где её искать — пути и кратко, что там; дальше чат сам
+ * посмотрит, что ему нужно»). Пути — из действий агента (Read/Edit/Write),
+ * а не из памяти модели; в карту идут только файлы, которые есть на диске.
+ * Anthropic, «Effective context engineering»: держать лёгкие указатели и
+ * доставать подробности по требованию.
+ */
+export async function buildFileMap(touched: TouchedFile[], limit = FILE_MAP_LIMIT): Promise<FileMapEntry[]> {
+  const home = os.homedir();
+  // «~/…» из команд — домашняя папка; один и тот же файл, записанный двумя
+  // способами, — одна строка карты.
+  const merged = new Map<string, TouchedFile>();
+  for (const item of touched) {
+    const full = item.path.startsWith('~/') ? path.join(home, item.path.slice(2)) : path.normalize(item.path);
+    if (!path.isAbsolute(full) || FILE_MAP_SKIP.test(full) || SYSTEM_PREFIX.test(full) || full === home) continue;
+    const prev = merged.get(full);
+    merged.set(full, prev
+      ? { path: full, edited: prev.edited || item.edited, reads: prev.reads + item.reads, mentions: prev.mentions + item.mentions, order: Math.max(prev.order, item.order) }
+      : { ...item, path: full });
+  }
+  const weight = (item: TouchedFile) => item.reads * 2 + item.mentions;
+  const ranked = [...merged.values()]
+    .sort((a, b) => Number(b.edited) - Number(a.edited) || weight(b) - weight(a) || b.order - a.order);
+  const entries: FileMapEntry[] = [];
+  let dirs = 0;
+  for (const item of ranked) {
+    if (entries.length >= limit) break;
+    try {
+      const info = await stat(item.path);
+      const isDir = info.isDirectory();
+      if (!info.isFile() && !isDir) continue;
+      // Папки — только из дела человека (в домашней), не выше и не служебные.
+      if (isDir && (!item.path.startsWith(home + path.sep) || dirs >= DIR_LIMIT || item.path === path.join(home, '.claude'))) continue;
+      if (isDir) dirs += 1;
+      entries.push({
+        path: item.path,
+        edited: item.edited,
+        reads: item.reads,
+        mentions: item.mentions,
+        dir: isDir,
+        size: info.size,
+        mtimeMs: info.mtimeMs,
+      });
+    } catch {
+      // Файла больше нет — в карту не идёт.
+    }
+  }
+  return entries;
+}
+
+/** Описания папок из карты (agent.md, README…) — ближайшее к файлу, без повторов. */
+export async function folderGuides(entries: FileMapEntry[]): Promise<string[]> {
+  const home = os.homedir();
+  const guides = new Set<string>();
+  const inMap = new Set(entries.map((entry) => entry.path));
+  const checked = new Set<string>();
+  for (const entry of entries) {
+    let dir = entry.dir ? entry.path : path.dirname(entry.path);
+    for (let level = 0; level < GUIDE_DEPTH && dir.startsWith(home) && dir !== home; level += 1) {
+      if (checked.has(dir)) break;
+      checked.add(dir);
+      let found = false;
+      for (const name of GUIDE_NAMES) {
+        const candidate = path.join(dir, name);
+        try {
+          if ((await stat(candidate)).isFile()) {
+            if (!inMap.has(candidate) && !GUIDE_SKIP.test(candidate)) guides.add(candidate);
+            found = true;
+            break;
+          }
+        } catch {
+          // Нет такого описания — смотрим следующее имя.
+        }
+      }
+      if (found) break;
+      dir = path.dirname(dir);
+    }
+  }
+  return [...guides].slice(0, 12);
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} КБ`;
+  return `${bytes} Б`;
+}
+
+/** Список для задания модели: путь и факты о нём, без описаний — их пишет модель. */
+export function formatFileList(entries: FileMapEntry[]): string {
+  return entries.map((entry) => {
+    const facts = [
+      entry.dir ? 'папка' : '',
+      entry.edited ? 'правился' : '',
+      entry.reads ? `открывался ${entry.reads}` : '',
+      entry.mentions ? `в командах ${entry.mentions}` : '',
+      entry.dir ? '' : formatSize(entry.size),
+    ]
+      .filter(Boolean)
+      .join(', ');
+    return `- \`${entry.path}\` (${facts})`;
+  }).join('\n');
 }
 
 type HandoffSource = {
@@ -390,6 +530,10 @@ type ComposeParts = {
   dialogPath: string | null;
   /** Задача нового чата, набранная в поле перед нажатием. */
   goal: string | null;
+  /** Описания папок, где лежат файлы карты (agent.md, README…). */
+  guides: string[];
+  /** Файлы, тронутые уже после заготовки: в карте модели их нет. */
+  lateFiles: FileMapEntry[];
 };
 
 /** Первое сообщение нового чата: выжимка модели между шапкой и указателями, которые пишет сервер. */
@@ -409,6 +553,17 @@ function composeMessage(source: HandoffSource, parts: ComposeParts, now: Date): 
       'Самое свежее: эта часть разговора шла уже после того, как выжимка была собрана. Где она расходится с выжимкой — верна она.',
       '',
       parts.tail.trim(),
+    );
+  }
+  if (parts.lateFiles.length > 0) {
+    lines.push('', '## Ещё файлы — из последних сообщений', formatFileList(parts.lateFiles));
+  }
+  if (parts.guides.length > 0) {
+    lines.push(
+      '',
+      '## Описания папок',
+      'Как устроена папка и её правила — прочитай нужное, прежде чем править файлы в ней:',
+      ...parts.guides.map((guide) => `- \`${guide}\``),
     );
   }
   lines.push('', '## Прошлый чат');
@@ -544,6 +699,9 @@ type Prepared = {
   fingerprint: string;
   brief?: string;
   changedFiles: string[];
+  /** Пути, которые модель видела в списке для карты. */
+  mapPaths: string[];
+  guides: string[];
   startedAt: number;
   finishedAt?: number;
   settled: Promise<void>;
@@ -617,6 +775,8 @@ export async function prepareHandoff(
     bytes,
     fingerprint,
     changedFiles: [],
+    mapPaths: [],
+    guides: [],
     startedAt: Date.now(),
     settled: new Promise<void>((resolve) => { settle = resolve; }),
   };
@@ -625,8 +785,11 @@ export async function prepareHandoff(
     try {
       const digest = await digestTranscriptFile(source.transcriptPath, source.providerSessionId, { end: bytes });
       if (!digest.text.trim()) throw new Error('в переписке нет сообщений');
-      item.brief = await writeBrief(digest.text, source.accountDir, ask);
+      const fileMap = await buildFileMap(digest.touchedFiles);
+      item.brief = await writeBrief(digest.text, source.accountDir, ask, null, formatFileList(fileMap));
       item.changedFiles = digest.changedFiles;
+      item.mapPaths = fileMap.map((entry) => entry.path);
+      item.guides = await folderGuides(fileMap);
       item.status = 'done';
       console.log(`[handoff] ${sessionId}: заготовка (шаг ${step}) ${item.brief.length} зн. из ${digest.text.length} зн. за ${Math.round((Date.now() - item.startedAt) / 1000)} с`);
     } catch (error) {
@@ -693,7 +856,17 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
             const changed = [...tail.changedFiles, ...ready.changedFiles.filter((file) => !tail.changedFiles.includes(file))];
             // Хвост — дословная переписка: ключи и ссылки входа скрываются так же,
             // как в тексте модели (первое сообщение видно на экране и лежит в файле).
-            parts = { brief: ready.brief, changedFiles: changed.slice(0, 40), tail: scrubSecrets(clipTail(tail.text)), dialogPath, goal };
+            const late = (await buildFileMap(tail.touchedFiles, 15)).filter((entry) => !ready.mapPaths.includes(entry.path));
+            const guides = [...new Set([...ready.guides, ...(await folderGuides(late))])];
+            parts = {
+              brief: ready.brief,
+              changedFiles: changed.slice(0, 40),
+              tail: scrubSecrets(clipTail(tail.text)),
+              dialogPath,
+              goal,
+              guides,
+              lateFiles: late,
+            };
             job.fromPrepared = true;
           }
         }
@@ -701,8 +874,17 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
       if (!parts) {
         const digest = await digestTranscriptFile(source.transcriptPath, source.providerSessionId);
         if (!digest.text.trim()) throw new Error('в переписке нет сообщений');
-        const brief = await writeBrief(digest.text, source.accountDir, ask, goal);
-        parts = { brief, changedFiles: digest.changedFiles, tail: '', dialogPath, goal };
+        const fileMap = await buildFileMap(digest.touchedFiles);
+        const brief = await writeBrief(digest.text, source.accountDir, ask, goal, formatFileList(fileMap));
+        parts = {
+          brief,
+          changedFiles: digest.changedFiles,
+          tail: '',
+          dialogPath,
+          goal,
+          guides: await folderGuides(fileMap),
+          lateFiles: [],
+        };
       }
       // Файл разговора упал с ошибкой — ссылку на него не даём. Не успел за
       // полторы секунды — даём: он допишется раньше, чем новый чат его откроет.
