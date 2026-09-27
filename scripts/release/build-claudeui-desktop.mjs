@@ -4,7 +4,7 @@
 // Claude под эту систему и мозги. Ничего не скачивается при первом запуске.
 //
 //   npm run build                                   # интерфейс и сервер
-//   node scripts/release/build-claudeui-desktop.mjs --mac   # на Mac: .dmg и .zip
+//   node scripts/release/build-claudeui-desktop.mjs --mac   # на Mac: Claude UI.app под процессор машины (.dmg — make-mac-dmg.mjs)
 //   node scripts/release/build-claudeui-desktop.mjs --win   # на Windows: установщик .exe
 //   node scripts/release/build-claudeui-desktop.mjs --linux --dir   # проба без упаковки
 //
