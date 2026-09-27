@@ -199,10 +199,10 @@ export default function ChatComposer({
   const handoffTooltip = handoffRunning
     ? 'Собираю главное для нового чата…'
     : handoffLevel === 'red'
-      ? 'Чат переполнен — пора продолжить в новом. Можно сначала написать в поле, что делать дальше'
+      ? 'Чат переполнен — пора сжать или перейти в новый. Можно сначала написать в поле, что делать дальше'
       : handoffLevel === 'yellow'
-        ? 'Чат большой — лучше продолжить в новом. Можно сначала написать в поле, что делать дальше'
-        : 'Продолжить в новом чате — перенести главное. Можно сначала написать в поле, что делать дальше';
+        ? 'Чат большой — лучше сжать или перейти в новый. Можно сначала написать в поле, что делать дальше'
+        : 'Сжать чат или продолжить в новом. Можно сначала написать в поле, что делать дальше';
   // Цвет при наведении — с !important: на сенсорном экране кнопка после касания
   // остаётся «наведённой», а общее правило index.css (button:hover { background:
   // inherit !important }) стирало жёлтый и красный (снимок iPhone 27.09.26).
@@ -575,10 +575,11 @@ export default function ChatComposer({
                 {handoffRunning ? <Loader2 className="animate-spin" /> : <MessageSquareShare />}
               </PromptInputButton>
             )}
-            {/* Два пути в одном меню (Егор 27.09.26, после слепого сравнения со
-                встроенным /compact): новый чат с выжимкой — быстро и с файлами;
-                сжатие здесь — тот же чат, встроенное в Claude. Текст в поле —
-                задача для обоих. */}
+            {/* Два пути в одном меню (Егор 27.09.26). Первым — сжатие в этом
+                чате: слепое сравнение на 5 чатах с проверкой по следующим
+                просьбам Егора — сжатие лучше в 4 из 5 (7,6 против 6,0 балла),
+                точнее держит параметры, ники, статусы. Новый чат — за секунду,
+                с файлом разговора: для новой задачи. Текст в поле — для обоих. */}
             {onStartHandoff && onCompactHere && !handoffRunning && (
               <span data-context-level={handoffLevel} className="inline-flex">
                 <ActionMenu
@@ -594,18 +595,18 @@ export default function ChatComposer({
                   header={<div className="px-3 pb-1 pt-1.5 text-xs text-muted-foreground">Текст в поле — что делать дальше</div>}
                   items={[
                     {
-                      key: 'handoff',
-                      label: 'Новый чат с выжимкой',
-                      description: 'Главное, карта файлов и весь разговор файлом. С жёлтой кнопки — за секунду',
-                      icon: MessageSquareShare,
-                      onSelect: onStartHandoff,
-                    },
-                    {
                       key: 'compact',
                       label: 'Сжать в этом чате',
-                      description: 'Встроенное сжатие Claude: тот же чат, 1–3 минуты',
+                      description: 'Встроенное сжатие Claude: тот же чат, лучше сохраняет детали. 1–3 минуты',
                       icon: Minimize2,
                       onSelect: onCompactHere,
+                    },
+                    {
+                      key: 'handoff',
+                      label: 'Новый чат с выжимкой',
+                      description: 'За секунду, весь разговор — файлом рядом. Для новой задачи или когда сжатие не помогло',
+                      icon: MessageSquareShare,
+                      onSelect: onStartHandoff,
                     },
                   ]}
                 />
