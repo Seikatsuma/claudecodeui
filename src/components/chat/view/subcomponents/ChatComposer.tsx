@@ -10,7 +10,7 @@ import type {
   RefObject,
   TouchEvent,
 } from 'react';
-import { PaperclipIcon, Loader2, ArrowUpIcon, MessageSquareShare } from 'lucide-react';
+import { PaperclipIcon, Loader2, ArrowUpIcon, MessageSquareShare, Minimize2 } from 'lucide-react';
 
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { isTouchKeyboard } from '../../../../utils/touchKeyboard';
@@ -28,6 +28,7 @@ import {
   PromptInputTools,
   PromptInputButton,
   PromptInputSubmit,
+  ActionMenu,
 } from '../../../../shared/view/ui';
 
 import CommandMenu from './CommandMenu';
@@ -83,6 +84,8 @@ interface ChatComposerProps {
   handoffStatus?: 'idle' | 'running';
   /** Нет — кнопки нет (новый чат, не Claude). */
   onStartHandoff?: () => void;
+  /** «Сжать в этом чате» — встроенное сжатие Claude в том же чате. */
+  onCompactHere?: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   queuedDrafts: QueuedDraft[];
@@ -148,6 +151,7 @@ export default function ChatComposer({
   onShowTokenUsage,
   handoffStatus = 'idle',
   onStartHandoff,
+  onCompactHere,
   onSubmit,
   isDragActive,
   queuedDrafts,
@@ -556,7 +560,7 @@ export default function ChatComposer({
                 половины окна — неярко-жёлтая («скорее всего пора»), с 70% —
                 красная («точно пора»). Других оповещений о размере чата на
                 сайте нет — Егор 27.09.26: «лишних не нужно». */}
-            {onStartHandoff && (
+            {onStartHandoff && (handoffRunning || !onCompactHere) && (
               <PromptInputButton
                 tooltip={{ content: handoffTooltip }}
                 onClick={handoffRunning ? undefined : onStartHandoff}
@@ -567,6 +571,42 @@ export default function ChatComposer({
               >
                 {handoffRunning ? <Loader2 className="animate-spin" /> : <MessageSquareShare />}
               </PromptInputButton>
+            )}
+            {/* Два пути в одном меню (Егор 27.09.26, после слепого сравнения со
+                встроенным /compact): новый чат с выжимкой — быстро и с файлами;
+                сжатие здесь — тот же чат, встроенное в Claude. Текст в поле —
+                задача для обоих. */}
+            {onStartHandoff && onCompactHere && !handoffRunning && (
+              <span data-context-level={handoffLevel} className="inline-flex">
+                <ActionMenu
+                  label={handoffTooltip}
+                  ariaLabel={handoffTooltip}
+                  icon={MessageSquareShare}
+                  iconOnly
+                  portal
+                  variant="ghost"
+                  size="icon"
+                  align="left"
+                  triggerClassName={`h-8 w-8 rounded-md [&_svg]:size-4 ${handoffClassName}`}
+                  header="Текст в поле — что делать дальше"
+                  items={[
+                    {
+                      key: 'handoff',
+                      label: 'Новый чат с выжимкой',
+                      description: 'Главное, карта файлов и весь разговор файлом. С жёлтой кнопки — за секунду',
+                      icon: MessageSquareShare,
+                      onSelect: onStartHandoff,
+                    },
+                    {
+                      key: 'compact',
+                      label: 'Сжать в этом чате',
+                      description: 'Встроенное сжатие Claude: тот же чат, 1–3 минуты',
+                      icon: Minimize2,
+                      onSelect: onCompactHere,
+                    },
+                  ]}
+                />
+              </span>
             )}
 
             {/* Кнопок в этом ряду намеренно меньше, чем было.
