@@ -34,6 +34,7 @@ import {
 } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage, getClaudeConfigDir, getClaudeJsonPath } from '@/shared/utils.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
+import { INHERITED_CLAUDE_AUTH_ENV_KEYS } from '@/shared/claude-login.js';
 import { noteSurvivorProviderSession, spawnSurvivableClaude } from '@/modules/providers/list/claude/survivor-runs.js';
 import { hasTranscriptOnDisk } from '@/modules/providers/list/claude/transcript-presence.js';
 
@@ -262,6 +263,10 @@ function mapCliOptionsToSDK(options = {}) {
   // Forward all host env vars (e.g. ANTHROPIC_BASE_URL) to the subprocess.
   // Since SDK 0.2.113, options.env replaces process.env instead of overlaying it.
   sdkOptions.env = { ...process.env, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: String(BG_WAIT_CEILING_MS) };
+  // Чат сайта: размер чата здесь показывает цвет кнопки «Продолжить в новом
+  // чате» (жёлтая с 50% окна, красная с 70%). Хук ~/.claude/hooks/context-fill-warn.py
+  // по этой метке молчит — Егор 27.09.26: «лишних оповещений не нужно».
+  sdkOptions.env.CCUI_CONTEXT_BUTTON = '1';
 
   // Multi-tenant env overrides. `options.claudeConfigDir`/`options.anthropicApiKey`
   // are set explicitly by the chat WebSocket handler (chat-websocket.service.ts),
@@ -276,6 +281,14 @@ function mapCliOptionsToSDK(options = {}) {
   const resolvedConfigDir = options.claudeConfigDir || getClaudeConfigDir();
   if (resolvedConfigDir) {
     sdkOptions.env.CLAUDE_CONFIG_DIR = resolvedConfigDir;
+  }
+  // Гость площадки с открытой регистрацией работает только своим входом:
+  // ключ Claude из окружения сервера — владельца, и CLI предпочёл бы его
+  // входу из папки гостя (shared/web-user-runtime.ts).
+  if (options.isolateInheritedClaudeAuth) {
+    for (const key of INHERITED_CLAUDE_AUTH_ENV_KEYS) {
+      delete sdkOptions.env[key];
+    }
   }
   const resolvedApiKey = options.anthropicApiKey
     ?? getRequestRuntimeContext()?.anthropicApiKey

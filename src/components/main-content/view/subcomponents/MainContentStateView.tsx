@@ -3,10 +3,10 @@ import { ChevronRight, Folder, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { MainContentStateViewProps } from '../../types/types';
-import type { Project } from '../../../../types/app';
+import type { Project, ServerScope } from '../../../../types/app';
 import type { SessionWithProvider } from '../../../sidebar/types/types';
 import { formatCompactAge, getAllSessions, getProjectLastActivity, getSessionDate, getSessionName } from '../../../sidebar/utils/utils';
-import { scopeProjectsToServer, useSecondServerLabel, useServerScope } from '../../../sidebar/hooks/useServerScope';
+import { effectiveScope, scopeProjectsToServer, useSecondServerLabel, useServerScope } from '../../../sidebar/hooks/useServerScope';
 import { cn } from '../../../../lib/utils';
 import { api } from '../../../../utils/api';
 
@@ -32,6 +32,8 @@ const MAX_FOLDERS = 6;
 type SessionHit = {
   project: Project;
   session: SessionWithProvider;
+  /** Чат второго блока («2-й сервер») — у строки тонкая светящаяся полоска. */
+  isSecond: boolean;
 };
 
 type SessionPreview = {
@@ -81,17 +83,37 @@ export default function MainContentStateView({
     [projects, serverScope, secondServerLabel],
   );
 
+  // Чаты ОБОИХ блоков вперемешку, по времени (Егор 26.09.26: «пусть стартовое
+  // окно показывает чаты двух групп»). Блок чата — как у панели: своё значение
+  // чата важнее значения папки.
   const recentHits = useMemo<SessionHit[]>(() => {
     const hits: SessionHit[] = [];
-    for (const project of scopedProjects) {
+    for (const project of projects) {
+      const projectScope: ServerScope = project.serverScope ?? 'main';
       for (const session of getAllSessions(project)) {
-        hits.push({ project, session });
+        const isSecond = Boolean(secondServerLabel)
+          && effectiveScope(session.serverScope as ServerScope | null | undefined, projectScope) === 'second';
+        hits.push({ project, session, isSecond });
       }
     }
     return hits
       .sort((a, b) => getSessionDate(b.session).getTime() - getSessionDate(a.session).getTime())
       .slice(0, RECENT_CHATS_LIMIT + 1);
-  }, [scopedProjects]);
+  }, [projects, secondServerLabel]);
+
+  // Метка второго блока — как у почтовых программ с общим ящиком (Canary Mail,
+  // Thunderbird): тонкая цветная полоска у края строки, название блока — в
+  // подсказке. Не точка: точки уже значат «работает» и «новый ответ».
+  // Видна, только если вглядеться; у чатов этого сервера метки нет.
+  const renderScopeMark = (hit: SessionHit, inset: string) => (hit.isSecond ? (
+    <span
+      aria-hidden
+      className={cn(
+        'pointer-events-none absolute left-0 w-[3px] rounded-r-full bg-violet-400/60 shadow-[0_0_6px_rgba(167,139,250,0.45)]',
+        inset,
+      )}
+    />
+  ) : null);
 
   const [lastHit, ...otherHits] = recentHits;
 
@@ -266,8 +288,10 @@ export default function MainContentStateView({
               <button
                 type="button"
                 onClick={() => openChat(lastHit)}
-                className="block w-full rounded-2xl border border-primary/20 bg-primary/[0.06] px-4 py-3.5 text-left transition-colors hover:border-primary/35 hover:bg-primary/10 active:scale-[0.99]"
+                title={lastHit.isSecond ? secondServerLabel ?? undefined : undefined}
+                className="relative block w-full rounded-2xl border border-primary/20 bg-primary/[0.06] px-4 py-3.5 text-left transition-colors hover:border-primary/35 hover:bg-primary/10 active:scale-[0.99]"
               >
+                {renderScopeMark(lastHit, 'top-4 bottom-4')}
                 <div className="flex items-center gap-3">
                   <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
                     {t('mainContent.lastChat')}
@@ -318,8 +342,10 @@ export default function MainContentStateView({
                         key={`${hit.project.projectId}:${hit.session.id}`}
                         type="button"
                         onClick={() => openChat(hit)}
-                        className="block w-full px-4 py-2.5 text-left transition-colors hover:bg-accent/40 active:bg-accent/60"
+                        title={hit.isSecond ? secondServerLabel ?? undefined : undefined}
+                        className="relative block w-full px-4 py-2.5 text-left transition-colors hover:bg-accent/40 active:bg-accent/60"
                       >
+                        {renderScopeMark(hit, 'top-3 bottom-3')}
                         <div className="flex items-baseline gap-3">
                           <span className="min-w-0 flex-1 truncate text-[15px] text-foreground">
                             {getSessionName(hit.session, t)}

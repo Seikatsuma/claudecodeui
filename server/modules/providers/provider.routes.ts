@@ -8,6 +8,7 @@ import { providerTokenUsageService } from '@/modules/providers/services/provider
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
+import { sessionRewindService } from '@/modules/providers/services/session-rewind.service.js';
 import type {
   CustomProviderModelInput,
   LLMProvider,
@@ -795,6 +796,29 @@ router.get(
     const sessionId = parseSessionId(req.params.sessionId);
     const providerSessionId = sessionsService.getProviderSessionId(sessionId);
     res.json(createApiSuccessResponse({ sessionId: providerSessionId }));
+  }),
+);
+
+/**
+ * Возврат чата к своему сообщению: всё, начиная с него, убирается из
+ * разговора (полная копия остаётся рядом с файлом), идущий ход
+ * останавливается. В ответе — текст сообщения для поля ввода.
+ */
+router.post(
+  '/sessions/:sessionId/rewind',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const messageId = typeof body.messageId === 'string' && body.messageId.trim() ? body.messageId.trim() : null;
+    const text = typeof body.text === 'string' && body.text.trim() ? body.text : null;
+    if (!messageId && !text) {
+      throw new AppError('Не указано, к какому сообщению вернуться.', {
+        code: 'REWIND_TARGET_REQUIRED',
+        statusCode: 400,
+      });
+    }
+    const result = await sessionRewindService.rewind({ sessionId, messageId, text });
+    res.json(createApiSuccessResponse(result));
   }),
 );
 

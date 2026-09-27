@@ -164,6 +164,8 @@ export default tseslint.config(
             "server/shared/image-attachments.ts",
             "server/shared/request-context.ts",
             "server/shared/web-user-paths.ts",
+            "server/shared/claude-login.ts",
+            "server/shared/web-user-runtime.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },

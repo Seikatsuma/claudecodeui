@@ -22,6 +22,8 @@
  *   сообщения человека: сводки сжатия теряют поправки чаще всего остального.
  */
 import { createReadStream } from 'node:fs';
+import { mkdir, open, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import readline from 'node:readline';
 
 import { isTranscriptServiceText, stripInjectedContext } from '@/shared/utils.js';
@@ -39,6 +41,28 @@ const CHANGED_FILES_LIMIT = 40;
 
 type AnyRecord = Record<string, any>;
 
+/** Файл, с которым работал чат: правился ли, сколько раз читался, когда в последний раз. */
+export type TouchedFile = { path: string; edited: boolean; reads: number; mentions: number; order: number };
+
+/**
+ * Пути в тексте команды: абсолютные и от домашней папки. Здесь агенты часто
+ * правят и читают файлы командами, а не инструментами (замер 27.09.26 на чате
+ * «Формат ответов нейросети»: 126 команд и 11 чтений инструментом; в командах —
+ * 33 существующих файла, в том числе CLAUDE.md 40 раз). Лишнее — адреса
+ * страниц, несуществующее — отсеет проверка на диске при сборке карты.
+ */
+const COMMAND_PATH = /(?<![\w.$:\/-])((?:~|\/)(?:\/?[\w.@+-]+)+)/g;
+
+export function pathsInCommand(command: string): string[] {
+  const found = new Set<string>();
+  for (const match of command.matchAll(COMMAND_PATH)) {
+    const raw = match[1].replace(/[.,;:]+$/, '');
+    if (raw.length < 4 || raw === '~') continue;
+    found.add(raw);
+  }
+  return [...found];
+}
+
 type DigestEntry =
   | { kind: 'human'; at: string | null; text: string }
   | { kind: 'assistant'; at: string | null; text: string }
@@ -51,6 +75,12 @@ export type TranscriptDigest = {
   text: string;
   /** Файлы, которые правились в чате (последние сверху), — для шапки выжимки. */
   changedFiles: string[];
+  /**
+   * Все файлы, которые чат открывал или правил: сколько раз и насколько
+   * недавно. Из них сервер собирает карту «где что лежит» для нового чата —
+   * пути берутся из действий агента, а не из памяти модели.
+   */
+  touchedFiles: TouchedFile[];
   /** Сколько сообщений человека попало в текст. */
   humanMessages: number;
   /** Было ли внутри чата сжатие (тогда ранняя часть — только слова человека). */
@@ -139,7 +169,16 @@ export function digestTranscriptLines(lines: Iterable<string>, providerSessionId
 function createDigestBuilder(providerSessionId: string | null) {
   const entries: DigestEntry[] = [];
   const changedFiles = new Map<string, number>();
+  const touched = new Map<string, TouchedFile>();
   let order = 0;
+  const touch = (file: string, how: 'edit' | 'read' | 'command') => {
+    const item = touched.get(file) ?? { path: file, edited: false, reads: 0, mentions: 0, order: 0 };
+    if (how === 'edit') item.edited = true;
+    else if (how === 'read') item.reads += 1;
+    else item.mentions += 1;
+    item.order = order;
+    touched.set(file, item);
+  };
 
   const add = (line: string): void => {
     if (!line.trim()) return;
@@ -193,6 +232,13 @@ function createDigestBuilder(providerSessionId: string | null) {
           const file = block.input?.file_path ?? block.input?.notebook_path;
           if (typeof file === 'string' && ['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(block.name)) {
             changedFiles.set(file, order++);
+            touch(file, 'edit');
+          } else if (typeof file === 'string' && block.name === 'Read') {
+            order += 1;
+            touch(file, 'read');
+          } else if (block.name === 'Bash' && typeof block.input?.command === 'string') {
+            order += 1;
+            for (const mentioned of pathsInCommand(block.input.command)) touch(mentioned, 'command');
           }
         }
       }
@@ -236,6 +282,7 @@ function createDigestBuilder(providerSessionId: string | null) {
         .sort((a, b) => b[1] - a[1])
         .slice(0, CHANGED_FILES_LIMIT)
         .map(([file]) => file),
+      touchedFiles: [...touched.values()],
       humanMessages,
       hadCompaction: lastCompact >= 0,
     };
@@ -244,10 +291,117 @@ function createDigestBuilder(providerSessionId: string | null) {
   return { add, finish };
 }
 
+/** Кусок файла переписки в байтах: `start` — с начала строки, `end` — не включая. */
+export type TranscriptRange = { start?: number; end?: number };
+
 /** Читает файл переписки построчно (файлы бывают по сотне мегабайт) и разбирает его. */
-export async function digestTranscriptFile(filePath: string, providerSessionId: string | null): Promise<TranscriptDigest> {
+export async function digestTranscriptFile(
+  filePath: string,
+  providerSessionId: string | null,
+  range: TranscriptRange = {},
+): Promise<TranscriptDigest> {
   const builder = createDigestBuilder(providerSessionId);
-  const reader = readline.createInterface({ input: createReadStream(filePath, { encoding: 'utf8' }), crlfDelay: Infinity });
+  const { start = 0, end } = range;
+  if (end !== undefined && end <= start) return builder.finish();
+  const input = createReadStream(filePath, { encoding: 'utf8', start, ...(end !== undefined ? { end: end - 1 } : {}) });
+  const reader = readline.createInterface({ input, crlfDelay: Infinity });
   for await (const line of reader) builder.add(line);
   return builder.finish();
+}
+
+/**
+ * Граница последней ЦЕЛОЙ строки файла: байт сразу после последнего перевода
+ * строки. Чат пишет в файл прямо сейчас, последняя строка может быть
+ * недописана — её дочитает следующий кусок, а не потеряет этот.
+ */
+export async function transcriptLineBoundary(filePath: string): Promise<number> {
+  const handle = await open(filePath, 'r');
+  try {
+    const { size } = await handle.stat();
+    const window = 256 * 1024;
+    for (let to = size; to > 0; to -= window) {
+      const from = Math.max(0, to - window);
+      const buffer = Buffer.alloc(to - from);
+      await handle.read(buffer, 0, buffer.length, from);
+      const lastNewline = buffer.lastIndexOf(0x0a);
+      if (lastNewline >= 0) return from + lastNewline + 1;
+    }
+    return 0;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Весь разговор чата текстом — слова человека и ответы агента ЦЕЛИКОМ, без
+ * размышлений и вывода инструментов. Кладётся файлом рядом с выжимкой.
+ *
+ * Зачем (разбор 26.09.26): выжимка пересказывает, а готовые тексты —
+ * промпт, письмо, список — пересказом не переносятся. В переносе 23.09 новый
+ * чат сам сказал: «промпт целиком остался только в прошлом чате». Сырой файл
+ * переписки для этого не годится: десятки мегабайт служебных записей, в них
+ * не найти нужный ответ. Здесь — только разговор, по порядку, со временем.
+ */
+export async function exportDialogFile(
+  filePath: string,
+  providerSessionId: string | null,
+  outPath: string,
+  title: string,
+): Promise<void> {
+  // Разговор собирается в памяти (это слова, а не вывод команд: замер 27.09.26 —
+  // переписка 98 МБ даёт 877 КБ текста за 2,2 с), чтобы в начало встало оглавление с номерами
+  // строк: новый агент прыгает к нужному ответу, не читая файл целиком.
+  const blocks: { human: boolean; at: string | null; text: string }[] = [];
+  const reader = readline.createInterface({ input: createReadStream(filePath, { encoding: 'utf8' }), crlfDelay: Infinity });
+  for await (const line of reader) {
+    if (!line.trim()) continue;
+    let entry: AnyRecord;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (providerSessionId && entry.sessionId && entry.sessionId !== providerSessionId) continue;
+    if (entry.isSidechain || entry.isMeta || entry.isCompactSummary) continue;
+    const at = typeof entry.timestamp === 'string' ? entry.timestamp : null;
+    const content = entry.message?.content;
+    if (entry.type === 'user') {
+      if (entry.toolUseResult !== undefined || (Array.isArray(content) && content.some((p: AnyRecord) => p?.type === 'tool_result'))) continue;
+      const raw = textOfContent(content).trim();
+      if (isTranscriptServiceText(raw)) continue;
+      const text = stripInjectedContext(raw);
+      if (text) blocks.push({ human: true, at, text });
+    } else if (entry.type === 'assistant' && Array.isArray(content)) {
+      const text = content
+        .filter((block: AnyRecord) => block?.type === 'text' && typeof block.text === 'string' && block.text.trim())
+        .map((block: AnyRecord) => block.text.trim())
+        .join('\n\n');
+      if (text) blocks.push({ human: false, at, text });
+    }
+  }
+
+  const humans = blocks.filter((block) => block.human);
+  const head = [
+    `# Разговор чата «${title}» — слова человека и ответы агента целиком`,
+    '',
+    `## Оглавление — просьбы человека по порядку (${humans.length}); «стр. N» — строка этого файла, где начинается обмен`,
+  ];
+  const bodyStart = head.length + humans.length + 2;
+  const body: string[] = [];
+  const index: string[] = [];
+  for (const block of blocks) {
+    const lineNo = bodyStart + body.length + 1;
+    if (block.human) {
+      index.push(`- стр. ${lineNo} · ${formatTime(block.at)}${oneLine(block.text, 140)}`);
+    }
+    body.push(`## ${formatTime(block.at)}${block.human ? 'Человек' : 'Агент'}`, '', ...block.text.split('\n'), '');
+  }
+  const out = [...head, ...index, '', '', ...body].join('\n');
+  await mkdir(path.dirname(outPath), { recursive: true });
+  await writeFile(outPath, out, 'utf8');
+}
+
+/** Размер файла переписки — сколько байт уже разобрано заготовкой. */
+export async function transcriptSize(filePath: string): Promise<number> {
+  return (await stat(filePath)).size;
 }

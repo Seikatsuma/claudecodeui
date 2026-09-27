@@ -14,6 +14,7 @@ import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messag
 
 import { normalizedToChatMessages } from './useChatMessages';
 import { useScrollAnchor } from './useScrollAnchor';
+import { useRowPrewarm } from './useRowPrewarm';
 import { knownRunStartedAt } from '../utils/liveRunCursor';
 
 /**
@@ -524,6 +525,9 @@ export function useChatSessionState({
     },
   });
 
+  // Строки над экраном размечаются в паузах, а не во время листания.
+  useRowPrewarm({ scrollContainerRef, enabled: isActive, contentKey: chatMessages.length });
+
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -886,6 +890,25 @@ export function useChatSessionState({
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [chatMessages.length, isActive, isLoadingSessionMessages, isTopSentinelNear, scrollToBottom, markProgrammaticScroll]);
+
+  // Первый кадр открытого чата — уже внизу. Строки появляются раньше, чем
+  // срабатывают прокрутки в низ выше: те идут после отрисовки, а признак
+  // `pendingInitialScrollRef` к этому моменту уже снят (в первый миг сообщений
+  // ноль — эффект выше решает, что вставать некуда). Чат на несколько кадров
+  // показывался с начала порции и потом прыгал в низ (замер 27.09.26: 150–380 мс
+  // на этом сервере, на телефоне дольше). Здесь — до отрисовки, один раз на
+  // чат: возврат на уже открытую вкладку место не трогает.
+  const firstFrameSessionRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!isActive || !activeSessionId || searchScrollActiveRef.current) return;
+    if (firstFrameSessionRef.current === activeSessionId) return;
+    const container = scrollContainerRef.current;
+    if (!container || chatMessages.length === 0) return;
+    firstFrameSessionRef.current = activeSessionId;
+    const target = container.scrollHeight;
+    markProgrammaticScroll(target);
+    container.scrollTop = target;
+  }, [activeSessionId, chatMessages.length, isActive, markProgrammaticScroll]);
 
   // Session replay/subscription remains active regardless of which main tab is
   // visible. Only persisted-history HTTP traffic is visibility-gated below.

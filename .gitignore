@@ -159,3 +159,4 @@ electron/*.tar.gz
 # десятки мегабайт собранного кода.
 dist-server.*
 dist.prev/
+.assets-archive/

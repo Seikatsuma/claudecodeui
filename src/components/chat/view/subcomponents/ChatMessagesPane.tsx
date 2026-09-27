@@ -72,6 +72,8 @@ interface ChatMessagesPaneProps {
   onGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
   showRawParameters?: boolean;
   showThinking?: boolean;
+  /** «Вернуться сюда» под своим сообщением; не задан — кнопки нет. */
+  onRewindToMessage?: (message: ChatMessage) => void;
   selectedProject: Project;
 }
 
@@ -130,6 +132,7 @@ function ChatMessagesPane({
   onGrantToolPermission,
   showRawParameters,
   showThinking,
+  onRewindToMessage,
   selectedProject,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
@@ -334,6 +337,7 @@ function ChatMessagesPane({
                   onGrantToolPermission={onGrantToolPermission}
                   showRawParameters={showRawParameters}
                   showThinking={showThinking}
+                  onRewindToMessage={onRewindToMessage}
                   selectedProject={selectedProject}
                   provider={provider}
                 />
