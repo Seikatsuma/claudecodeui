@@ -61,6 +61,9 @@ if (isCloudCliAppOrigin(window.location)) {
 if (window.location.protocol === 'file:') {
   contextBridge.exposeInMainWorld('cloudcliDesktop', {
     signIn: (fields) => ipcRenderer.invoke('claudeui:sign-in', fields),
+    checkAppUpdate: () => ipcRenderer.invoke('claudeui:app-update-check'),
+    installAppUpdate: () => ipcRenderer.invoke('claudeui:app-update-install'),
+    openAppUpdatePage: () => ipcRenderer.invoke('claudeui:app-update-download-page'),
     register: (fields) => ipcRenderer.invoke('claudeui:register', fields),
     connectCloud: () => ipcRenderer.invoke('cloudcli-desktop:connect-cloud'),
     disconnectCloud: () => ipcRenderer.invoke('cloudcli-desktop:disconnect-cloud'),

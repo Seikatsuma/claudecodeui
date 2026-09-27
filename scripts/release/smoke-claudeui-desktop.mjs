@@ -11,6 +11,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -123,9 +124,32 @@ if (process.env.SMOKE_EMAIL && process.env.SMOKE_PASSWORD) {
 }
 
 // 3. Обычный запуск.
+// Обновление без установщика (electron/appUpdate.js): раздаём пробную начинку
+// с номером больше установленного — программа должна поставить её сама и
+// снова поднять «Этот компьютер».
+let updateServer = null;
+let updateEnv = {};
+let testBuild = null;
+if (process.env.SMOKE_UPDATE_DIR) {
+  const dir = path.resolve(process.env.SMOKE_UPDATE_DIR);
+  testBuild = JSON.parse(fs.readFileSync(path.join(dir, 'update.json'), 'utf8')).build;
+  updateServer = http.createServer((req, res) => {
+    const file = path.join(dir, path.basename(new URL(req.url, 'http://x').pathname));
+    if (!fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { 'Content-Length': fs.statSync(file).size });
+    fs.createReadStream(file).pipe(res);
+  });
+  await new Promise((resolve) => updateServer.listen(0, '127.0.0.1', resolve));
+  updateEnv = {
+    CLAUDE_UI_UPDATE_URL: `http://127.0.0.1:${updateServer.address().port}/update.json`,
+    CLAUDE_UI_UPDATE_AUTO_INSTALL: '1',
+  };
+  log(`пробная начинка: сборка ${testBuild}, раздаётся на ${updateEnv.CLAUDE_UI_UPDATE_URL}`);
+}
+
 const appLog = fs.openSync(path.join(out, 'app.log'), 'a');
 const child = spawn(executable, [], {
-  env: { ...process.env, CLAUDE_UI_STATUS_FILE: statusFile, CLAUDE_UI_ACCOUNT_URL: ACCOUNT_URL },
+  env: { ...process.env, CLAUDE_UI_STATUS_FILE: statusFile, CLAUDE_UI_ACCOUNT_URL: ACCOUNT_URL, ...updateEnv },
   stdio: ['ignore', appLog, appLog],
   detached: false,
 });
@@ -154,6 +178,33 @@ if (status?.localWebUrl) {
 } else if (process.env.SMOKE_EMAIL) {
   fail('«Этот компьютер» не открылся за 150 секунд');
 }
+if (testBuild && status?.localWebUrl) {
+  let updated = null;
+  for (let i = 0; i < 120; i += 1) {
+    try {
+      updated = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+    } catch {
+      updated = null;
+    }
+    if (updated?.appUpdate?.build === testBuild && updated.localWebUrl) break;
+    if (child.exitCode !== null) break;
+    await sleep(1000);
+  }
+  log(`после обновления: ${JSON.stringify(updated?.appUpdate || null)}`);
+  if (updated?.appUpdate?.build !== testBuild) {
+    fail(`обновление не встало: работает сборка ${updated?.appUpdate?.build ?? 'неизвестно'}, ждали ${testBuild}`);
+  } else {
+    const health = await fetch(`${updated.localWebUrl}/health`).then((r) => r.json()).catch((e) => ({ error: e.message }));
+    log(`сервер после обновления: ${JSON.stringify(health).slice(0, 200)}`);
+    if (health.status !== 'ok') fail('после обновления «Этот компьютер» не отвечает');
+    const page = await fetch(`${updated.localWebUrl}/`).then((r) => r.text()).catch(() => '');
+    if (!page.includes('id="root"')) fail('после обновления интерфейс не отдаётся');
+    await sleep(8000);
+    screenshot('03-после-обновления');
+  }
+  status = updated || status;
+}
+updateServer?.close();
 if (status?.lastError) fail(`программа показала ошибку: ${status.lastError}`);
 
 try {

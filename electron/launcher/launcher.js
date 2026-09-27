@@ -103,6 +103,7 @@ window.__MOCK_STATE__ = {
     monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
     phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/>',
     x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
     logOut: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   };
   var FILLED = { play: true };
@@ -326,6 +327,12 @@ window.__MOCK_STATE__ = {
         return CC.run('Открываю…', function () { return bridge.openCloudDashboard(); });
       case 'refresh-environments':
         return CC.run('Обновляю список серверов…', function () { return bridge.refreshEnvironments(); });
+      case 'app-update':
+        return CC.run('', function () { return bridge.installAppUpdate(); });
+      case 'app-update-check':
+        return CC.run('', function () { return bridge.checkAppUpdate(); });
+      case 'app-update-page':
+        return CC.run('Открываю страницу скачивания…', function () { return bridge.openAppUpdatePage(); });
       case 'refresh-tab':
         return CC.run('Обновляю…', function () { return bridge.refreshActiveTab(); });
       case 'env-action':
@@ -363,17 +370,62 @@ window.__MOCK_STATE__ = {
       (activeTab && activeTab.id !== 'home');
     var envActions = '';
     var refreshAction = activeRefreshable ? '<button class="icon-btn tb-action tb-refresh no-drag" data-cc-action="refresh-tab" title="Обновить вкладку">' + icon('refresh', 16) + '</button>' : '';
+    var updateAction = CC.updateButton(state);
     var logoutAction = (conn || authState(state) === 'expired') ? '<button class="icon-btn tb-action tb-logout no-drag" data-cc-action="logout" title="Выйти из аккаунта">' + icon('logOut', 16) + '</button>' : '';
     return '<div class="titlebar">' +
       '<div class="brand"><img class="mk" src="' + esc(LOGO_URL) + '" alt=""><span class="brand-name">Claude UI</span></div>' +
       '<div class="tb-tabs no-drag">' + renderTabs(state) + '</div>' +
       '<span style="flex:1"></span>' +
+      updateAction +
       refreshAction +
       envActions +
       '<button class="btn sm tb-action no-drag" data-cc-action="home" title="' + esc(authState(state) === 'expired' ? 'Войти заново' : accountLabel(state)) + '"><span class="dot" style="background:' + (conn ? 'var(--ok)' : (authState(state) === 'expired' ? 'var(--warn)' : 'var(--tx3)')) + '"></span><span class="tb-acct-label">' + esc(accountLabel(state)) + '</span></button>' +
       logoutAction +
       '<button class="icon-btn tb-action no-drag" data-cc-action="settings-toggle" title="Настройки программы">' + icon('settings', 16) + '</button>' +
       '</div>';
+  };
+
+  // Обновление программы без установщика (electron/appUpdate.js).
+  CC.updateButton = function (state) {
+    var update = state.appUpdate || {};
+    if (!update.enabled) return '';
+    if (update.status === 'available') {
+      return '<button class="btn sm pri tb-action tb-update no-drag" data-cc-action="app-update" title="' +
+        esc('Новая сборка ' + update.latestBuild + (update.latestNotes ? ': ' + update.latestNotes : '')) + '">' +
+        icon('download', 14) + '<span>Обновить</span></button>';
+    }
+    if (update.status === 'downloading' || update.status === 'installing') {
+      return '<button class="btn sm tb-action tb-update no-drag" disabled title="' + esc(update.message) + '">' +
+        icon('refresh', 14) + '<span>Обновляю…</span></button>';
+    }
+    if (update.status === 'installer') {
+      return '<button class="btn sm tb-action tb-update no-drag" data-cc-action="app-update-page" title="' +
+        esc('Сборка ' + update.latestBuild + ' требует переустановки: скачать установщик') + '">' +
+        icon('download', 14) + '<span>Новая версия</span></button>';
+    }
+    return '';
+  };
+
+  CC.buildUpdateSection = function (state) {
+    var update = state.appUpdate || {};
+    if (!update.enabled) return '';
+    var line = 'Сборка ' + esc(update.build) + '. ';
+    if (update.status === 'available') line += 'Есть новая — сборка ' + esc(update.latestBuild) + '.';
+    else if (update.status === 'installer') line += 'Новая сборка ' + esc(update.latestBuild) + ' ставится только установщиком.';
+    else if (update.status === 'checking') line += 'Проверяю…';
+    else if (update.status === 'downloading' || update.status === 'installing') line += esc(update.message);
+    else line += 'Новых версий нет. Программа проверяет их сама раз в час.';
+    var note = update.message && ['idle', 'available'].indexOf(update.status) !== -1
+      ? '<div class="cc-meta">' + esc(update.message) + '</div>' : '';
+    var action = update.status === 'available'
+      ? '<button class="btn sm pri" data-cc-action="app-update">' + icon('download', 14) + 'Обновить</button>'
+      : update.status === 'installer'
+        ? '<button class="btn sm" data-cc-action="app-update-page">' + icon('download', 14) + 'Скачать установщик</button>'
+        : '<button class="btn sm" data-cc-action="app-update-check"' + (update.status === 'checking' ? ' disabled' : '') + '>' + icon('refresh', 14) + 'Проверить обновления</button>';
+    return CC.renderSection('ВЕРСИЯ', 'Обновления без нового установщика', '<div class="cc-surface">' +
+      '<div class="cc-meta">' + line + '</div>' + note +
+      '<div class="cc-row2">' + action + '</div>' +
+      '</div>');
   };
 
   CC.statusbar = function (state) {
@@ -470,6 +522,7 @@ window.__MOCK_STATE__ = {
     CC.renderSheet('Настройки программы', 'Оформление и работа на этом компьютере', [
       CC.buildLocalServerSection(CC.state || {}),
       CC.buildThemeSection(CC.state || {}),
+      CC.buildUpdateSection(CC.state || {}),
     ]);
   };
 
@@ -477,6 +530,7 @@ window.__MOCK_STATE__ = {
     CC.renderSheet('Настройки программы', 'Оформление и работа на этом компьютере', [
       CC.buildThemeSection(CC.state || {}),
       CC.buildLocalServerSection(CC.state || {}),
+      CC.buildUpdateSection(CC.state || {}),
     ]);
   };
 

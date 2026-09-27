@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { AppUpdater } from './appUpdate.js';
 import { BrainsManager } from './brains.js';
 import { CloudController } from './cloud.js';
 import { DesktopWindowManager } from './desktopWindow.js';
@@ -35,6 +36,7 @@ let localServer = null;
 let cloud = null;
 let desktopNotifications = null;
 let brains = null;
+let appUpdater = null;
 let localAuth = null;
 // Тема интерфейса (тёмная/светлая) — от страницы «Этого компьютера», запоминается.
 let uiTheme = null;
@@ -160,6 +162,7 @@ function getDesktopState() {
     environments: cloud.getEnvironments().map(serializeEnvironment),
     desktopNotifications: desktopNotifications?.getState() || { enabled: false, supported: false, connectedCount: 0, targetCount: 0 },
     brainsVersion: brains?.getVersion() || null,
+    appUpdate: appUpdater?.getState() || { enabled: false, status: 'idle' },
     uiTheme,
     platform: process.platform,
     appVersion: app.getVersion(),
@@ -206,6 +209,7 @@ function writeStatusFile() {
     account: cloud.getAccount()?.email || null,
     authState: cloud.getAuthState(),
     brainsVersion: brains?.getVersion() || null,
+    appUpdate: appUpdater?.getState() || null,
     lastError: lastErrorText,
   };
   fs.writeFile(file, JSON.stringify(status, null, 2), 'utf8').catch(() => {});
@@ -636,6 +640,53 @@ async function openLocalInDesktop() {
   return getDesktopState();
 }
 
+// Обновление начинки (appUpdate.js): кнопка в верхней полосе. Сервер этого компьютера
+// перезапускается — идущий ответ Claude прервётся, поэтому сначала спрашиваем.
+async function installAppUpdate({ confirm = true } = {}) {
+  const state = appUpdater.getState();
+  const parent = desktopWindow?.getMainWindow() || undefined;
+  const { response } = !confirm ? { response: 0 } : await dialog.showMessageBox(parent, {
+    type: 'question',
+    buttons: ['Обновить', 'Позже'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Обновление Claude UI',
+    message: `Обновить Claude UI до сборки ${state.latestBuild}?`,
+    detail: [
+      state.latestNotes ? `Что нового: ${state.latestNotes}` : null,
+      'Интерфейс перезапустится за несколько секунд. Если Claude сейчас отвечает — ответ прервётся.',
+    ].filter(Boolean).join('\n\n'),
+  });
+  if (response !== 0) return getDesktopState();
+
+  const hadLocalServer = localServer.hasOwnedServer();
+  try {
+    await appUpdater.install({ beforeSwap: () => localServer.shutdownOwnedServer() });
+  } finally {
+    // И после неудачи сервер должен снова работать — на прежней или новой начинке.
+    if (hadLocalServer) {
+      await localServer.restartOwnedServer()
+        .then(() => reopenLocalAfterRestart())
+        .catch((error) => showError('Интерфейс этого компьютера не запустился', error));
+    }
+    syncDesktopState();
+  }
+  return getDesktopState();
+}
+
+async function reopenLocalAfterRestart() {
+  const localTab = tabs.getTab('local');
+  if (!localTab) return;
+  const target = await localServer.getResolvedTarget();
+  await ensureLocalLogin(target.url);
+  const sameUrl = localTab.target?.url === target.url;
+  tabs.upsertTarget(target);
+  if (!sameUrl || tabs.activeTabId === 'local') {
+    await desktopWindow.showTarget(target);
+  }
+  desktopWindow.viewHost?.reloadTab('local');
+}
+
 // После входа: серверы и тариф с сервера аккаунтов, свежие мозги, сразу — этот компьютер.
 async function afterSignedIn() {
   // Подписки Claude — до запуска сервера этого компьютера: он берёт их при старте.
@@ -868,6 +919,12 @@ function registerIpcHandlers() {
   ipcMain.handle('claudeui:register', async (_event, fields) => signIn('register', fields));
   // Выбор папки проекта системным окном (как «Открыть папку» в Claude Desktop):
   // только для страницы интерфейса этого компьютера.
+  ipcMain.handle('claudeui:app-update-check', () => appUpdater.check().then(() => getDesktopState()));
+  ipcMain.handle('claudeui:app-update-install', () => installAppUpdate());
+  ipcMain.handle('claudeui:app-update-download-page', async () => {
+    await shell.openExternal(appUpdater.getState().downloadPage || `${CLOUDCLI_CONTROL_PLANE_URL}/`);
+    return getDesktopState();
+  });
   ipcMain.handle('claudeui:pick-folder', async (event, options = {}) => {
     let origin = null;
     try {
@@ -1077,7 +1134,16 @@ async function bootstrap() {
     log: (line) => console.log(`[Brains] ${line}`),
   });
   localAuth = new LocalAuth({ userDataDir: app.getPath('userData') });
+  appUpdater = new AppUpdater({
+    appRoot: getAppRoot(),
+    userDataDir: app.getPath('userData'),
+    updateUrl: process.env.CLAUDE_UI_UPDATE_URL || `${CLOUDCLI_CONTROL_PLANE_URL}/api/app-update`,
+    log: (line) => console.log(`[Обновление] ${line}`),
+    onChange: () => syncDesktopState(),
+  });
   localServer = new LocalServerController({
+    getUpdatedServerRoot: () => appUpdater.getActiveRoot(),
+    onUpdatedServerFailed: () => appUpdater.markActiveBad(),
     appRoot: getAppRoot(),
     settingsPath: getSettingsPath(),
     isPackaged: app.isPackaged,
@@ -1116,8 +1182,16 @@ async function bootstrap() {
   registerIpcHandlers();
   registerAppEvents();
   await createDesktopWindow();
+  appUpdater.startAutoCheck();
   if (cloud.getAuthState() === 'connected') {
     await afterSignedIn().catch((error) => showError('Не удалось открыть интерфейс', error));
+  }
+  // Только для пробы сборки (smoke-claudeui-desktop.mjs): обновиться без окна вопроса.
+  if (process.env.CLAUDE_UI_UPDATE_AUTO_INSTALL === '1') {
+    const state = await appUpdater.check();
+    if (state.status === 'available') {
+      await installAppUpdate({ confirm: false }).catch((error) => showError('Обновление не встало', error));
+    }
   }
 }
 

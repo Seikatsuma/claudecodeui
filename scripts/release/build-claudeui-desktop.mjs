@@ -16,6 +16,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { buildInfo } from './claudeui-update-meta.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..', '..');
 const stageDir = path.join(rootDir, '.desktop-build', 'claudeui');
@@ -112,6 +114,10 @@ if (leaks.length) {
   console.error(`Личное в программе (${leaks.length}):\n${leaks.slice(0, 40).join('\n')}`);
   throw new Error('в программе осталось личное — сборка остановлена');
 }
+// Номер сборки и отпечаток пакетов — программа сверяет с ними обновления
+// (electron/appUpdate.js); без номера (сборка на своей машине) обновления выключены.
+await fs.writeFile(path.join(stageDir, 'update-build.json'), `${JSON.stringify(buildInfo(rootDir), null, 2)}\n`);
+
 if (process.env.CLAUDEUI_STAGE_ONLY === '1') {
   console.log('Подготовка проверена (CLAUDEUI_STAGE_ONLY), дальше не собираю.');
   process.exit(0);

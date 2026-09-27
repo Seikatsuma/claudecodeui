@@ -264,8 +264,12 @@ async function waitForCloudCliServer(baseUrl, timeoutMs) {
 }
 
 export class LocalServerController {
-  constructor({ appRoot, settingsPath, isPackaged = false, appVersion, onChange, getServerEnv }) {
+  constructor({ appRoot, settingsPath, isPackaged = false, appVersion, onChange, getServerEnv,
+    getUpdatedServerRoot, onUpdatedServerFailed }) {
     this.appRoot = appRoot;
+    // Скачанная начинка (appUpdate.js): сервер берётся из неё, пока она запускается.
+    this.getUpdatedServerRoot = typeof getUpdatedServerRoot === 'function' ? getUpdatedServerRoot : () => null;
+    this.onUpdatedServerFailed = typeof onUpdatedServerFailed === 'function' ? onUpdatedServerFailed : async () => {};
     // Настройки сервера от программы: мозги, встроенный Claude, своя база, режим разрешений.
     this.getServerEnv = typeof getServerEnv === 'function' ? getServerEnv : () => ({});
     this.settingsPath = settingsPath;
@@ -413,6 +417,11 @@ export class LocalServerController {
       return process.env.ELECTRON_SERVER_ENTRY;
     }
 
+    const updatedRoot = this.getUpdatedServerRoot();
+    if (updatedRoot) {
+      return path.join(updatedRoot, 'dist-server', 'server', 'index.js');
+    }
+
     const bundledEntry = path.join(this.appRoot, 'dist-server', 'server', 'index.js');
     if (process.env.CLOUDCLI_USE_INSTALLED_SERVER !== '1' && await pathExists(bundledEntry)) {
       return bundledEntry;
@@ -441,7 +450,8 @@ export class LocalServerController {
     this.appendStartupLog(`cwd: ${serverCwd}`);
     this.appendStartupLog(`HOST=${bindHost} SERVER_PORT=${port}`);
 
-    const bundledClaude = resolveBundledClaudeEnv(serverCwd);
+    // Claude — всегда из установки: у скачанной начинки пакеты — ссылка на те же.
+    const bundledClaude = resolveBundledClaudeEnv(this.appRoot);
     this.ownedServerProcess = spawn(runtime.command, [serverEntry], {
       cwd: serverCwd,
       detached: true,
@@ -516,7 +526,7 @@ export class LocalServerController {
       }
     }
 
-    const serverEntry = await this.resolveServerEntry();
+    let serverEntry = await this.resolveServerEntry();
 
     const port = await chooseServerPort(this.getServerBindHost());
     const serverUrl = `http://${HOST}:${port}`;
@@ -524,7 +534,17 @@ export class LocalServerController {
     this.localServerPort = port;
     this.startBundledServer(port, serverEntry);
 
-    const ready = await waitForCloudCliServer(serverUrl, SERVER_START_TIMEOUT_MS);
+    let ready = await waitForCloudCliServer(serverUrl, SERVER_START_TIMEOUT_MS);
+    // Скачанная начинка не поднялась — помечаем её и запускаем сервер из установки,
+    // чтобы неудачное обновление не оставило человека без программы.
+    if (!ready && this.getUpdatedServerRoot() && serverEntry.startsWith(this.getUpdatedServerRoot())) {
+      this.appendStartupLog('Обновлённый интерфейс не запустился — возвращаюсь к установленному');
+      await this.shutdownOwnedServer();
+      await this.onUpdatedServerFailed();
+      serverEntry = await this.resolveServerEntry();
+      this.startBundledServer(port, serverEntry);
+      ready = await waitForCloudCliServer(serverUrl, SERVER_START_TIMEOUT_MS);
+    }
     if (!ready) {
       const recentLogs = this.getStartupLogs().slice(-20).join('\n');
       await this.shutdownOwnedServer();
@@ -561,6 +581,14 @@ export class LocalServerController {
       pendingTarget: this.getPendingTarget(),
       target: await this.getResolvedTarget(),
     };
+  }
+
+  /** Перезапуск своего сервера (после обновления начинки): тот же порт, если он свободен. */
+  async restartOwnedServer() {
+    await this.shutdownOwnedServer();
+    this.localServerUrl = null;
+    this.localServerPort = null;
+    return this.ensureLocalServer();
   }
 
   hasOwnedServer() {

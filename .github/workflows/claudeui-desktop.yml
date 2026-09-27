@@ -64,6 +64,7 @@ jobs:
         run: node scripts/release/build-claudeui-desktop.mjs ${{ matrix.target }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          CLAUDEUI_BUILD: ${{ github.run_number }}
 
       - name: Mac — подпись «для себя» и .dmg
         if: runner.os == 'macOS'
@@ -92,9 +93,58 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  update-pack:
+    name: Начинка для обновления без установщика
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Код
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Пакеты
+        run: npm ci
+        env:
+          HUSKY: '0'
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Сборка интерфейса и сервера
+        run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      - name: Начинка этой сборки
+        run: |
+          CLAUDEUI_STAGE_ONLY=1 node scripts/release/build-claudeui-desktop.mjs --linux
+          node scripts/release/pack-claudeui-update.mjs out/update
+        env:
+          CLAUDEUI_BUILD: ${{ github.run_number }}
+      # Та же начинка с номером больше — проба ставит её поверх только что
+      # установленной программы и проверяет, что интерфейс поднялся.
+      - name: Пробная начинка для проверки обновления
+        run: |
+          export CLAUDEUI_BUILD=$(( ${{ github.run_number }} + 1000000 ))
+          CLAUDEUI_STAGE_ONLY=1 node scripts/release/build-claudeui-desktop.mjs --linux
+          node scripts/release/pack-claudeui-update.mjs out/update-test
+      - name: Выгрузка начинки
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: claudeui-update
+          path: out/update/
+          if-no-files-found: error
+      - name: Выгрузка пробной начинки
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: claudeui-update-test
+          path: out/update-test/
+          if-no-files-found: error
+
   smoke:
     name: Проверка — ${{ matrix.name }}
-    needs: build
+    needs: [build, update-pack]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     continue-on-error: ${{ matrix.optional }}
@@ -123,6 +173,11 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: installer
+      - name: Пробная начинка
+        uses: actions/download-artifact@v4
+        with:
+          name: claudeui-update-test
+          path: update-test
       - name: Установка на Mac — как человек, из .dmg в «Программы»
         if: matrix.kind == 'mac'
         run: |
@@ -157,6 +212,7 @@ jobs:
         run: node scripts/release/smoke-claudeui-desktop.mjs
         env:
           SMOKE_OUT: smoke
+          SMOKE_UPDATE_DIR: update-test
           SMOKE_EMAIL: ${{ secrets.CLAUDEUI_SMOKE_EMAIL }}
           SMOKE_PASSWORD: ${{ secrets.CLAUDEUI_SMOKE_PASSWORD }}
       - name: Снимки и журнал
@@ -166,3 +222,27 @@ jobs:
           name: smoke-${{ matrix.os }}
           path: smoke/
           if-no-files-found: warn
+
+  update-publish:
+    name: Выкладка обновления
+    needs: [smoke, update-pack]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Начинка
+        uses: actions/download-artifact@v4
+        with:
+          name: claudeui-update
+          path: update
+      - name: Выпуск desktop-update-${{ github.run_number }}
+        run: |
+          NOTES="$(node -p "require('./update/update.json').notes || ''")"
+          gh release create "desktop-update-${{ github.run_number }}" update/* \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" --latest=false \
+            --title "Обновление программы, сборка ${{ github.run_number }}" \
+            --notes "Начинка Claude UI для компьютера (интерфейс и сервер) — программа ставит её кнопкой «Обновить». ${NOTES}"
+        env:
+          GH_TOKEN: ${{ github.token }}
