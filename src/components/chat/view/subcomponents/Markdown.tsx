@@ -248,7 +248,7 @@ function rehypeUncertainUnderline() {
         child.tagName = 'span';
         child.properties = {
           ...(child.properties || {}),
-          className: ['md-uncertain', 'underline', 'decoration-foreground', 'decoration-2', 'underline-offset-[3px]'],
+          className: ['md-uncertain', 'underline', 'decoration-foreground', 'decoration-1', 'underline-offset-[3px]'],
           title: 'Не проверено: нейросеть прикинула или не перепроверила',
         };
       }
