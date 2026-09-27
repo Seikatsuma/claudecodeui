@@ -457,11 +457,19 @@ export function useChatComposerState({
           onShowSettings?.();
           break;
 
+        // /clear — новый пустой чат в той же папке, как «Новый сеанс»: Claude
+        // сам завёл бы разговор под новым номером, которого интерфейс не видит.
+        case 'clear':
+          if (selectedProject && onStartNewChat) {
+            onStartNewChat(selectedProject);
+          }
+          break;
+
         default:
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage],
+    [onFileOpen, onShowSettings, addMessage, selectedProject, onStartNewChat],
   );
 
   const closeCommandModal = useCallback(() => {

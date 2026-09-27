@@ -151,3 +151,58 @@ test('окно «Token Usage»: сервер не нашёл чат — оста
   assert.equal(data.tokenUsage.used, 10);
   assert.equal(data.tokenUsage.total, 200_000);
 });
+
+async function listCommands(body: Record<string, unknown>): Promise<Record<string, any>> {
+  const router = createCommandsRouter({
+    fileSystem: {
+      access: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+    } as unknown as typeof import('node:fs/promises'),
+    homeDirectory: () => '/home/test',
+    appRoot: '/app',
+    models: createModelsService() as never,
+    nativeCommands: {
+      listCommands: async () => [
+        { name: '/context', description: 'Context usage', argumentHint: '' },
+        { name: '/config', description: 'CLI config', argumentHint: 'key=value' },
+        { name: '/clear', description: 'CLI clear', argumentHint: '' },
+      ],
+    },
+    runtime: {
+      uptime: () => 0,
+      memoryUsage: () => ({ rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }),
+      version: 'v22', platform: 'linux', pid: 1,
+    },
+  });
+  const app = express().use(express.json()).use('/api/commands', router);
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/commands/list`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 200);
+    return await response.json() as Record<string, any>;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('список команд несёт команды самого Claude, кроме тех, что делает интерфейс', async () => {
+  const data = await listCommands({ projectPath: '/tmp/none', provider: 'claude' });
+  assert.deepEqual(data.native.map((command: { name: string }) => command.name), ['/context']);
+  assert.equal(data.native[0].namespace, 'claude');
+  assert.ok(data.builtIn.some((command: { name: string }) => command.name === '/clear'));
+});
+
+test('команды Claude не показываются в чатах других агентов', async () => {
+  const data = await listCommands({ projectPath: '/tmp/none', provider: 'codex' });
+  assert.deepEqual(data.native, []);
+});
+
+test('/clear отдаёт интерфейсу действие «новый чат», а не уходит Claude', async () => {
+  const result = await executeCommand('/clear', { provider: 'claude' });
+  assert.equal(result.type, 'builtin');
+  assert.equal(result.action, 'clear');
+});
