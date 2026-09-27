@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -9,9 +9,18 @@ import {
   digestTranscriptFile,
   digestTranscriptLines,
   exportDialogFile,
+  pathsInCommand,
   transcriptLineBoundary,
 } from '@/modules/handoff/handoff-digest.js';
-import { scrubSecrets, tailFingerprint, transcriptUnchangedUpTo, writeBrief } from '@/modules/handoff/handoff.service.js';
+import {
+  buildFileMap,
+  folderGuides,
+  formatFileList,
+  scrubSecrets,
+  tailFingerprint,
+  transcriptUnchangedUpTo,
+  writeBrief,
+} from '@/modules/handoff/handoff.service.js';
 
 const SID = '11111111-2222-3333-4444-555555555555';
 const line = (entry: Record<string, unknown>) => JSON.stringify({ sessionId: SID, timestamp: '2026-09-23T10:00:00Z', ...entry });
@@ -171,4 +180,92 @@ test('откат чата после заготовки делает её нед
   assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), false, 'урезан — негодна');
   await writeFile(file, a + `${line({ type: 'user', message: { content: 'ветка Б, другой текст той же длины!!' } })}\n`.padEnd(b.length + 10, ' '));
   assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), false, 'переписан после отката — негодна');
+});
+
+test('карта файлов: пути из действий агента, только существующие, правленые первыми, с описанием папки', async () => {
+  // Не /tmp: временная папка в карту намеренно не идёт.
+  const root = await mkdtemp('/var/tmp/handoff-home-');
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    const project = path.join(root, 'bot');
+    await mkdir(path.join(project, 'app'), { recursive: true });
+    await writeFile(path.join(project, 'agent.md'), '# как устроен бот');
+    await writeFile(path.join(project, 'app', 'main.py'), 'print(1)');
+    await writeFile(path.join(project, 'app', 'notes.md'), 'заметки');
+    const gone = path.join(project, 'app', 'deleted.py');
+    const digest = digestTranscriptLines([
+      line({ type: 'assistant', message: { content: [
+        { type: 'tool_use', name: 'Read', input: { file_path: path.join(project, 'app', 'notes.md') } },
+        { type: 'tool_use', name: 'Read', input: { file_path: path.join(project, 'app', 'notes.md') } },
+        { type: 'tool_use', name: 'Read', input: { file_path: gone } },
+        { type: 'tool_use', name: 'Edit', input: { file_path: path.join(project, 'app', 'main.py') } },
+      ] } }),
+    ], SID);
+    const map = await buildFileMap(digest.touchedFiles);
+    assert.deepEqual(map.map((entry) => path.basename(entry.path)), ['main.py', 'notes.md'], 'удалённого нет, правленый первым');
+    assert.equal(map[1].reads, 2);
+    assert.match(formatFileList(map), /main\.py` \(правился, 8 Б\)[\s\S]*notes\.md` \(открывался 2/);
+    assert.deepEqual(await folderGuides(map), [path.join(project, 'agent.md')]);
+  } finally {
+    process.env.HOME = oldHome;
+  }
+});
+
+test('карта попадает в задание той половины, что пишет «Где искать»', async () => {
+  const prompts: string[] = [];
+  await writeBrief('ЧЕЛОВЕК: привет', '/acc', async (prompt) => {
+    prompts.push(prompt);
+    return '## X\ny';
+  }, null, '- `/home/x/app.py` (правился, 1 КБ)');
+  const withMap = prompts.filter((prompt) => prompt.includes('/home/x/app.py'));
+  assert.equal(withMap.length, 1);
+  assert.match(withMap[0], /## Где искать — карта/);
+});
+
+test('оглавление разговора указывает на строку своей просьбы', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  await writeFile(file, [
+    line({ type: 'user', message: { content: 'Первая просьба' } }),
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'ответ\nв две строки' }] } }),
+    line({ type: 'user', message: { content: 'Вторая просьба' } }),
+  ].join('\n'));
+  const out = path.join(dir, 'd.md');
+  await exportDialogFile(file, SID, out, 'Т');
+  const lines = (await readFile(out, 'utf8')).split('\n');
+  const refs = lines.filter((l) => l.startsWith('- стр. '));
+  assert.equal(refs.length, 2);
+  for (const ref of refs) {
+    const n = Number(ref.match(/стр\. (\d+)/)?.[1]);
+    const want = ref.includes('Первая') ? 'Первая просьба' : 'Вторая просьба';
+    assert.match(lines[n - 1], /Человек$/, `стр. ${n} — заголовок реплики`);
+    assert.equal(lines[n + 1], want);
+  }
+});
+
+test('пути из команд: файлы и папки, без адресов страниц', () => {
+  assert.deepEqual(
+    pathsInCommand('cd ~/bot && sed -n 1,5p /home/u/CLAUDE.md; curl https://site.ru/api/x > /tmp/a.log; echo $HOME/x'),
+    ['~/bot', '/home/u/CLAUDE.md', '/tmp/a.log'],
+  );
+});
+
+test('карта: ключи входа не показываются, файлы настроек — с пометкой', async () => {
+  const root = await mkdtemp('/var/tmp/handoff-keys-');
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    await mkdir(path.join(root, '.ssh'), { recursive: true });
+    await mkdir(path.join(root, '.secrets'), { recursive: true });
+    await mkdir(path.join(root, '.claude'), { recursive: true });
+    for (const file of ['.ssh/id_ed25519', '.claude/.credentials.json', '.secrets/bot.env']) await writeFile(path.join(root, file), 'x');
+    const touched = ['.ssh/id_ed25519', '.claude/.credentials.json', '.secrets/bot.env']
+      .map((file, order) => ({ path: `~/${file}`, edited: false, reads: 0, mentions: 3, order }));
+    const map = await buildFileMap(touched);
+    assert.deepEqual(map.map((entry) => path.basename(entry.path)), ['bot.env']);
+    assert.match(formatFileList(map), /секреты: содержимое не выводить/);
+  } finally {
+    process.env.HOME = oldHome;
+  }
 });
