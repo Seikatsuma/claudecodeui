@@ -101,6 +101,25 @@ const mapSkillToSlashCommand = (skill: ProviderSkill): SlashCommand => ({
   },
 });
 
+type NativeCommand = {
+  name: string;
+  description?: string;
+  argumentHint?: string;
+  namespace?: string;
+  metadata?: Record<string, unknown>;
+};
+
+// Команды самого Claude (/context, /usage, /loop …) уходят ему обычным текстом,
+// поэтому в меню ведут себя как навыки: выбор вписывает команду в поле.
+const mapNativeToSlashCommand = (command: NativeCommand): SlashCommand => ({
+  name: command.name,
+  description: command.description,
+  argumentHint: command.argumentHint,
+  namespace: 'claude',
+  type: 'skill',
+  metadata: { ...(command.metadata || {}), type: 'claude' },
+});
+
 const filterSlashCommands = (
   commands: SlashCommand[],
   query: string,
@@ -194,6 +213,7 @@ export function useSlashCommands({
           },
           body: JSON.stringify({
             projectPath: workspacePath || commandsProjectPath,
+            provider,
           }),
         });
 
@@ -215,16 +235,23 @@ export function useSlashCommands({
           : null;
         const skillCommands = dedupeProviderSkills(skillsData?.data?.skills || [])
           .map(mapSkillToSlashCommand);
+        const customCommands = ((data.custom || []) as SlashCommand[]).map((command) => ({
+          ...command,
+          type: 'custom',
+        }));
+        // Свои навыки и команды из папок главнее одноимённой команды Claude.
+        const knownNames = new Set([...skillCommands, ...customCommands].map((command) => command.name));
+        const nativeCommands = ((data.native || []) as NativeCommand[])
+          .filter((command) => !knownNames.has(command.name))
+          .map(mapNativeToSlashCommand);
         const allCommands: SlashCommand[] = [
           ...((data.builtIn || []) as SlashCommand[]).map((command) => ({
             ...command,
             type: 'built-in',
           })),
+          ...nativeCommands,
           ...skillCommands,
-          ...((data.custom || []) as SlashCommand[]).map((command) => ({
-            ...command,
-            type: 'custom',
-          })),
+          ...customCommands,
         ];
 
         const parsedHistory = readCommandHistory(commandsProjectId as string);
