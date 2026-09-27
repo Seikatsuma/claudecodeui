@@ -128,6 +128,14 @@ jobs:
         run: |
           sw_vers
           DMG="$(ls installer/*.dmg | head -1)"
+          # Окно установки, как его увидит человек: открыть образ и снять экран.
+          mkdir -p smoke
+          hdiutil attach "$DMG"
+          open "/Volumes/Claude UI"
+          sleep 6
+          screencapture -x smoke/00-окно-установки.png || true
+          ls -la "/Volumes/Claude UI"
+          hdiutil detach "/Volumes/Claude UI" -force
           hdiutil attach "$DMG" -nobrowse -mountpoint /Volumes/ClaudeUI
           ls -la /Volumes/ClaudeUI
           cp -R "/Volumes/ClaudeUI/Claude UI.app" /Applications/

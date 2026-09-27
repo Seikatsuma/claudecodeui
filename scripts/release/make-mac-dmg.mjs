@@ -5,7 +5,7 @@
 //
 //   node scripts/release/make-mac-dmg.mjs <Claude UI.app> <папка итога> <версия> <M|Intel>
 //
-// Только на Mac (нужны lipo, codesign, hdiutil).
+// Только на Mac (нужны lipo, codesign, tiffutil, hdiutil; dmgbuild ставится сам).
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -48,10 +48,40 @@ if (await fs.access(otherClaude).then(() => true, () => false)) {
   throw new Error(`внутри лишний Claude второго процессора: ${otherClaude}`);
 }
 
-// .dmg: программа + ярлык «Программы». Сжатие ULMO (LZMA, macOS 10.15+) —
-// самое плотное из встроенных, как у установщика Windows.
-await fs.symlink('/Applications', path.join(staging, 'Applications'));
+// .dmg — окно установки, как у Claude Desktop: светлый фон со стрелкой и надписью
+// «Перетащите Claude UI в папку «Программы»», значки на своих местах, без «.app»,
+// без панелей Finder. Собирает dmgbuild (1.6.7+: фон не пропадает на новых macOS).
+const assets = path.resolve('electron', 'assets', 'dmg');
+const work = path.resolve(outDir, `dmgbuild-${chip}`);
+await fs.rm(work, { recursive: true, force: true });
+await fs.mkdir(work, { recursive: true });
+// Фон — один TIFF с обычной и Retina-картинкой (Finder не любит PNG с прозрачностью).
+const background = path.join(work, 'background.tiff');
+run('tiffutil', ['-cathidpicheck', path.join(assets, 'background.png'), path.join(assets, 'background@2x.png'), '-out', background]);
+run('python3', ['-m', 'venv', path.join(work, 'venv')]);
+run(path.join(work, 'venv', 'bin', 'pip'), ['install', '--quiet', 'dmgbuild>=1.6.7']);
+const settings = path.join(work, 'settings.py');
+// Центры значков совпадают со стрелкой на фоне (electron/assets/dmg/make-background.py).
+await fs.writeFile(settings, `# -*- coding: utf-8 -*-
+files = [${JSON.stringify(outAppPath)}]
+symlinks = {"Программы": "/Applications"}
+hide_extension = ["Claude UI.app"]
+icon_locations = {"Claude UI.app": (170, 200), "Программы": (490, 200)}
+background = ${JSON.stringify(background)}
+window_rect = ((200, 120), (660, 400))
+default_view = "icon-view"
+show_status_bar = False
+show_tab_view = False
+show_toolbar = False
+show_pathbar = False
+show_sidebar = False
+show_icon_preview = False
+icon_size = 128
+text_size = 14
+arrange_by = None
+format = "ULMO"
+`, 'utf8');
 const dmgPath = path.resolve(outDir, `Claude-UI-${version}-mac-${chip}.dmg`);
 await fs.rm(dmgPath, { force: true });
-run('hdiutil', ['create', '-volname', 'Claude UI', '-srcfolder', staging, '-ov', '-format', 'ULMO', dmgPath]);
+run(path.join(work, 'venv', 'bin', 'dmgbuild'), ['-s', settings, 'Claude UI', dmgPath]);
 console.log(`Готово: ${dmgPath}`);
