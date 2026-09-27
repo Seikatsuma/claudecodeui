@@ -266,7 +266,7 @@ const markdownComponents = {
   code: CodeBlock,
   u: ({ children }: { children?: React.ReactNode }) => (
     <u
-      className="underline decoration-primary decoration-2 underline-offset-[3px]"
+      className="md-uncertain underline decoration-primary decoration-2 underline-offset-[3px]"
       title="Не проверено: нейросеть прикинула или не перепроверила"
     >
       {children}
