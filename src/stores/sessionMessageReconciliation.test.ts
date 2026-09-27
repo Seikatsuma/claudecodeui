@@ -86,6 +86,25 @@ test('queued echo without a tab bubble is simply appended', () => {
   assert.deepEqual(appendRealtimeWithQueuedEcho([other], queued), [other, queued]);
 });
 
+// Снимок Егора 27.09.26: «дизан отличаеться» с картинкой дважды, обе в 17:15:38 —
+// одна и та же строка из очереди доставлена вкладке второй раз.
+test('the same live row delivered twice stays one row', () => {
+  const image = { path: '/home/claude/.cloudcli/assets/shot.png', name: 'shot.png' };
+  const queued = createUserMessage('queued_74d5', '2026-09-27T14:15:38.100Z', {
+    content: 'дизан отличаеться',
+    images: [image],
+  });
+  const reply = { ...createUserMessage('a1', '2026-09-27T14:15:40.000Z'), role: 'assistant' as const, content: 'ok' };
+  const persisted = createUserMessage('claude_d', '2026-09-27T14:17:14.496Z', {
+    content: 'дизан отличаеться',
+    images: [{ data: 'data:image/png;base64,AAAA' }],
+  });
+
+  const realtime = [queued, reply, queued].reduce(appendRealtimeWithQueuedEcho, [] as NormalizedMessage[]);
+  assert.deepEqual(realtime.map((message) => message.id), ['queued_74d5', 'a1']);
+  assert.deepEqual(removeOptimisticUserEchoes([persisted], realtime).map((message) => message.id), ['a1']);
+});
+
 test('queued echo is dropped once the transcript row lands, even after a long wait', () => {
   const local = createUserMessage('local_2', '2026-09-21T13:40:00.000Z', { content: '2' });
   const queued = createUserMessage('queued_q1', '2026-09-21T13:53:54.300Z', { content: '2' });
