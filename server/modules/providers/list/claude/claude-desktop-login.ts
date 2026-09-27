@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+
+import spawn from 'cross-spawn';
 
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 
@@ -34,8 +36,9 @@ export type ClaudeCliAuthStatus = {
 };
 
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+const CANNOT_START = 'Не получилось запустить вход: внутри программы не нашёлся Claude. Скачайте программу заново со страницы скачивания и установите поверх.';
 const STATUS_CACHE_MS = 10 * 1000;
-const URL_PATTERN = /https:\/\/\S*oauth\/authorize\S*/;
+const URL_PATTERN = /https:\/\/(?:[a-z0-9-]+\.)*(?:claude\.com|claude\.ai|anthropic\.com)\/\S*oauth\/authorize\S*/;
 
 let child: ChildProcess | null = null;
 let timeoutTimer: NodeJS.Timeout | null = null;
@@ -94,7 +97,8 @@ export function startDesktopLogin(): DesktopLoginState {
       windowsHide: true,
     });
   } catch (error) {
-    state = { ...state, phase: 'error', message: `Не удалось запустить вход: ${(error as Error).message}` };
+    console.error('[claude-login] не запустился:', error);
+    state = { ...state, phase: 'error', message: CANNOT_START };
     return getDesktopLoginState();
   }
   child = proc;
@@ -112,7 +116,8 @@ export function startDesktopLogin(): DesktopLoginState {
     if (child !== proc) return;
     clearTimer();
     child = null;
-    state = { ...state, phase: 'error', message: `Не удалось запустить вход: ${error.message}` };
+    console.error('[claude-login] не запустился:', error);
+    state = { ...state, phase: 'error', message: CANNOT_START };
   });
 
   proc.on('close', (code) => {
@@ -125,12 +130,13 @@ export function startDesktopLogin(): DesktopLoginState {
       state = { ...state, phase: 'success', message: null };
     } else {
       const detail = lastOutputLine();
+      if (detail) console.warn('[claude-login] вход не завершён:', detail);
       state = {
         ...state,
         phase: 'error',
         message: state.codeSent
           ? 'Код не подошёл. Нажмите «Попробовать ещё раз» и скопируйте код со страницы целиком — он действует несколько минут.'
-          : detail ? `Вход не завершён: ${detail}` : 'Вход не завершён. Попробуйте ещё раз.',
+          : 'Вход не завершён. Нажмите «Попробовать ещё раз» — и в браузере «Разрешить».',
       };
     }
   });

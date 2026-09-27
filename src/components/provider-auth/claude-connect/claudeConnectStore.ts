@@ -45,6 +45,8 @@ let state: ClaudeConnectState = {
 const listeners = new Set<() => void>();
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let loadedOnce = false;
+/** Растёт на каждое действие (подключить, код, отмена): опрос, начатый раньше, устарел. */
+let actionEpoch = 0;
 
 const emit = (): void => {
   for (const listener of listeners) listener();
@@ -100,9 +102,10 @@ const schedulePoll = (): void => {
 /** fresh — спросить Claude заново, минуя 10-секундный запас сервера (после ошибки «не вошли»). */
 export async function refreshClaudeConnect(fresh = false): Promise<void> {
   if (!isDesktopApp()) return;
+  const epoch = actionEpoch;
   try {
     const response = await authenticatedFetch(fresh ? `${BASE}?fresh=1` : BASE, { method: 'GET', headers: { 'Cache-Control': 'no-cache' } });
-    if (response.ok) applyServer(await readJson(response));
+    if (response.ok && epoch === actionEpoch) applyServer(await readJson(response));
   } catch {
     // сеть моргнула — спросим ещё раз при следующем действии
   }
@@ -110,6 +113,7 @@ export async function refreshClaudeConnect(fresh = false): Promise<void> {
 }
 
 const post = async (path: string, body?: Record<string, unknown>): Promise<void> => {
+  actionEpoch += 1;
   try {
     const response = await authenticatedFetch(`${BASE}${path}`, {
       method: 'POST',
