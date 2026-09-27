@@ -179,5 +179,10 @@
     "emptyTitle": "No active sessions right now",
     "emptyDescription": "Sessions that are running or waiting on you will show up here.",
     "noMatchingSessions": "No active sessions match this search."
+  },
+  "claudeAccounts": {
+    "title": "Your Claude subscriptions",
+    "fallback": "Subscription {{slot}}",
+    "error": "Could not switch the subscription. Please try again."
   }
 }

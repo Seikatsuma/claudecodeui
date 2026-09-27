@@ -6,6 +6,7 @@ import spawn from 'cross-spawn';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
+import { getDesktopClaudeActiveEmail } from '@/modules/user/desktop-claude-accounts.js';
 import { getClaudeConfigDir, readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
 type ClaudeCredentialsStatus = {
@@ -100,7 +101,11 @@ export class ClaudeProviderAuth implements IProviderAuth {
     }
 
     if (process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) {
-      return { authenticated: true, email: 'OAuth Token (long-lived)', method: 'environment' };
+      return {
+        authenticated: true,
+        email: getDesktopClaudeActiveEmail() || 'OAuth Token (long-lived)',
+        method: 'environment',
+      };
     }
 
     if (readOptionalString(settingsEnv.CLAUDE_CODE_OAUTH_TOKEN)) {

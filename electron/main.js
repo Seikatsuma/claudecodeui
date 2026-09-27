@@ -638,6 +638,10 @@ async function openLocalInDesktop() {
 
 // После входа: серверы и тариф с сервера аккаунтов, свежие мозги, сразу — этот компьютер.
 async function afterSignedIn() {
+  // Подписки Claude — до запуска сервера этого компьютера: он берёт их при старте.
+  // Нет связи — работаем с сохранёнными, запуск не задерживаем дольше 6 секунд.
+  await cloud.refreshClaudeAccounts()
+    .catch((error) => console.warn('[Claude] подписки не обновились:', error?.message || error));
   void cloud.refreshAccount().then(() => syncDesktopState()).catch(() => {});
   void refreshCloudEnvironments({ showErrors: false }).catch(() => {});
   void brains.syncFromServer(() => cloud.fetchBrains())
@@ -677,6 +681,11 @@ function getServerEnv() {
   // Окно разрешения ждёт ответа, пока человек не вернётся (как в Claude Desktop):
   // на сайте через 55 с запрос отклонялся сам — отошёл за чаем, а работа отменена.
   env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS = String(24 * 60 * 60 * 1000);
+  // Подписки Claude владельца с сервера аккаунтов: сервер программы выберет
+  // активную и уберёт список из окружения (desktop-claude-accounts.ts). Нет
+  // подписок — Claude работает под собственным входом человека на компьютере.
+  const claudeAccounts = account?.claudeAccounts || [];
+  env.CLAUDE_UI_CLAUDE_ACCOUNTS = claudeAccounts.length ? JSON.stringify(claudeAccounts) : '';
   return env;
 }
 

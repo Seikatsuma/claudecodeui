@@ -220,7 +220,8 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
     }
 
     return {
-      model: session.model?.trim() || null,
+      // «<synthetic>» — служебная запись Claude, не модель (см. claude-models.provider).
+      model: session.model?.trim() && !/^<.*>$/.test(session.model.trim()) ? session.model.trim() : null,
       effort: session.effort?.trim() || null,
     };
   };

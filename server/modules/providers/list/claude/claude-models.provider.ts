@@ -166,6 +166,14 @@ const ANSI_PATTERN = new RegExp(
   'g',
 );
 
+// Служебные записи самого Claude (ошибка входа, прерывание, «нет ответа») пишутся
+// с моделью «<synthetic>»: это не модель, её нельзя ни показывать на кнопке,
+// ни отправлять обратно в Claude — ищем выше настоящую.
+const realModel = (value: string | undefined | null): string | null => {
+  const trimmed = value?.trim();
+  return trimmed && !/^<.*>$/.test(trimmed) ? trimmed : null;
+};
+
 const extractClaudeEventModel = (event: ClaudeInitEvent, sessionId: string): string | null => {
   const eventSessionId = event.sessionId ?? event.session_id;
   if (eventSessionId && eventSessionId !== sessionId) {
@@ -177,13 +185,12 @@ const extractClaudeEventModel = (event: ClaudeInitEvent, sessionId: string): str
     return contentModel;
   }
 
-  const directModel = event.model?.trim();
+  const directModel = realModel(event.model);
   if (directModel) {
     return directModel;
   }
 
-  const messageModel = event.message?.model?.trim();
-  return messageModel || null;
+  return realModel(event.message?.model);
 };
 
 const stripAnsi = (value: string): string => value.replace(ANSI_PATTERN, '');

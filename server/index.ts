@@ -50,6 +50,7 @@ import { handoffRoutes } from './modules/handoff/index.js';
 import { openTabsRoutes } from './modules/open-tabs/index.js';
 import { startChatGroupClassifier } from './modules/chat-groups/chat-group-classifier.js';
 import { userRoutes } from './modules/user/index.js';
+import { getDesktopClaudeActiveEmail, initDesktopClaudeAccounts } from './modules/user/desktop-claude-accounts.js';
 import {
     getPluginPort,
     pluginsRoutes,
@@ -121,7 +122,11 @@ const SWITCH_ACCOUNT_URL = process.env.SWITCH_ACCOUNT_URL || null;
 // any particular web user's own account. Showing that as "the account this
 // instance represents" would be actively misleading on a shared instance
 // with no single fixed account at all.
+initDesktopClaudeAccounts();
 const CLAUDE_ACCOUNT_EMAIL = OPEN_REGISTRATION ? null : (() => {
+    // Настольная программа с подписками владельца: почта — у выбранной подписки.
+    const desktopEmail = getDesktopClaudeActiveEmail();
+    if (desktopEmail) return desktopEmail;
     try {
         const parsed = JSON.parse(fs.readFileSync(getClaudeJsonPath(), 'utf8'));
         const email = parsed?.oauthAccount?.emailAddress;

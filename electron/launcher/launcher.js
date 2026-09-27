@@ -19,7 +19,9 @@ window.__MOCK_STATE__ = {
 (function cloudCliLauncher() {
   var MOCK = window.__MOCK_STATE__ || {};
   var VERSION = window.__APP_VERSION__ || '';
-  var LOGO_URL = new URL('../../public/logo-32.png', window.location.href).toString();
+  // 256 точек, а не 32: на экране входа значок 48 точек, на Mac с Retina это 96
+  // настоящих пикселей — картинка 32 растягивалась втрое и шла квадратиками.
+  var LOGO_URL = new URL('../../public/logo-256.png', window.location.href).toString();
   var SEARCH = new URLSearchParams(window.location.search || '');
 
   function clone(value) {

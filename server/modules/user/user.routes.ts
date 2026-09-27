@@ -1,5 +1,10 @@
 import express from 'express';
 
+import {
+  activateDesktopClaudeAccount,
+  hasDesktopClaudeAccounts,
+  listDesktopClaudeAccounts,
+} from './desktop-claude-accounts.js';
 import type { createUserService } from './user.service.js';
 
 type AuthenticatedRequest = express.Request & { user?: { id?: number | string } };
@@ -124,6 +129,11 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
   // availability. Non-owners receive an empty accounts list (not an error).
   router.get('/owner-accounts', async (req, res, next) => {
     try {
+      // Настольная программа: подписки владельца пришли с сервера аккаунтов.
+      if (hasDesktopClaudeAccounts()) {
+        res.json(listDesktopClaudeAccounts());
+        return;
+      }
       res.json(await service.getOwnerAccounts(readUserId(req)));
     } catch (error) {
       next(error);
@@ -135,6 +145,15 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
   router.post('/owner-accounts/activate', async (req, res, next) => {
     try {
       const body = req.body as { slot?: unknown };
+      if (hasDesktopClaudeAccounts()) {
+        const result = activateDesktopClaudeAccount(body.slot);
+        if (!result) {
+          res.status(400).json({ success: false, error: { message: 'Нет такой подписки.' } });
+          return;
+        }
+        res.json(result);
+        return;
+      }
       res.json(await service.activateOwnerAccount(readUserId(req), body.slot));
     } catch (error) {
       next(error);

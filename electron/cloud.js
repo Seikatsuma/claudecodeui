@@ -27,6 +27,17 @@ function decryptSecret(record) {
   }
 }
 
+function parseClaudeAccounts(value) {
+  let list = value;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { return []; }
+  }
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((item) => typeof item?.email === 'string' && typeof item?.token === 'string' && item.token.length > 20)
+    .map((item) => ({ email: item.email, token: item.token }));
+}
+
 export class CloudController {
   constructor({ storePath, controlPlaneUrl, callbackUrl, onChange }) {
     this.storePath = storePath;
@@ -82,6 +93,7 @@ export class CloudController {
         plan: stored.plan || null,
         planLabel: stored.planLabel || null,
         apiKey: apiKey || null,
+        claudeAccounts: parseClaudeAccounts(decryptSecret(stored.claudeAccounts)),
       };
       this.authState = apiKey ? 'connected' : (stored.email ? 'expired' : 'logged_out');
       return this.cloudAccount;
@@ -104,6 +116,9 @@ export class CloudController {
       plan: account.plan || null,
       planLabel: account.planLabel || null,
       apiKey: account.apiKey ? encryptSecret(account.apiKey) : null,
+      claudeAccounts: account.apiKey && account.claudeAccounts?.length
+        ? encryptSecret(JSON.stringify(account.claudeAccounts))
+        : null,
     };
 
     await fs.mkdir(path.dirname(this.storePath), { recursive: true });
@@ -115,6 +130,7 @@ export class CloudController {
       plan: payload.plan,
       planLabel: payload.planLabel,
       apiKey: account.apiKey || null,
+      claudeAccounts: account.apiKey ? (account.claudeAccounts || []) : [],
     };
     this.authState = account.apiKey ? 'connected' : 'logged_out';
     this.onChange?.();
@@ -145,6 +161,7 @@ export class CloudController {
       this.cloudAccount = {
         ...this.cloudAccount,
         apiKey: null,
+        claudeAccounts: [],
       };
     }
     this.authState = this.cloudAccount.email ? 'expired' : 'logged_out';
@@ -163,13 +180,14 @@ export class CloudController {
       throw new Error('Сначала войдите в аккаунт.');
     }
 
+    const { timeoutMs = CLOUD_API_TIMEOUT_MS, ...fetchOptions } = options;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CLOUD_API_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response;
 
     try {
       response = await fetch(`${this.controlPlaneUrl}${pathname}`, {
-        ...options,
+        ...fetchOptions,
         signal: options.signal || controller.signal,
         headers: {
           'Content-Type': 'application/json',
@@ -179,7 +197,7 @@ export class CloudController {
       });
     } catch (error) {
       if (error?.name === 'AbortError') {
-        throw new Error(`Сервер аккаунтов не ответил за ${Math.round(CLOUD_API_TIMEOUT_MS / 1000)} секунд. Проверьте интернет.`);
+        throw new Error(`Сервер аккаунтов не ответил за ${Math.round(timeoutMs / 1000)} секунд. Проверьте интернет.`);
       }
       throw new Error('Нет связи с сервером аккаунтов. Проверьте интернет.');
     } finally {
@@ -298,6 +316,20 @@ export class CloudController {
       await this.saveCloudAccount({ ...this.cloudAccount, ...fields });
     }
     return data.account;
+  }
+
+  // Подписки Claude владельца (годовые ключи `claude setup-token`), которые
+  // хозяин сервера аккаунтов привязал к этому аккаунту. Хранятся зашифрованными
+  // рядом с ключом устройства; без связи работаем с сохранёнными.
+  async refreshClaudeAccounts() {
+    if (!this.cloudAccount?.apiKey) return [];
+    const data = await this.cloudApi('/api/claude-accounts', { timeoutMs: 6000 });
+    const next = parseClaudeAccounts(data.accounts);
+    const current = this.cloudAccount.claudeAccounts || [];
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      await this.saveCloudAccount({ ...this.cloudAccount, claudeAccounts: next });
+    }
+    return next;
   }
 
   async fetchBrains() {

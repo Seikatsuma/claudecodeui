@@ -1,6 +1,7 @@
 import { Check, ChevronsUpDown, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { useOwnerAccountSettings } from '../../../settings/hooks/useOwnerAccountSettings';
 
@@ -34,6 +35,7 @@ export default function SidebarAccountSwitcher({
   hideWithoutEmail = false,
 }: SidebarAccountSwitcherProps) {
   const { activeSlot, accounts, pendingSlot, errorMessage, activateSlot } = useOwnerAccountSettings();
+  const { t } = useTranslation('sidebar');
   const [isOpen, setIsOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -135,7 +137,7 @@ export default function SidebarAccountSwitcher({
                 style={{ left: anchor.left, bottom: anchor.bottom, width: Math.max(anchor.width, 240) }}
               >
                 <div className="border-b border-border/60 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Your Claude accounts
+                  {t('claudeAccounts.title')}
                 </div>
                 {available.map((account) => {
                   const isActive = account.slot === activeSlot;
@@ -153,14 +155,14 @@ export default function SidebarAccountSwitcher({
                         {isActive && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
                       </span>
                       <span className="min-w-0 flex-1 truncate">
-                        {account.email ?? `Account ${account.slot}`}
+                        {account.email ?? t('claudeAccounts.fallback', { slot: account.slot })}
                       </span>
                       {isBusy && <span className="text-xs text-muted-foreground">…</span>}
                     </button>
                   );
                 })}
                 {errorMessage && (
-                  <p className="border-t border-border/60 px-3 py-2 text-xs text-destructive">{errorMessage}</p>
+                  <p className="border-t border-border/60 px-3 py-2 text-xs text-destructive">{t('claudeAccounts.error')}</p>
                 )}
               </div>
             </>,
