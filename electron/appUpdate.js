@@ -315,6 +315,11 @@ export class AppUpdater {
     const list = [...new Set([...this.readBadBuilds(), active.build])];
     await fs.mkdir(this.root, { recursive: true });
     await fs.writeFile(this.badBuildsPath, JSON.stringify(list), 'utf8');
+    // Указатель — на прежнюю: неудачная сборка уйдёт при следующей уборке.
+    const pointer = this.readPointer();
+    const tmp = `${this.pointerPath}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify({ build: pointer.previous || null, previous: null }), 'utf8');
+    await fs.rename(tmp, this.pointerPath);
     this.log(`сборка ${active.build} не запустилась — вернулся к установленной`);
     this.#set('idle', `Сборка ${active.build} не запустилась — работаю на прежней`);
   }
