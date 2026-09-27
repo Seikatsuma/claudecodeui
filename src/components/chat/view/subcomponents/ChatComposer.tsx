@@ -35,6 +35,7 @@ import ActivityIndicator from './ActivityIndicator';
 import ComposerAttachment from './ComposerAttachment';
 import VoiceInputButton from './VoiceInputButton';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
+import ClaudeConnectCard from '../../../provider-auth/claude-connect/ClaudeConnectCard';
 import TokenUsageSummary from './TokenUsageSummary';
 import MessageQueueDock from './MessageQueueDock';
 import ComposerModelMenu from './ComposerModelMenu';
@@ -69,6 +70,8 @@ interface ChatComposerProps {
   availablePermissionModes: (PermissionMode | string)[];
   onSelectPermissionMode: (mode: PermissionMode | string) => void;
   providerLabel: string;
+  /** Программа на компьютере и выбран Claude — карточка «Подключите Claude», пока он не подключён. */
+  showClaudeConnect?: boolean;
   effort: string;
   availableEffortOptions: NonNullable<ProviderModelOption['effort']>['values'];
   onSelectEffort: (effort: string) => void;
@@ -136,6 +139,7 @@ export default function ChatComposer({
   availablePermissionModes,
   onSelectPermissionMode,
   providerLabel,
+  showClaudeConnect = false,
   effort,
   availableEffortOptions,
   onSelectEffort,
@@ -328,6 +332,8 @@ export default function ChatComposer({
           <ActivityIndicator activity={activity} onAbort={onAbortSession} isInputFocused={isInputFocused} />
         </div>
       )}
+
+      {showClaudeConnect && <ClaudeConnectCard variant="composer" />}
 
       {pendingPermissionRequests.length > 0 && (
         <div className="mx-auto mb-3 max-w-[54.25rem]">

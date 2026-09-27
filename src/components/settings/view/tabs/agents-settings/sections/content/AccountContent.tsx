@@ -2,6 +2,8 @@ import { LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Badge, Button } from '../../../../../../../shared/view/ui';
 import LLMProviderLogo from '../../../../../../llm-provider-logo/LLMProviderLogo';
+import ClaudeConnectCard from '../../../../../../provider-auth/claude-connect/ClaudeConnectCard';
+import { isDesktopApp } from '../../../../../../../lib/desktopBridge';
 import type { AgentProvider, AuthStatus } from '../../../../../types/types';
 
 type AccountContentProps = {
@@ -111,7 +113,13 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             </div>
           </div>
 
-          {authStatus.method !== 'api_key' && (
+          {agent === 'claude' && isDesktopApp() && authStatus.method !== 'api_key' && (
+            <div className="border-t border-border/50 pt-4">
+              <ClaudeConnectCard variant="settings" />
+            </div>
+          )}
+
+          {authStatus.method !== 'api_key' && !(agent === 'claude' && isDesktopApp()) && (
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center justify-between">
                 <div>

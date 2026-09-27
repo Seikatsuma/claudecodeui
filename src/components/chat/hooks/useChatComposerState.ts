@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isDesktopApp } from '../../../lib/desktopBridge';
+import { openClaudeConnect } from '../../provider-auth/claude-connect/claudeConnectStore';
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -908,6 +910,17 @@ export function useChatComposerState({
         )
         || !selectedProject
       ) {
+        return;
+      }
+
+      // Программа на компьютере: «/login» (и «/логин») — это вход в подписку Claude.
+      // Вложенный Claude сам его не умеет («isn't available in this environment»),
+      // поэтому открываем карточку «Подключите Claude» над полем ввода.
+      if (isDesktopApp() && /^\/(login|логин)\s*$/i.test(currentInput.trim())) {
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        openClaudeConnect();
         return;
       }
 

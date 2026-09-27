@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useCallback } from 'react';
+import { memo, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import LLMProviderLogo from '../../../llm-provider-logo/LLMProviderLogo';
@@ -19,6 +19,25 @@ import ChatMessageFiles from './ChatMessageFiles';
 import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
 import MessageSpeakControl from './MessageSpeakControl';
+import { isDesktopApp } from '../../../../lib/desktopBridge';
+import { isClaudeNotLoggedInText, refreshClaudeConnect, useClaudeConnect } from '../../../provider-auth/claude-connect/claudeConnectStore';
+
+/** Строка в ленте вместо «Not logged in · Please run /login». Заодно перепроверяет вход — карточка над полем ввода появится сама. */
+function ClaudeNotLoggedInNotice() {
+  const connect = useClaudeConnect();
+  useEffect(() => { void refreshClaudeConnect(true); }, []);
+  const text = connect.loggedIn
+    ? 'Тогда Claude ещё не был подключён к подписке и не ответил. Сейчас подключён — напишите сообщение ещё раз.'
+    : 'Claude ещё не подключён к вашей подписке, поэтому не ответил. Подключите его кнопкой «Подключить Claude» внизу, над полем ввода, — и напишите сообщение ещё раз.';
+  return (
+    <div className="w-full">
+      <div className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-3 text-sm text-foreground">
+        <span className="mt-0.5 h-5 w-5 flex-shrink-0"><LLMProviderLogo provider="claude" className="h-5 w-5" /></span>
+        <span>{text}</span>
+      </div>
+    </div>
+  );
+}
 
 type DiffLine = {
   type: string;
@@ -203,6 +222,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
             <span className="text-xs text-gray-500 dark:text-gray-400">{message.content}</span>
           </div>
         </div>
+      ) : isDesktopApp() && !message.isToolUse && isClaudeNotLoggedInText(message.content) ? (
+        /* Программа на компьютере, Claude не вошёл в подписку: вместо английской
+           ошибки — одна русская строка; кнопка — в карточке над полем ввода.
+           «Not logged in» и следом «returned an error result» — одна строка. */
+        isClaudeNotLoggedInText(prevMessage?.content) ? null : <ClaudeNotLoggedInNotice />
       ) : (
         /* Claude/Error/Tool messages on the left */
         <div className="w-full">

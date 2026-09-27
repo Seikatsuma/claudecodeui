@@ -28,6 +28,8 @@ import {
 } from "../../../../shared/view/ui";
 
 import ModelLibraryPanel from "./ModelLibraryPanel";
+import { isDesktopApp } from "../../../../lib/desktopBridge";
+import { useClaudeConnect } from "../../../provider-auth/claude-connect/claudeConnectStore";
 
 const PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "claude", name: "Anthropic" },
@@ -130,6 +132,7 @@ export default function ProviderSelectionEmptyState({
   onShowAllTasks,
   setInput,
 }: ProviderSelectionEmptyStateProps) {
+  const claudeConnect = useClaudeConnect();
   const { t } = useTranslation("chat");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [modelLibraryOpen, setModelLibraryOpen] = useState(false);
@@ -369,9 +372,12 @@ export default function ProviderSelectionEmptyState({
           <p className="mt-4 text-center text-sm text-muted-foreground/70">
             {
               {
-                claude: t("providerSelection.readyPrompt.claude", {
-                  model: claudeModel,
-                }),
+                // Программа на компьютере, Claude ещё не подключён — не «готов», а «сначала подключите».
+                claude: claudeConnect.loggedIn === false && isDesktopApp()
+                  ? "Сначала подключите Claude — кнопка ниже."
+                  : t("providerSelection.readyPrompt.claude", {
+                      model: claudeModel,
+                    }),
                 cursor: t("providerSelection.readyPrompt.cursor", {
                   model: cursorModel,
                 }),

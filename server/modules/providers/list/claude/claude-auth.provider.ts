@@ -7,6 +7,7 @@ import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { getDesktopClaudeActiveEmail } from '@/modules/user/desktop-claude-accounts.js';
+import { isDesktopLoginEnabled, readClaudeCliAuthStatus } from '@/modules/providers/list/claude/claude-desktop-login.js';
 import { getClaudeConfigDir, readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
 type ClaudeCredentialsStatus = {
@@ -110,6 +111,18 @@ export class ClaudeProviderAuth implements IProviderAuth {
 
     if (readOptionalString(settingsEnv.CLAUDE_CODE_OAUTH_TOKEN)) {
       return { authenticated: true, email: 'OAuth Token (long-lived)', method: 'environment' };
+    }
+
+    // Программа на компьютере: вход может лежать в «Связке ключей» Mac, файлом его не увидеть —
+    // спрашиваем сам Claude. Не ответил — ниже прежняя проверка файла.
+    if (isDesktopLoginEnabled()) {
+      const cli = await readClaudeCliAuthStatus();
+      if (cli?.loggedIn) {
+        return { authenticated: true, email: cli.email, method: cli.authMethod || 'claude.ai' };
+      }
+      if (cli) {
+        return { authenticated: false, email: null, method: null, error: 'Claude не подключён к подписке.' };
+      }
     }
 
     try {

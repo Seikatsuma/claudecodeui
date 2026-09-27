@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { isDesktopApp } from '../../../lib/desktopBridge';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownIcon } from 'lucide-react';
 
@@ -565,6 +566,7 @@ function ChatInterface({
           availablePermissionModes={availablePermissionModes}
           onSelectPermissionMode={(mode) => selectPermissionMode(mode as PermissionMode)}
           providerLabel={selectedProviderLabel}
+          showClaudeConnect={isDesktopApp() && provider === 'claude'}
           effort={currentProviderEffort}
           availableEffortOptions={currentProviderEffortOptions}
           onSelectEffort={handleSelectComposerEffort}

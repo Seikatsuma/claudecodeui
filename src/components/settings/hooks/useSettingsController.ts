@@ -231,6 +231,14 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     setShowLoginModal(true);
   }, []);
 
+  // Программа на компьютере: Claude подключили кнопкой (карточка в чате или здесь) —
+  // обновить отметку «Подключено» без перезагрузки.
+  useEffect(() => {
+    const onConnected = () => { void checkProviderAuthStatus('claude'); };
+    window.addEventListener('claudeui:claude-connected', onConnected);
+    return () => window.removeEventListener('claudeui:claude-connected', onConnected);
+  }, [checkProviderAuthStatus]);
+
   const handleLoginComplete = useCallback((exitCode: number) => {
     if (!loginProvider) {
       return;

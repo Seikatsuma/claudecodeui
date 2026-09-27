@@ -1,6 +1,14 @@
 import express, { type Request, type Response } from 'express';
 
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
+import {
+  cancelDesktopLogin,
+  getDesktopLoginState,
+  isDesktopLoginEnabled,
+  readClaudeCliAuthStatus,
+  startDesktopLogin,
+  submitDesktopLoginCode,
+} from '@/modules/providers/list/claude/claude-desktop-login.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
@@ -481,6 +489,51 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
 
   return { model, id };
 };
+
+/**
+ * Вход в подписку Claude из настольной программы (кнопка «Подключить Claude» в чате
+ * и в настройках) — без терминала. На сайте выключено: браузер открылся бы на сервере.
+ */
+const requireDesktopLogin = (): void => {
+  if (!isDesktopLoginEnabled()) {
+    throw new AppError('Вход кнопкой доступен только в программе на компьютере.', { code: 'DESKTOP_ONLY', statusCode: 404 });
+  }
+};
+
+router.get(
+  '/claude/desktop-login',
+  asyncHandler(async (req: Request, res: Response) => {
+    requireDesktopLogin();
+    const login = getDesktopLoginState();
+    const status = await readClaudeCliAuthStatus(login.phase === 'success' || req.query.fresh === '1');
+    res.json(createApiSuccessResponse({ login, status }));
+  }),
+);
+
+router.post(
+  '/claude/desktop-login/start',
+  asyncHandler(async (_req: Request, res: Response) => {
+    requireDesktopLogin();
+    res.json(createApiSuccessResponse({ login: startDesktopLogin() }));
+  }),
+);
+
+router.post(
+  '/claude/desktop-login/code',
+  asyncHandler(async (req: Request, res: Response) => {
+    requireDesktopLogin();
+    const code = typeof req.body?.code === 'string' ? req.body.code : '';
+    res.json(createApiSuccessResponse({ login: submitDesktopLoginCode(code) }));
+  }),
+);
+
+router.post(
+  '/claude/desktop-login/cancel',
+  asyncHandler(async (_req: Request, res: Response) => {
+    requireDesktopLogin();
+    res.json(createApiSuccessResponse({ login: cancelDesktopLogin() }));
+  }),
+);
 
 router.get(
   '/:provider/auth/status',
