@@ -49,9 +49,19 @@ function sha256File(filePath) {
   });
 }
 
+// На Windows — системный tar.exe (Windows 10 1803+): «tar» из PATH бывает от Git for
+// Windows, а тот читает «C:\…» как адрес удалённой машины (проба 28.09.26: «Cannot
+// connect to C: resolve failed»).
+function resolveTar() {
+  if (process.platform !== 'win32') return { command: 'tar', extra: [] };
+  const systemTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+  return existsSync(systemTar) ? { command: systemTar, extra: [] } : { command: 'tar', extra: ['--force-local'] };
+}
+
 function runTar(args) {
   return new Promise((resolve, reject) => {
-    const child = spawn('tar', args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    const tar = resolveTar();
+    const child = spawn(tar.command, [...tar.extra, ...args], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.once('error', reject);
