@@ -98,11 +98,27 @@ function isQueuedUserEcho(message: NormalizedMessage): boolean {
  * 21.09.26 — «2» в 16:53:39 и «2» в 16:53:54, «зачем дублировать?». Время
  * берём серверное: оно совпадает с записью на диске, и по нему строку потом
  * снимает removeOptimisticUserEchoes, сколько бы сообщение ни ждало очереди.
+ *
+ * Строка с номером, который в ленте уже есть, — та же строка, доставленная
+ * второй раз: встаёт на своё место, а не второй копией. Егор 27.09.26 —
+ * сообщение с картинкой из очереди дважды, обе копии `queued_…` в 17:15:38
+ * (одна отправка по журналу сервера), «зачем дубль?». Путь повторной
+ * доставки по коду не нашёлся — отсев по `seq` стоит везде, — поэтому
+ * лента сама не принимает одну строку дважды, откуда бы та ни пришла.
  */
 export function appendRealtimeWithQueuedEcho(
   realtimeMessages: NormalizedMessage[],
   incoming: NormalizedMessage,
 ): NormalizedMessage[] {
+  const sameIdIndex = incoming.id
+    ? realtimeMessages.findIndex((message) => message.id === incoming.id)
+    : -1;
+  if (sameIdIndex !== -1) {
+    const next = realtimeMessages.slice();
+    next[sameIdIndex] = incoming;
+    return next;
+  }
+
   const fingerprint = isQueuedUserEcho(incoming) ? userTurnFingerprint(incoming) : null;
   const incomingTime = readMessageTime(incoming);
   if (fingerprint && incomingTime !== null) {
