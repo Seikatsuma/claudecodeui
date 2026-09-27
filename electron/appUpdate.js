@@ -16,9 +16,11 @@ import { pipeline } from 'node:stream/promises';
  * подписи Apple система не пропускает. Если новая начинка требует других пакетов
  * (depsHash не совпал) — кнопка ведёт на страницу скачивания установщика.
  *
- * Где лежит: <userData>/app-update/current — рабочая начинка (её node_modules —
- * ссылка на пакеты установки), previous — прежняя. Версия — номер сборки (build)
- * в update-build.json; у установки он лежит в корне программы.
+ * Где лежит: <userData>/app-update/builds/<номер> — каждая сборка в своей папке (её
+ * node_modules — ссылка на пакеты установки), current.json — какая рабочая. Папку, из
+ * которой работает сервер, никогда не переименовываем и не удаляем: на Windows это
+ * не выходит, пока сервер жив. Подмена — один файл-указатель. Версия — номер сборки
+ * (build) в update-build.json; у установки он лежит в корне программы.
  */
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
@@ -70,8 +72,10 @@ export class AppUpdater {
   constructor({ appRoot, userDataDir, updateUrl, log = () => {}, onChange = () => {}, fetchImpl = globalThis.fetch }) {
     this.appRoot = appRoot;
     this.root = path.join(userDataDir, 'app-update');
-    this.currentDir = path.join(this.root, 'current');
+    this.buildsDir = path.join(this.root, 'builds');
+    this.pointerPath = path.join(this.root, 'current.json');
     this.badBuildsPath = path.join(this.root, 'bad-builds.json');
+    this.installing = null;
     this.updateUrl = updateUrl;
     this.log = log;
     this.onChange = onChange;
@@ -98,19 +102,52 @@ export class AppUpdater {
    * пакеты совпадают с установленными и она не помечена как не запустившаяся.
    * Иначе null — сервер берётся из самой программы.
    */
+  readPointer() {
+    try {
+      return JSON.parse(readFileSync(this.pointerPath, 'utf8'));
+    } catch {
+      return {};
+    }
+  }
+
   getActiveRoot() {
     if (!this.installed) return null;
-    const active = readBuildInfo(this.currentDir);
-    if (!active || active.build <= this.installed.build) return null;
-    if (active.depsHash !== this.installed.depsHash) return null;
-    if (this.readBadBuilds().includes(active.build)) return null;
-    if (!existsSync(path.join(this.currentDir, 'dist-server', 'server', 'index.js'))) return null;
-    return this.currentDir;
+    const build = Number(this.readPointer().build);
+    if (!Number.isFinite(build) || build <= this.installed.build) return null;
+    const dir = path.join(this.buildsDir, String(build));
+    const active = readBuildInfo(dir);
+    if (!active || active.build !== build || active.depsHash !== this.installed.depsHash) return null;
+    if (this.readBadBuilds().includes(build)) return null;
+    if (!existsSync(path.join(dir, 'dist-server', 'server', 'index.js'))) return null;
+    return dir;
   }
 
   getRunningBuild() {
     if (!this.installed) return null;
-    return this.getActiveRoot() ? readBuildInfo(this.currentDir).build : this.installed.build;
+    const active = this.getActiveRoot();
+    return active ? readBuildInfo(active).build : this.installed.build;
+  }
+
+  /**
+   * До запуска сервера: убрать остатки прерванной установки и сборки старше
+   * рабочей и прежней (служебный кэш программы, не данные человека).
+   */
+  async cleanup() {
+    let entries = [];
+    try {
+      entries = await fs.readdir(this.buildsDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const pointer = this.readPointer();
+    const keep = new Set([pointer.build, pointer.previous].filter(Boolean).map(String));
+    for (const entry of entries) {
+      if (!entry.isDirectory() || keep.has(entry.name)) continue;
+      await fs.rm(path.join(this.buildsDir, entry.name), { recursive: true, force: true }).catch(() => {});
+    }
+    for (const name of await fs.readdir(this.root).catch(() => [])) {
+      if (name.startsWith('download-')) await fs.rm(path.join(this.root, name), { force: true }).catch(() => {});
+    }
   }
 
   getState() {
@@ -193,11 +230,18 @@ export class AppUpdater {
   }
 
   /**
-   * Скачивает свежую сборку, сверяет отпечаток, раскладывает рядом и подменяет
-   * папку разом. beforeSwap — остановить сервер: на Windows папку, из которой он
-   * работает, не переименовать. Запустить его заново — дело вызывающего (main.js).
+   * Скачивает свежую сборку, сверяет отпечаток, раскладывает в свою папку и
+   * переключает на неё указатель. Работающую папку не трогает, поэтому сервер можно
+   * перезапустить после (main.js). Повторный вызов во время установки ждёт ту же.
    */
-  async install({ beforeSwap = async () => {} } = {}) {
+  install() {
+    if (!this.installing) {
+      this.installing = this.#install().finally(() => { this.installing = null; });
+    }
+    return this.installing;
+  }
+
+  async #install() {
     if (this.status !== 'available' || !this.latest) {
       await this.check();
       if (this.status !== 'available') throw new Error('Новой версии нет');
@@ -205,7 +249,7 @@ export class AppUpdater {
     const latest = this.latest;
     await fs.mkdir(this.root, { recursive: true });
     const archive = path.join(this.root, `download-${latest.build}.tar.gz`);
-    const next = path.join(this.root, `next-${Date.now()}`);
+    const next = path.join(this.buildsDir, `.next-${Date.now()}`);
     try {
       this.#set('downloading', `Скачиваю сборку ${latest.build}…`);
       const response = await this.#fetchWithTimeout(latest.url, DOWNLOAD_TIMEOUT_MS);
@@ -242,13 +286,15 @@ export class AppUpdater {
       await fs.symlink(path.join(this.appRoot, 'node_modules'), path.join(next, 'node_modules'),
         process.platform === 'win32' ? 'junction' : 'dir');
 
-      await beforeSwap();
-      const previous = path.join(this.root, 'previous');
-      if (existsSync(this.currentDir)) {
-        await fs.rm(previous, { recursive: true, force: true });
-        await fs.rename(this.currentDir, previous);
-      }
-      await fs.rename(next, this.currentDir);
+      // Своя папка сборки: если такая осталась от неудачной попытки — она не рабочая,
+      // рабочая всегда другая (иначе обновления бы не было).
+      const target = path.join(this.buildsDir, String(latest.build));
+      await fs.rm(target, { recursive: true, force: true });
+      await fs.rename(next, target);
+      const pointer = this.readPointer();
+      const tmp = `${this.pointerPath}.tmp`;
+      await fs.writeFile(tmp, JSON.stringify({ build: latest.build, previous: pointer.build || null }), 'utf8');
+      await fs.rename(tmp, this.pointerPath);
       this.log(`установлена сборка ${latest.build}`);
       this.#set('idle', `Обновлено до сборки ${latest.build}`);
       return latest.build;
@@ -263,7 +309,8 @@ export class AppUpdater {
 
   /** Сервер из скачанной начинки не запустился — больше её не берём, работаем на установленной. */
   async markActiveBad() {
-    const active = readBuildInfo(this.currentDir);
+    const activeRoot = this.getActiveRoot();
+    const active = activeRoot ? readBuildInfo(activeRoot) : null;
     if (!active) return;
     const list = [...new Set([...this.readBadBuilds(), active.build])];
     await fs.mkdir(this.root, { recursive: true });

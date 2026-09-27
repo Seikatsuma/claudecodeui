@@ -642,7 +642,19 @@ async function openLocalInDesktop() {
 
 // Обновление начинки (appUpdate.js): кнопка в верхней полосе. Сервер этого компьютера
 // перезапускается — идущий ответ Claude прервётся, поэтому сначала спрашиваем.
+let appUpdateInProgress = false;
 async function installAppUpdate({ confirm = true } = {}) {
+  // Двойное нажатие или повтор из меню — не второе окно вопроса и не вторая установка.
+  if (appUpdateInProgress) return getDesktopState();
+  appUpdateInProgress = true;
+  try {
+    return await installAppUpdateOnce({ confirm });
+  } finally {
+    appUpdateInProgress = false;
+  }
+}
+
+async function installAppUpdateOnce({ confirm }) {
   const state = appUpdater.getState();
   const parent = desktopWindow?.getMainWindow() || undefined;
   const { response } = !confirm ? { response: 0 } : await dialog.showMessageBox(parent, {
@@ -661,7 +673,8 @@ async function installAppUpdate({ confirm = true } = {}) {
 
   const hadLocalServer = localServer.hasOwnedServer();
   try {
-    await appUpdater.install({ beforeSwap: () => localServer.shutdownOwnedServer() });
+    // Ставится в свою папку, работающую не трогает — сервер перезапускаем после.
+    await appUpdater.install();
   } finally {
     // И после неудачи сервер должен снова работать — на прежней или новой начинке.
     if (hadLocalServer) {
@@ -1176,6 +1189,7 @@ async function bootstrap() {
   await desktopNotifications.loadSettings();
   await loadUiTheme();
   await brains.ensureInstalled().catch((error) => console.warn('[Brains] не разложились:', error?.message || error));
+  await appUpdater.cleanup().catch(() => {});
   await localAuth.prepare();
 
   registerProtocolHandler();

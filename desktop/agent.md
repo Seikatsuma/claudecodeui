@@ -29,8 +29,10 @@
 ## Обновление без установщика (28.09.26, Егор: «чтобы обновления выкатывались сами — кнопка, нажал и обновилось»)
 - Обновляется начинка — dist, dist-server, public, shared (+ package.json, update-build.json), 10 МБ против 240–290 МБ
   установщика. Оболочка (electron/) и пакеты (node_modules, с Claude) — из установки: полное самообновление на Mac без
-  платной подписи Apple система не пропускает. `electron/appUpdate.js`: `<userData>/app-update/current` (node_modules —
-  ссылка/junction на пакеты установки), previous — прежняя, bad-builds.json — не запустившиеся.
+  платной подписи Apple система не пропускает. `electron/appUpdate.js`: `<userData>/app-update/builds/<номер>`
+  (node_modules — ссылка/junction на пакеты установки), `current.json` — рабочая и прежняя, bad-builds.json — не
+  запустившиеся. Работающую папку не переименовываем и не удаляем (на Windows не выходит, пока сервер жив) — подмена
+  одним файлом-указателем; уборка остатков — `cleanup()` при запуске, до сервера.
 - Номер сборки = `github.run_number` (CLAUDEUI_BUILD → update-build.json в корне программы). depsHash — отпечаток
   package-lock.json (`scripts/release/claudeui-update-meta.mjs`): не совпал — кнопка «Новая версия» ведёт на страницу
   скачивания. Сборка на своей машине (без номера) обновления не проверяет.

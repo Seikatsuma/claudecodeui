@@ -71,10 +71,12 @@ test('новая сборка находится, ставится рядом и
   try {
     assert.equal(updater.getActiveRoot(), null);
     assert.equal((await updater.check()).status, 'available');
-    let swapped = false;
-    assert.equal(await updater.install({ beforeSwap: async () => { swapped = true; } }), 11);
-    assert.ok(swapped, 'сервер останавливается до подмены папки');
+    // Двойное нажатие — одна установка.
+    const [first, second] = await Promise.all([updater.install(), updater.install()]);
+    assert.equal(first, 11);
+    assert.equal(second, 11);
     const active = updater.getActiveRoot();
+    assert.ok(active.endsWith(path.join('builds', '11')), 'каждая сборка — в своей папке');
     assert.ok(active);
     assert.equal(readFileSync(path.join(active, 'dist', 'index.html'), 'utf8'), '<html>11</html>');
     // Пакеты — ссылка на установку, а не копия.
@@ -160,4 +162,22 @@ test('сборка на своей машине (без номера) не пр�
   await updater.check();
   assert.equal(called, false);
   assert.ok(!existsSync(path.join(root, 'user', 'app-update')));
+});
+
+test('уборка: остатки прерванной установки и старые сборки уходят, рабочая и прежняя остаются', async () => {
+  const { updater, server } = await setup();
+  try {
+    await updater.check();
+    await updater.install();
+    await fs.mkdir(path.join(updater.buildsDir, '.next-123'), { recursive: true });
+    await fs.mkdir(path.join(updater.buildsDir, '7'), { recursive: true });
+    await fs.writeFile(path.join(updater.root, 'download-12.tar.gz'), 'x');
+    await updater.cleanup();
+    const left = (await fs.readdir(updater.buildsDir)).sort();
+    assert.deepEqual(left, ['11']);
+    assert.ok(!existsSync(path.join(updater.root, 'download-12.tar.gz')));
+    assert.ok(updater.getActiveRoot());
+  } finally {
+    await server.close();
+  }
 });
