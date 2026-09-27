@@ -231,23 +231,18 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
 };
 
 /*
- * Пометка «не проверено» (Егор 27.09.26): ИИ пишет `⚠ *фраза*` — фраза, которую
- * он прикинул, додумал или не перепроверил. Егор просил видеть её ПОДЧЁРКНУТОЙ,
- * а не курсивом. Разметка подчёркивания не знает, вставки HTML мы не выполняем,
- * поэтому курсив сразу после ⚠ переделываем в подчёркнутый фрагмент. Остальной
- * курсив не трогаем. Правило для ИИ — ~/CLAUDE.md «Пометки точности».
+ * Пометка «не проверено» (Егор 27.09.26): фразу, которую ИИ прикинул, додумал или
+ * не перепроверил, он пишет курсивной разметкой `*фраза* (почему)`. Егор просил
+ * видеть её подчёркнутой, без значка ⚠, цветом полосы открытой вкладки. Курсив в
+ * ответах ИИ используется только для этой пометки (~/CLAUDE.md «Пометки точности»),
+ * поэтому любой курсив рисуем подчёркиванием. HTML-вставки не выполняем.
  */
-const WARN_TAIL = /[\u26A0]\uFE0F?\s*$/;
 function rehypeUncertainUnderline() {
   const walk = (node: any) => {
     const kids = node?.children;
     if (!Array.isArray(kids)) return;
-    kids.forEach((child: any, i: number) => {
-      // Перенос строки между ⚠ и фразой (remark-breaks даёт <br>) — смотрим сквозь него.
-      let j = i - 1;
-      while (j >= 0 && ((kids[j]?.type === 'element' && kids[j].tagName === 'br') || (kids[j]?.type === 'text' && !String(kids[j].value).trim()))) j -= 1;
-      const prev = kids[j];
-      if (child?.type === 'element' && child.tagName === 'em' && prev?.type === 'text' && WARN_TAIL.test(prev.value || '')) {
+    kids.forEach((child: any) => {
+      if (child?.type === 'element' && child.tagName === 'em') {
         child.tagName = 'u';
         child.properties = { ...(child.properties || {}), className: ['md-uncertain'] };
       }
@@ -271,7 +266,7 @@ const markdownComponents = {
   code: CodeBlock,
   u: ({ children }: { children?: React.ReactNode }) => (
     <u
-      className="underline decoration-amber-600 decoration-2 underline-offset-[3px] dark:decoration-amber-400"
+      className="underline decoration-primary decoration-2 underline-offset-[3px]"
       title="Не проверено: нейросеть прикинула или не перепроверила"
     >
       {children}
