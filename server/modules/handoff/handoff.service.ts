@@ -387,6 +387,13 @@ const GUIDE_DEPTH = 3;
 const GUIDE_NAMES = ['agent.md', 'AGENTS.md', 'CLAUDE.md', 'README.md'];
 /** Эти места — служебные или временные: в карту не идут. */
 const FILE_MAP_SKIP = /\/(node_modules|dist|dist-server|\.git|\.cache|tool-results)(\/|$)|^\/tmp(\/|$)|\/projects\/[^/]+\/[0-9a-f-]{36}(\.jsonl$|\/)/;
+/**
+ * Ключи входа (SSH, вход Claude) — в карту не идут: новому чату по ним лазить
+ * незачем, а копировать их запрещено правилами сервера. Рабочие файлы с
+ * настройками (.env, ~/.secrets) остаются — они нужны делу, — но с пометкой.
+ */
+const KEY_PATH_SKIP = /\/\.ssh\/|\/\.credentials\.json$|\/id_(rsa|ed25519|ecdsa)[^/]*$|\.(pem|key|p12)$/;
+const SECRET_PATH = /\/\.secrets\/|\/\.env(\.[^/]*)?$|\.env$/;
 /** Резервные копии — не описание живой папки. */
 const GUIDE_SKIP = /\/(backups?|\.bak[^/]*)\//;
 
@@ -421,7 +428,7 @@ export async function buildFileMap(touched: TouchedFile[], limit = FILE_MAP_LIMI
   const merged = new Map<string, TouchedFile>();
   for (const item of touched) {
     const full = item.path.startsWith('~/') ? path.join(home, item.path.slice(2)) : path.normalize(item.path);
-    if (!path.isAbsolute(full) || FILE_MAP_SKIP.test(full) || SYSTEM_PREFIX.test(full) || full === home) continue;
+    if (!path.isAbsolute(full) || FILE_MAP_SKIP.test(full) || SYSTEM_PREFIX.test(full) || KEY_PATH_SKIP.test(full) || full === home) continue;
     const prev = merged.get(full);
     merged.set(full, prev
       ? { path: full, edited: prev.edited || item.edited, reads: prev.reads + item.reads, mentions: prev.mentions + item.mentions, order: Math.max(prev.order, item.order) }
@@ -503,6 +510,7 @@ export function formatFileList(entries: FileMapEntry[]): string {
       entry.reads ? `открывался ${entry.reads}` : '',
       entry.mentions ? `в командах ${entry.mentions}` : '',
       entry.dir ? '' : formatSize(entry.size),
+      SECRET_PATH.test(entry.path) ? 'секреты: содержимое не выводить' : '',
     ]
       .filter(Boolean)
       .join(', ');
@@ -886,10 +894,10 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
           lateFiles: [],
         };
       }
-      // Файл разговора упал с ошибкой — ссылку на него не даём. Не успел за
-      // полторы секунды — даём: он допишется раньше, чем новый чат его откроет.
-      const dialogOk = await Promise.race([dialogReady, new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1500))]);
-      if (!dialogOk) parts.dialogPath = null;
+      // Файл разговора пишется целиком в конце (оглавление в начале), поэтому
+      // ждём его до конца: замер 27.09.26 — переписка 98 МБ за 2,2 с, 19 МБ за
+      // 0,4 с. Ссылка на ещё не записанный файл хуже пары секунд ожидания.
+      if (!(await dialogReady)) parts.dialogPath = null;
       job.message = composeMessage(source, parts, now);
       job.status = 'done';
       console.log(`[handoff] ${sessionId}: ${job.fromPrepared ? 'из заготовки' : 'заново'}${goal ? ', с задачей' : ''} — ${job.message.length} зн. за ${((Date.now() - job.startedAt) / 1000).toFixed(1)} с`);

@@ -250,3 +250,22 @@ test('пути из команд: файлы и папки, без адресо�
     ['~/bot', '/home/u/CLAUDE.md', '/tmp/a.log'],
   );
 });
+
+test('карта: ключи входа не показываются, файлы настроек — с пометкой', async () => {
+  const root = await mkdtemp('/var/tmp/handoff-keys-');
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    await mkdir(path.join(root, '.ssh'), { recursive: true });
+    await mkdir(path.join(root, '.secrets'), { recursive: true });
+    await mkdir(path.join(root, '.claude'), { recursive: true });
+    for (const file of ['.ssh/id_ed25519', '.claude/.credentials.json', '.secrets/bot.env']) await writeFile(path.join(root, file), 'x');
+    const touched = ['.ssh/id_ed25519', '.claude/.credentials.json', '.secrets/bot.env']
+      .map((file, order) => ({ path: `~/${file}`, edited: false, reads: 0, mentions: 3, order }));
+    const map = await buildFileMap(touched);
+    assert.deepEqual(map.map((entry) => path.basename(entry.path)), ['bot.env']);
+    assert.match(formatFileList(map), /секреты: содержимое не выводить/);
+  } finally {
+    process.env.HOME = oldHome;
+  }
+});
