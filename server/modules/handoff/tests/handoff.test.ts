@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -17,6 +17,7 @@ import {
   folderGuides,
   formatFileList,
   scrubSecrets,
+  sweepOldDialogs,
   tailFingerprint,
   transcriptUnchangedUpTo,
   writeBrief,
@@ -268,4 +269,18 @@ test('карта: ключи входа не показываются, файл�
   } finally {
     process.env.HOME = oldHome;
   }
+});
+
+test('уборка: файлы разговоров старше 30 дней удаляются, свежие и чужие — нет', async () => {
+  const acc = await mkdtemp(path.join(os.tmpdir(), 'handoff-acc-'));
+  const dir = path.join(acc, 'handoffs');
+  await mkdir(dir);
+  const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+  for (const name of ['2026-08-01-aaaaaaaa.md', '2026-09-27-bbbbbbbb.md', 'заметки.md', '2026-08-01-notmine.md']) {
+    await writeFile(path.join(dir, name), 'x');
+  }
+  for (const name of ['2026-08-01-aaaaaaaa.md', 'заметки.md', '2026-08-01-notmine.md']) await utimes(path.join(dir, name), old, old);
+  assert.equal(await sweepOldDialogs(acc), 1);
+  assert.deepEqual((await readdir(dir)).sort(), ['2026-08-01-notmine.md', '2026-09-27-bbbbbbbb.md', 'заметки.md'].sort());
+  assert.equal(await sweepOldDialogs(path.join(acc, 'нет-такой')), 0, 'нет папки — не ошибка');
 });
