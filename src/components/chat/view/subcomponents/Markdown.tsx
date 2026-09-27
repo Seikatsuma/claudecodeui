@@ -243,8 +243,14 @@ function rehypeUncertainUnderline() {
     if (!Array.isArray(kids)) return;
     kids.forEach((child: any) => {
       if (child?.type === 'element' && child.tagName === 'em') {
-        child.tagName = 'u';
-        child.properties = { ...(child.properties || {}), className: ['md-uncertain'] };
+        // span, а не <u>: при копировании черту снимаем одним стилем, не трогая
+        // узлы, которыми владеет React (copyParagraphBreaks.ts, neutralizeUncertain).
+        child.tagName = 'span';
+        child.properties = {
+          ...(child.properties || {}),
+          className: ['md-uncertain', 'underline', 'decoration-primary', 'decoration-2', 'underline-offset-[3px]'],
+          title: 'Не проверено: нейросеть прикинула или не перепроверила',
+        };
       }
       walk(child);
     });
@@ -264,14 +270,6 @@ function rehypeMarkTopLevel() {
 
 const markdownComponents = {
   code: CodeBlock,
-  u: ({ children }: { children?: React.ReactNode }) => (
-    <u
-      className="md-uncertain underline decoration-primary decoration-2 underline-offset-[3px]"
-      title="Не проверено: нейросеть прикинула или не перепроверила"
-    >
-      {children}
-    </u>
-  ),
   // Fenced/indented code arrives as <pre><code>. Re-render the child CodeBlock
   // with `forceBlock` so it always gets the block treatment (react-markdown v9+
   // no longer passes an `inline` flag), and skip the outer <pre> so Tailwind

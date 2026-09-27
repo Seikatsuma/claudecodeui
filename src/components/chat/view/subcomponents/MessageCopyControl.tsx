@@ -42,8 +42,16 @@ const convertMarkdownToPlainText = (markdown: string): string => {
 // (~/CLAUDE.md «Пометки точности»); в чате она рисуется подчёркиванием. В копию
 // «как Markdown» её не несём: Егор вставляет текст дальше, звёздочки там — мусор.
 // Жирное `**…**` и пункты списка `* …` не трогаем.
-const stripUncertainMarks = (markdown: string): string =>
-  markdown.replace(/(?<![*\w])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![*\w])/g, '$1');
+// Код (```…``` и `…`) не трогаем: там звёздочки — часть команды (`mv *.jpg`).
+const stripUncertainMarks = (markdown: string): string => {
+  const kept: string[] = [];
+  const hide = (m: string) => `@@KEEP${kept.push(m) - 1}@@`;
+  return markdown
+    .replace(/```[\s\S]*?```/g, hide)
+    .replace(/`[^`\n]+`/g, hide)
+    .replace(/(?<![*\w])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![*\w])/g, '$1')
+    .replace(/@@KEEP(\d+)@@/g, (_m, i: string) => kept[Number(i)] ?? '');
+};
 
 const MessageCopyControl = ({
   content,
