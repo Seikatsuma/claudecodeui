@@ -232,6 +232,7 @@ function ChatInterface({
     showCostModal,
     handoffStatus,
     startHandoff,
+    compactHere,
     canHandoff,
   } = useChatComposerState({
     selectedProject,
@@ -655,6 +656,7 @@ function ChatInterface({
           onShowTokenUsage={showCostModal}
           handoffStatus={handoffStatus}
           onStartHandoff={canHandoff ? startHandoff : undefined}
+          onCompactHere={canHandoff ? compactHere : undefined}
           onSubmit={handleSubmit}
           isDragActive={isDragActive}
           queuedDrafts={queuedDrafts}

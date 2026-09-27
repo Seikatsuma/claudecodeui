@@ -10,7 +10,7 @@ import type {
   RefObject,
   TouchEvent,
 } from 'react';
-import { PaperclipIcon, Loader2, ArrowUpIcon, MessageSquareShare } from 'lucide-react';
+import { PaperclipIcon, Loader2, ArrowUpIcon, MessageSquareShare, Minimize2 } from 'lucide-react';
 
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { isTouchKeyboard } from '../../../../utils/touchKeyboard';
@@ -28,6 +28,7 @@ import {
   PromptInputTools,
   PromptInputButton,
   PromptInputSubmit,
+  ActionMenu,
 } from '../../../../shared/view/ui';
 
 import CommandMenu from './CommandMenu';
@@ -83,6 +84,8 @@ interface ChatComposerProps {
   handoffStatus?: 'idle' | 'running';
   /** Нет — кнопки нет (новый чат, не Claude). */
   onStartHandoff?: () => void;
+  /** «Сжать в этом чате» — встроенное сжатие Claude в том же чате. */
+  onCompactHere?: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   queuedDrafts: QueuedDraft[];
@@ -148,6 +151,7 @@ export default function ChatComposer({
   onShowTokenUsage,
   handoffStatus = 'idle',
   onStartHandoff,
+  onCompactHere,
   onSubmit,
   isDragActive,
   queuedDrafts,
@@ -195,16 +199,19 @@ export default function ChatComposer({
   const handoffTooltip = handoffRunning
     ? 'Собираю главное для нового чата…'
     : handoffLevel === 'red'
-      ? 'Чат переполнен — пора продолжить в новом. Можно сначала написать в поле, что делать дальше'
+      ? 'Чат переполнен — пора сжать или перейти в новый. Можно сначала написать в поле, что делать дальше'
       : handoffLevel === 'yellow'
-        ? 'Чат большой — лучше продолжить в новом. Можно сначала написать в поле, что делать дальше'
-        : 'Продолжить в новом чате — перенести главное. Можно сначала написать в поле, что делать дальше';
+        ? 'Чат большой — лучше сжать или перейти в новый. Можно сначала написать в поле, что делать дальше'
+        : 'Сжать чат или продолжить в новом. Можно сначала написать в поле, что делать дальше';
+  // Цвет при наведении — с !important: на сенсорном экране кнопка после касания
+  // остаётся «наведённой», а общее правило index.css (button:hover { background:
+  // inherit !important }) стирало жёлтый и красный (снимок iPhone 27.09.26).
   const handoffClassName = handoffRunning
     ? 'text-primary'
     : handoffLevel === 'red'
-      ? 'bg-red-500/15 text-red-600 hover:bg-red-500/25 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300'
+      ? 'bg-red-500/15 text-red-600 dark:text-red-400 [&:hover]:!bg-red-500/25 [&:hover]:!text-red-700 dark:[&:hover]:!text-red-300'
       : handoffLevel === 'yellow'
-        ? 'bg-amber-400/15 text-amber-600 hover:bg-amber-400/25 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
+        ? 'bg-amber-400/15 text-amber-600 dark:text-amber-400 [&:hover]:!bg-amber-400/25 [&:hover]:!text-amber-700 dark:[&:hover]:!text-amber-300'
         : 'text-muted-foreground/60 hover:text-foreground';
   const { t } = useTranslation('chat');
   const fileDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -254,12 +261,52 @@ export default function ChatComposer({
     if (voiceErrorTimer.current) clearTimeout(voiceErrorTimer.current);
   }, []);
   const noopTranscript = useCallback(() => {}, []);
-  const { state: voiceState, toggle: voiceToggle, stop: voiceStop } = useVoiceInput(
+  const { state: voiceState, toggle: voiceToggle, stop: voiceStop, requestSend: voiceRequestSend } = useVoiceInput(
     onVoiceTranscript ?? noopTranscript,
     handleVoiceError,
   );
   const isRecording = voiceState === 'recording';
   const isTranscribing = voiceState === 'transcribing';
+
+  // Enter is "send", never "record" (25.09.26: Enter after a dictation started a new
+  // one). While recording it stops and sends, like the Send button; while the
+  // transcript is on its way it sends the transcript once it lands.
+  const handleVoiceSendKey = useCallback(() => {
+    if (voiceState === 'recording') voiceStop({ send: true });
+    else if (voiceState === 'transcribing') voiceRequestSend();
+    else textareaRef.current?.focus();
+  }, [voiceState, voiceStop, voiceRequestSend, textareaRef]);
+
+  // On a computer the mic click leaves the caret in the text box, so the next Enter
+  // lands there. Not on a phone: focusing the box would pop the on-screen keyboard.
+  const handleVoiceToggle = useCallback(() => {
+    if (!isTouchKeyboard()) textareaRef.current?.focus();
+    voiceToggle();
+  }, [voiceToggle, textareaRef]);
+
+  const handleComposerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (
+        (isRecording || isTranscribing) &&
+        event.key === 'Enter' &&
+        !event.nativeEvent.isComposing &&
+        !isCommandMenuOpen &&
+        !showFileDropdown
+      ) {
+        // Same keys that send a message (see handleKeyDown in useChatComposerState).
+        const plainEnter =
+          !event.shiftKey && !event.ctrlKey && !event.metaKey && !sendByCtrlEnter && !isTouchKeyboard();
+        const modEnter = (event.ctrlKey || event.metaKey) && !event.shiftKey;
+        if (plainEnter || modEnter) {
+          event.preventDefault();
+          handleVoiceSendKey();
+          return;
+        }
+      }
+      onTextareaKeyDown(event);
+    },
+    [isRecording, isTranscribing, isCommandMenuOpen, showFileDropdown, sendByCtrlEnter, handleVoiceSendKey, onTextareaKeyDown],
+  );
 
   // Detect if the AskUserQuestion interactive panel is active
   const hasQuestionPanel = pendingPermissionRequests.some(
@@ -468,7 +515,7 @@ export default function ChatComposer({
               value={input}
               onChange={onInputChange}
               onClick={onTextareaClick}
-              onKeyDown={onTextareaKeyDown}
+              onKeyDown={handleComposerKeyDown}
               onPaste={onTextareaPaste}
               onScroll={(event) => onTextareaScrollSync(event.target as HTMLTextAreaElement)}
               onFocus={() => onInputFocusChange?.(true)}
@@ -500,7 +547,12 @@ export default function ChatComposer({
             </PromptInputButton>
 
             {onVoiceTranscript && voiceAvailable && (
-              <VoiceInputButton state={voiceState} onToggle={voiceToggle} errorMsg={voiceError} />
+              <VoiceInputButton
+                state={voiceState}
+                onToggle={handleVoiceToggle}
+                onEnter={handleVoiceSendKey}
+                errorMsg={voiceError}
+              />
             )}
 
             <TokenUsageSummary usage={tokenBudget} onClick={onShowTokenUsage} />
@@ -511,7 +563,7 @@ export default function ChatComposer({
                 половины окна — неярко-жёлтая («скорее всего пора»), с 70% —
                 красная («точно пора»). Других оповещений о размере чата на
                 сайте нет — Егор 27.09.26: «лишних не нужно». */}
-            {onStartHandoff && (
+            {onStartHandoff && (handoffRunning || !onCompactHere) && (
               <PromptInputButton
                 tooltip={{ content: handoffTooltip }}
                 onClick={handoffRunning ? undefined : onStartHandoff}
@@ -522,6 +574,43 @@ export default function ChatComposer({
               >
                 {handoffRunning ? <Loader2 className="animate-spin" /> : <MessageSquareShare />}
               </PromptInputButton>
+            )}
+            {/* Два пути в одном меню (Егор 27.09.26). Первым — сжатие в этом
+                чате: слепое сравнение на 5 чатах с проверкой по следующим
+                просьбам Егора — сжатие лучше в 4 из 5 (7,6 против 6,0 балла),
+                точнее держит параметры, ники, статусы. Новый чат — за секунду,
+                с файлом разговора: для новой задачи. Текст в поле — для обоих. */}
+            {onStartHandoff && onCompactHere && !handoffRunning && (
+              <span data-context-level={handoffLevel} className="inline-flex">
+                <ActionMenu
+                  label={handoffTooltip}
+                  ariaLabel={handoffTooltip}
+                  icon={MessageSquareShare}
+                  iconOnly
+                  portal
+                  variant="ghost"
+                  size="icon"
+                  align="left"
+                  triggerClassName={`h-8 w-8 rounded-md [&_svg]:size-4 ${handoffClassName}`}
+                  header={<div className="px-3 pb-1 pt-1.5 text-xs text-muted-foreground">Текст в поле — что делать дальше</div>}
+                  items={[
+                    {
+                      key: 'compact',
+                      label: 'Сжать в этом чате',
+                      description: 'Встроенное сжатие Claude: тот же чат, лучше сохраняет детали. 1–3 минуты',
+                      icon: Minimize2,
+                      onSelect: onCompactHere,
+                    },
+                    {
+                      key: 'handoff',
+                      label: 'Новый чат с выжимкой',
+                      description: 'За секунду, весь разговор — файлом рядом. Для новой задачи или когда сжатие не помогло',
+                      icon: MessageSquareShare,
+                      onSelect: onStartHandoff,
+                    },
+                  ]}
+                />
+              </span>
             )}
 
             {/* Кнопок в этом ряду намеренно меньше, чем было.

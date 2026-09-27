@@ -457,11 +457,19 @@ export function useChatComposerState({
           onShowSettings?.();
           break;
 
+        // /clear — новый пустой чат в той же папке, как «Новый сеанс»: Claude
+        // сам завёл бы разговор под новым номером, которого интерфейс не видит.
+        case 'clear':
+          if (selectedProject && onStartNewChat) {
+            onStartNewChat(selectedProject);
+          }
+          break;
+
         default:
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage],
+    [onFileOpen, onShowSettings, addMessage, selectedProject, onStartNewChat],
   );
 
   const closeCommandModal = useCallback(() => {
@@ -1473,6 +1481,28 @@ export function useChatComposerState({
   }, [handoffStatus, runHandoff, selectedProject]);
 
   /*
+   * «Сжать в этом чате» (Егор 27.09.26, вариант 1 после сравнения со встроенным
+   * /compact): тот же чат, встроенное сжатие Claude. Текст из поля — что важно
+   * дальше; к нему добавляется то, что сжатие теряет чаще всего. Уходит обычной
+   * отправкой: /compact сайт не перехватывает, его выполняет сам Claude.
+   */
+  const compactHere = useCallback(() => {
+    if (!sessionKeyRef.current || handoffStatus === 'running') return;
+    const goal = inputValueRef.current.replace(/\s+/g, ' ').trim();
+    const focus = [
+      goal ? `Дальше: ${goal}. Сохрани в первую очередь всё, что для этого нужно.` : '',
+      'Сохрани подробно: решения с причинами и отвергнутое; поправки и требования человека почти дословно; текущую правку кода — файлы, функции, что сделано и что осталось; следующий шаг; полные пути к нужным файлам.',
+    ].filter(Boolean).join(' ');
+    const command = `/compact ${focus}`;
+    inputValueRef.current = command;
+    setInput(command);
+    window.setTimeout(() => {
+      if (inputValueRef.current !== command) return;
+      void handleSubmitRef.current?.(createFakeSubmitEvent());
+    }, 30);
+  }, [handoffStatus]);
+
+  /*
    * Заготовка выжимки заранее: чат перешёл на половину окна (кнопка
    * пожелтела) или на следующий десяток процентов — сервер собирает выжимку
    * фоном, и нажатие потом берёт готовую за секунду вместо полутора-двух
@@ -1786,6 +1816,7 @@ export function useChatComposerState({
     showCostModal,
     handoffStatus,
     startHandoff,
+    compactHere,
     canHandoff,
   };
 }

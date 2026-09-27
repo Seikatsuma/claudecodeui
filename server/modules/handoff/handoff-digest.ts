@@ -401,6 +401,86 @@ export async function exportDialogFile(
   await writeFile(outPath, out, 'utf8');
 }
 
+/** Одна правка кода из переписки — дословно, для блока «последние правки». */
+export type RecentEdit = { file: string; at: string | null; kind: 'правка' | 'записан'; text: string };
+
+const RECENT_EDIT_LINES = 40;
+const RECENT_EDIT_CHARS = 2000;
+
+function clipCode(text: string): string {
+  const lines = text.split('\n');
+  let out = lines.slice(0, RECENT_EDIT_LINES).join('\n');
+  if (out.length > RECENT_EDIT_CHARS) out = out.slice(0, RECENT_EDIT_CHARS);
+  const cut = out.length < text.length;
+  return cut ? `${out}\n… [обрезано, всего ${lines.length} строк]` : out;
+}
+
+/**
+ * Последние правки кода — дословно, из хвоста переписки (Edit/MultiEdit/Write).
+ *
+ * Зачем (слепое сравнение 27.09.26 со встроенным /compact на 3 чатах): сжатие
+ * выигрывало там, где работа шла над кодом, — оно видит сами правки и пишет
+ * имена функций, строки, что уже тронуто; выжимка кнопки видела только
+ * «правка файла X». Здесь сервер достаёт сами правки, без пересказа.
+ * Читается только хвост файла (правки нужны свежие), не весь файл.
+ */
+export async function recentEdits(
+  filePath: string,
+  providerSessionId: string | null,
+  limit = 6,
+  tailBytes = 4 * 1024 * 1024,
+  endByte?: number,
+): Promise<RecentEdit[]> {
+  const handle = await open(filePath, 'r');
+  let text = '';
+  try {
+    const size = Math.min((await handle.stat()).size, endByte ?? Number.MAX_SAFE_INTEGER);
+    const from = Math.max(0, size - tailBytes);
+    const buffer = Buffer.alloc(size - from);
+    await handle.read(buffer, 0, buffer.length, from);
+    text = buffer.toString('utf8');
+    if (from > 0) text = text.slice(text.indexOf('\n') + 1);
+  } finally {
+    await handle.close();
+  }
+  const edits: RecentEdit[] = [];
+  for (const line of text.split('\n')) {
+    if (!line.includes('"tool_use"')) continue;
+    let entry: AnyRecord;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.type !== 'assistant' || entry.isSidechain) continue;
+    if (providerSessionId && entry.sessionId && entry.sessionId !== providerSessionId) continue;
+    const at = typeof entry.timestamp === 'string' ? entry.timestamp : null;
+    for (const block of Array.isArray(entry.message?.content) ? entry.message.content : []) {
+      if (block?.type !== 'tool_use') continue;
+      const input: AnyRecord = block.input && typeof block.input === 'object' ? block.input : {};
+      const file = input.file_path ?? input.notebook_path;
+      if (typeof file !== 'string') continue;
+      if (block.name === 'Edit' && typeof input.new_string === 'string') {
+        edits.push({ file, at, kind: 'правка', text: clipCode(input.new_string) });
+      } else if (block.name === 'MultiEdit' && Array.isArray(input.edits)) {
+        const joined = input.edits.map((e: AnyRecord) => String(e?.new_string ?? '')).filter(Boolean).join('\n…\n');
+        if (joined) edits.push({ file, at, kind: 'правка', text: clipCode(joined) });
+      } else if (block.name === 'Write' && typeof input.content === 'string') {
+        edits.push({ file, at, kind: 'записан', text: clipCode(input.content) });
+      }
+    }
+  }
+  return edits.slice(-limit);
+}
+
+/** Блок правок текстом: для задания модели и для первого сообщения нового чата. */
+export function formatRecentEdits(edits: RecentEdit[]): string {
+  return edits.map((edit) => {
+    const fence = edit.text.includes('```') ? '~~~' : '```';
+    return `- ${formatTime(edit.at)}${edit.kind === 'записан' ? 'файл записан целиком' : 'правка'}: \`${edit.file}\`\n${fence}\n${edit.text}\n${fence}`;
+  }).join('\n');
+}
+
 /** Размер файла переписки — сколько байт уже разобрано заготовкой. */
 export async function transcriptSize(filePath: string): Promise<number> {
   return (await stat(filePath)).size;
