@@ -203,12 +203,15 @@ export default function ChatComposer({
       : handoffLevel === 'yellow'
         ? 'Чат большой — лучше продолжить в новом. Можно сначала написать в поле, что делать дальше'
         : 'Продолжить в новом чате — перенести главное. Можно сначала написать в поле, что делать дальше';
+  // Цвет при наведении — с !important: на сенсорном экране кнопка после касания
+  // остаётся «наведённой», а общее правило index.css (button:hover { background:
+  // inherit !important }) стирало жёлтый и красный (снимок iPhone 27.09.26).
   const handoffClassName = handoffRunning
     ? 'text-primary'
     : handoffLevel === 'red'
-      ? 'bg-red-500/15 text-red-600 hover:bg-red-500/25 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300'
+      ? 'bg-red-500/15 text-red-600 dark:text-red-400 [&:hover]:!bg-red-500/25 [&:hover]:!text-red-700 dark:[&:hover]:!text-red-300'
       : handoffLevel === 'yellow'
-        ? 'bg-amber-400/15 text-amber-600 hover:bg-amber-400/25 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
+        ? 'bg-amber-400/15 text-amber-600 dark:text-amber-400 [&:hover]:!bg-amber-400/25 [&:hover]:!text-amber-700 dark:[&:hover]:!text-amber-300'
         : 'text-muted-foreground/60 hover:text-foreground';
   const { t } = useTranslation('chat');
   const fileDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -588,7 +591,7 @@ export default function ChatComposer({
                   size="icon"
                   align="left"
                   triggerClassName={`h-8 w-8 rounded-md [&_svg]:size-4 ${handoffClassName}`}
-                  header="Текст в поле — что делать дальше"
+                  header={<div className="px-3 pb-1 pt-1.5 text-xs text-muted-foreground">Текст в поле — что делать дальше</div>}
                   items={[
                     {
                       key: 'handoff',
