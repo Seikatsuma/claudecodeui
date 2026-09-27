@@ -38,6 +38,13 @@ const convertMarkdownToPlainText = (markdown: string): string => {
   return plainText.trim();
 };
 
+// Одиночные звёздочки `*фраза*` в ответах ИИ — только пометка «не проверено»
+// (~/CLAUDE.md «Пометки точности»); в чате она рисуется подчёркиванием. В копию
+// «как Markdown» её не несём: Егор вставляет текст дальше, звёздочки там — мусор.
+// Жирное `**…**` и пункты списка `* …` не трогаем.
+const stripUncertainMarks = (markdown: string): string =>
+  markdown.replace(/(?<![*\w])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![*\w])/g, '$1');
+
 const MessageCopyControl = ({
   content,
   messageType,
@@ -97,7 +104,7 @@ const MessageCopyControl = ({
 
   const copyPayload = useMemo(() => {
     if (selectedFormat === 'markdown') {
-      return content;
+      return messageType === 'assistant' ? stripUncertainMarks(content) : content;
     }
     return convertMarkdownToPlainText(content);
   }, [content, selectedFormat]);
