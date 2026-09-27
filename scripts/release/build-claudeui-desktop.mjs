@@ -144,9 +144,9 @@ const stagePackage = {
       icon: 'electron/assets/logo-macos.icns',
       // Claude Code работает на macOS 13 и новее — ниже программа бесполезна.
       minimumSystemVersion: '13.0',
-      // Здесь собирается одна половина (M или Intel) без упаковки и подписи:
-      // половины склеивает в одну программу для любого Mac и подписывает
-      // make-mac-universal.mjs (подпись «для себя», настоящая Apple — платная).
+      // Отдельная программа под процессор этой машины (M или Intel) — без
+      // лишнего Claude второго процессора. Подпись «для себя» и .dmg делает
+      // make-mac-dmg.mjs (настоящая подпись Apple — платная).
       target: ['dir'],
       identity: null,
       hardenedRuntime: false,
@@ -179,29 +179,7 @@ await fs.writeFile(path.join(stageDir, 'package.json'), `${JSON.stringify(stageP
 // нативным модулям они нужны до пересборки под Electron.
 await run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: stageDir });
 
-// Mac: в каждой половине Claude для обоих процессоров — тогда у половин
-// одинаковый набор файлов и они склеиваются в одну программу для любого Mac.
-if (process.platform === 'darwin') {
-  const sdkVersion = JSON.parse(readFileSync(path.join(stageDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'package.json'), 'utf8')).version;
-  for (const arch of ['arm64', 'x64']) {
-    const name = `claude-agent-sdk-darwin-${arch}`;
-    const target = path.join(stageDir, 'node_modules', '@anthropic-ai', name);
-    try {
-      await fs.access(path.join(target, 'claude'));
-      continue;
-    } catch {
-      // нет — докачиваем
-    }
-    const packDir = path.join(stageDir, '.pack');
-    await fs.mkdir(packDir, { recursive: true });
-    await run('npm', ['pack', `@anthropic-ai/${name}@${sdkVersion}`, '--pack-destination', packDir, '--silent'], { cwd: stageDir });
-    await fs.mkdir(target, { recursive: true });
-    await run('tar', ['-xzf', path.join(packDir, `anthropic-ai-${name}-${sdkVersion}.tgz`), '-C', target, '--strip-components=1']);
-    await fs.chmod(path.join(target, 'claude'), 0o755);
-    await fs.rm(packDir, { recursive: true, force: true });
-  }
-}
-// Служебный список установленного у половин разный — людям он не нужен.
+// Служебный список установленного пакетов — людям он не нужен.
 await fs.rm(path.join(stageDir, 'node_modules', '.package-lock.json'), { force: true });
 
 console.log(`Пересборка нативных модулей под Electron ${electronVersion} (${process.arch})…`);

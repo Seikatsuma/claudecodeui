@@ -1,7 +1,7 @@
 name: Claude UI для компьютера
 
-# Одна программа для любого Mac (macOS 13+, M и Intel) и один установщик для
-# Windows 10 и 11. Затем проверка ИЗ УСТАНОВЩИКОВ на разных версиях систем:
+# Mac (macOS 13+) — отдельный файл под процессор M и под Intel: каждый вдвое
+# легче общего. Windows 10 и 11 — один установщик. Затем проверка ИЗ УСТАНОВЩИКОВ на разных версиях систем:
 # программа ставится как у человека, входит пробным аккаунтом, открывает
 # «Этот компьютер» и снимает экран. Запуск: пуш в desktop-app или вручную.
 on:
@@ -22,14 +22,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Mac, половина M
+          - name: Mac на M
             os: macos-latest
             target: --mac
-            artifact: half-mac-arm64
-          - name: Mac, половина Intel
+            chip: M
+            artifact: claude-ui-mac-M
+          - name: Mac на Intel
             os: macos-15-intel
             target: --mac
-            artifact: half-mac-x64
+            chip: Intel
+            artifact: claude-ui-mac-Intel
           - name: Windows 10/11
             os: windows-latest
             target: --win
@@ -63,21 +65,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Половина для Mac — архивом (ссылки внутри программы сохраняются)
+      - name: Mac — подпись «для себя» и .dmg
         if: runner.os == 'macOS'
         run: |
           APP="$(find release/claudeui -maxdepth 2 -name 'Claude UI.app' -type d | head -1)"
           test -n "$APP"
-          tar -czf half.tgz -C "$(dirname "$APP")" "Claude UI.app"
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/release/make-mac-dmg.mjs "$APP" out "$VERSION" ${{ matrix.chip }}
+          ls -la out/*.dmg
 
-      - name: Выгрузка половины Mac
+      - name: Выгрузка .dmg
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ matrix.artifact }}
-          path: half.tgz
+          path: out/*.dmg
+          if-no-files-found: error
           compression-level: 0
-          retention-days: 3
 
       - name: Выгрузка установщика Windows
         if: runner.os == 'Windows'
@@ -88,44 +92,9 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-  mac-universal:
-    name: Одна программа для любого Mac
-    needs: build
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - name: Код
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          persist-credentials: false
-      - name: Node.js 22
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: 22
-      - name: Инструмент склейки
-        run: npm i --no-save --no-package-lock --ignore-scripts @electron/universal@2.0.3
-      - name: Половины
-        uses: actions/download-artifact@v4
-        with:
-          pattern: half-mac-*
-      - name: Склейка, подпись, .dmg
-        run: |
-          mkdir -p x64 arm64
-          tar -xzf half-mac-x64/half.tgz -C x64
-          tar -xzf half-mac-arm64/half.tgz -C arm64
-          VERSION="$(node -p "require('./package.json').version")"
-          node scripts/release/make-mac-universal.mjs "x64/Claude UI.app" "arm64/Claude UI.app" out "$VERSION"
-      - name: Выгрузка
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: claude-ui-mac
-          path: out/*.dmg
-          if-no-files-found: error
-          compression-level: 0
-
   smoke:
     name: Проверка — ${{ matrix.name }}
-    needs: [build, mac-universal]
+    needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     continue-on-error: ${{ matrix.optional }}
@@ -133,13 +102,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS 14 (M), os: macos-14, kind: mac, optional: false }
-          - { name: macOS 15 (M), os: macos-15, kind: mac, optional: false }
-          - { name: macOS 26 (M), os: macos-26, kind: mac, optional: true }
-          - { name: macOS 15 (Intel), os: macos-15-intel, kind: mac, optional: false }
-          - { name: Windows 10 (ядро Server 2022), os: windows-2022, kind: win, optional: false }
-          - { name: Windows 11 (ядро Server 2025), os: windows-2025, kind: win, optional: false }
-          - { name: Windows 11 ARM, os: windows-11-arm, kind: win, optional: true }
+          - { name: macOS 14 (M), os: macos-14, kind: mac, artifact: claude-ui-mac-M, optional: false }
+          - { name: macOS 15 (M), os: macos-15, kind: mac, artifact: claude-ui-mac-M, optional: false }
+          - { name: macOS 26 (M), os: macos-26, kind: mac, artifact: claude-ui-mac-M, optional: true }
+          - { name: macOS 15 (Intel), os: macos-15-intel, kind: mac, artifact: claude-ui-mac-Intel, optional: false }
+          - { name: Windows 10 (ядро Server 2022), os: windows-2022, kind: win, artifact: claude-ui-windows, optional: false }
+          - { name: Windows 11 (ядро Server 2025), os: windows-2025, kind: win, artifact: claude-ui-windows, optional: false }
+          - { name: Windows 11 ARM, os: windows-11-arm, kind: win, artifact: claude-ui-windows, optional: true }
     steps:
       - name: Код
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -152,7 +121,7 @@ jobs:
       - name: Установщик
         uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.kind == 'mac' && 'claude-ui-mac' || 'claude-ui-windows' }}
+          name: ${{ matrix.artifact }}
           path: installer
       - name: Установка на Mac — как человек, из .dmg в «Программы»
         if: matrix.kind == 'mac'
