@@ -21,13 +21,20 @@ security find-generic-password -a "$USER" -s "claudeui.<имя>" -w             
 ```
 Mac может показать окно «разрешить доступ к связке ключей» — сказать человеку заранее: «нажмите «Разрешить всегда»».
 
-**Windows — файл в личной папке пользователя** `%USERPROFILE%\.claudeui\keys.env`, строки `ИМЯ=значение`. Создать папку, дописать строку, в скрипте читать этот файл.
+**Windows — зашифрованный файл** в `%USERPROFILE%\.claudeui\keys\<имя>.txt`: шифрует сама Windows (DPAPI) ключом этого пользователя этого компьютера — другой человек и другой компьютер файл не прочтут. Администратор не нужен. PowerShell:
+```
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.claudeui\keys" | Out-Null
+ConvertTo-SecureString '<ключ>' -AsPlainText -Force | ConvertFrom-SecureString | Set-Content "$env:USERPROFILE\.claudeui\keys\<имя>.txt"      # сохранить
+$s = Get-Content "$env:USERPROFILE\.claudeui\keys\<имя>.txt" | ConvertTo-SecureString
+[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))          # прочитать
+```
+Из Git Bash — тем же текстом через `powershell -NoProfile -Command '…'` (одинарные кавычки снаружи, чтобы `$` не съела оболочка). `cmdkey` не подходит: он сохраняет, но прочитать ключ обратно не даёт.
 
 Список сохранённого (без значений) держи в `~/.claudeui/keys-list.txt`: имя, для чего, дата — чтобы в следующем чате знать, что ключ уже есть, и не просить снова.
 
 ## Как пользоваться
 - **Подключение (MCP) с ключом** — `claude mcp add --scope user --env ИМЯ=<ключ> --transport stdio <имя> -- <команда>`: ключ ляжет в личные настройки Claude (`~/.claude.json`), не в проект. Область `project` для ключей не использовать — она попадает в папку проекта.
-- **Скрипт** — читает ключ из хранилища при запуске (Mac — `security find-generic-password … -w`, Windows — `keys.env`); в сам файл скрипта ключ не вписывать.
+- **Скрипт** — читает ключ из хранилища при запуске (Mac — `security find-generic-password … -w`, Windows — расшифровка файла командой выше); в сам файл скрипта ключ не вписывать.
 
 ## Если ключ утёк
 Попал в общий доступ (git, чат с людьми, скриншот) — сказать прямо и провести человека по отзыву ключа в кабинете сервиса («Revoke» / «Удалить» → создать новый), затем заменить в хранилище.

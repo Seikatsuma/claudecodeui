@@ -31,7 +31,7 @@
 - Подключения и возможности (28.09.26, Егор: «написал „хочу подключить Google“ — и он такой: да»): навыки
   `plugin/skills/connect` (лестница: подключения аккаунта claude.ai → папка облака → MCP по адресу с входом
   через инструмент `mcp__<имя>__authenticate` → MCP с ключом → свой скрипт/браузер; ключи — Связка ключей Mac /
-  `~/.claudeui/keys.env` Windows) и `plugin/skills/tools` (uv без администратора, `scripts/photos_info.py` —
+  зашифрованный файл DPAPI `~/.claudeui/keys/<имя>.txt` Windows; открыть ссылку на Windows — `explorer`, не `start ""`: без Git Bash команды идут в PowerShell) и `plugin/skills/tools` (uv без администратора, `scripts/photos_info.py` —
   дата/место/адрес фото с HEIC, `scripts/video_frames.py` — кадры, дата, место, звук; ffmpeg из imageio-ffmpeg).
   `claude mcp login` и `/mcp` во встроенном Claude 2.1.165 нет — вход в MCP только тем инструментом.
   `applyDesktopBrains` добавляет в PATH Claude `~/.local/bin` и `~/.claudeui/node(/bin)` — туда ставятся uv и Node.
