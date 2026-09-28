@@ -946,6 +946,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   let awaitingHumanCount = 0;
   // Процесс Claude этого запуска: сторож проверяет, жив ли он, пока ждём человека.
   let claudeProcess = null;
+  // Событие exit ловит любую смерть: у убитого сигналом снаружи (нехватка памяти,
+  // падение) exitCode остаётся null, а killed — false (проверено kill -9).
+  let claudeProcessExited = false;
   // Ход, усыновлённый удержанным процессом: обещание «ход закончен» для вызывающего.
   let adoptedTurnDone = null;
   const settleAdoptedTurn = () => {
@@ -1196,6 +1199,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         providerSessionId: providerSessionId || null,
         configDir: sdkOptions.env?.CLAUDE_CONFIG_DIR || getClaudeConfigDir(),
       });
+      claudeProcess.once?.('exit', () => { claudeProcessExited = true; });
       return claudeProcess;
     };
 
@@ -1256,7 +1260,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       }
       // Ждём ответа человека (разрешение, выбор) — это не тишина, пока процесс
       // Claude жив. Умер, пока ждали, — закрываем сразу, а не через 15 мин.
-      const processGone = Boolean(claudeProcess) && (claudeProcess.exitCode !== null || claudeProcess.killed);
+      const processGone = claudeProcessExited
+        || (Boolean(claudeProcess) && (claudeProcess.exitCode !== null || claudeProcess.killed));
       const diedWhileAwaitingHuman = awaitingHumanCount > 0 && processGone;
       if (awaitingHumanCount > 0 && !processGone) {
         lastMessageAt = Date.now();
