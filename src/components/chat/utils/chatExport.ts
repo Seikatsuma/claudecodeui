@@ -20,6 +20,13 @@ function formatTimestamp(date: Date | string | number): string {
   }).format(d);
 }
 
+// Выгрузку Егор пересылает в другой чат на разбор (27.09.26): размышления на
+// английском и пустые сообщения (вызовы инструментов) там только шум — в
+// присланном файле из 654 строк ответов было меньше половины.
+function exportable(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((m) => !m.isThinking && String(m.content ?? '').trim() !== '');
+}
+
 function escapeHTML(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -49,7 +56,7 @@ export function exportToMarkdown(
   }
 
   // Messages
-  for (const msg of messages) {
+  for (const msg of exportable(messages)) {
     if (msg.type === 'user') {
       markdown += '## You\n\n';
     } else if (msg.type === 'assistant') {
@@ -98,7 +105,7 @@ export function exportToHTML(
 ): string {
   const includeMeta = options.includeMeta ?? true;
 
-  const htmlContent = messages
+  const htmlContent = exportable(messages)
     .map((msg) => {
       const type = msg.type === 'user' ? '👤 You' : msg.type === 'assistant' ? '🤖 Claude' : `${msg.type}`;
       const time = includeMeta && msg.timestamp ? `<p style="font-size: 12px; color: #999; margin-top: 8px;">${formatTimestamp(msg.timestamp)}</p>` : '';

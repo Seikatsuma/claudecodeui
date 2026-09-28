@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDesktopApp } from '../../../lib/desktopBridge';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownIcon } from 'lucide-react';
@@ -7,17 +7,19 @@ import type { SessionActivity } from '../../../hooks/useSessionProtection';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
 import PermissionContext from '../../../contexts/PermissionContext';
-import type { ChatInterfaceProps, PermissionMode, Provider  } from '../types/types';
+import type { ChatInterfaceProps, ChatMessage, PermissionMode, Provider  } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useSessionStore } from '../../../stores/useSessionStore';
+import { authenticatedFetch } from '../../../utils/api';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatRequestBar from './subcomponents/ChatRequestBar';
 import ChatComposer from './subcomponents/ChatComposer';
 import CommandResultModal from './subcomponents/CommandResultModal';
+import RewindConfirmDialog from './subcomponents/RewindConfirmDialog';
 import { knownRunStartedAt } from '../utils/liveRunCursor';
 
 /**
@@ -231,6 +233,7 @@ function ChatInterface({
     showCostModal,
     handoffStatus,
     startHandoff,
+    compactHere,
     canHandoff,
   } = useChatComposerState({
     selectedProject,
@@ -438,6 +441,72 @@ function ChatInterface({
 
   // A composer pick becomes the default for new chats and, when a session is
   // open, is recorded against that session so reopening it restores this model.
+  // «Вернуться сюда» под своим сообщением: сервер останавливает ход, убирает
+  // из разговора это сообщение и всё после него (полная копия остаётся рядом
+  // с файлом разговора), а текст возвращается в поле ввода — поправить и
+  // отправить заново. Как «rewind» в Claude Code.
+  const rewindSessionId = currentSessionId || selectedSession?.id || null;
+  // Сообщение, к которому просят вернуться: пока задано — открыто окно подтверждения.
+  const [rewindTarget, setRewindTarget] = useState<ChatMessage | null>(null);
+  const [rewindBusy, setRewindBusy] = useState(false);
+  const [rewindError, setRewindError] = useState<string | null>(null);
+
+  const handleRewindToMessage = useCallback((message: ChatMessage) => {
+    setRewindError(null);
+    setRewindTarget(message);
+  }, []);
+
+  const cancelRewind = useCallback(() => {
+    setRewindTarget(null);
+    setRewindError(null);
+  }, []);
+
+  const confirmRewind = useCallback(async () => {
+    const sessionId = rewindSessionId;
+    const message = rewindTarget;
+    if (!sessionId || !message) return;
+    setRewindBusy(true);
+    setRewindError(null);
+    try {
+      const response = await authenticatedFetch(
+        `/api/providers/sessions/${encodeURIComponent(sessionId)}/rewind`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messageId: typeof message.sourceId === 'string' ? message.sourceId : null,
+            text: typeof message.content === 'string' ? message.content : null,
+          }),
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) {
+        setRewindError(payload?.error?.message || 'Не получилось вернуться к сообщению. Попробуйте ещё раз.');
+        return;
+      }
+
+      const data = payload.data as { text?: string; queuedTexts?: string[] };
+      // Лента — заново с сервера: живые строки отменённого хода и его поток
+      // иначе остались бы на экране.
+      sessionStore.clearRealtime(sessionId);
+      resetStreamingState();
+      retryHistoryLoad();
+
+      const draft = [data.text ?? '', ...(data.queuedTexts ?? [])]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join('\n\n');
+      setInput(draft);
+      setRewindTarget(null);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    } catch (error) {
+      console.error('Rewind to message failed:', error);
+      setRewindError('Нет связи с сервером. Попробуйте ещё раз.');
+    } finally {
+      setRewindBusy(false);
+    }
+  }, [rewindSessionId, rewindTarget, sessionStore, resetStreamingState, retryHistoryLoad, setInput, textareaRef]);
+
   const handleSelectComposerModel = useCallback(async (model: string) => {
     try {
       await selectProviderModel(provider, model, currentSessionId || selectedSession?.id || null);
@@ -537,8 +606,19 @@ function ChatInterface({
           onGrantToolPermission={handleGrantToolPermission}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
+          onRewindToMessage={provider === 'claude' && rewindSessionId ? handleRewindToMessage : undefined}
           selectedProject={selectedProject}
         />
+
+        {rewindTarget && (
+          <RewindConfirmDialog
+            text={typeof rewindTarget.content === 'string' ? rewindTarget.content : ''}
+            busy={rewindBusy}
+            error={rewindError}
+            onCancel={cancelRewind}
+            onConfirm={confirmRewind}
+          />
+        )}
 
         <div className="relative flex-shrink-0">
           {isUserScrolledUp && chatMessages.length > 0 && (
@@ -578,6 +658,7 @@ function ChatInterface({
           onShowTokenUsage={showCostModal}
           handoffStatus={handoffStatus}
           onStartHandoff={canHandoff ? startHandoff : undefined}
+          onCompactHere={canHandoff ? compactHere : undefined}
           onSubmit={handleSubmit}
           isDragActive={isDragActive}
           queuedDrafts={queuedDrafts}

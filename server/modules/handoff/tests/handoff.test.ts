@@ -1,8 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { digestTranscriptLines } from '@/modules/handoff/handoff-digest.js';
-import { writeBrief } from '@/modules/handoff/handoff.service.js';
+import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import {
+  digestTranscriptFile,
+  digestTranscriptLines,
+  exportDialogFile,
+  formatRecentEdits,
+  pathsInCommand,
+  recentEdits,
+  transcriptLineBoundary,
+} from '@/modules/handoff/handoff-digest.js';
+import {
+  buildFileMap,
+  folderGuides,
+  formatFileList,
+  scrubSecrets,
+  sweepOldDialogs,
+  tailFingerprint,
+  transcriptUnchangedUpTo,
+  writeBrief,
+} from '@/modules/handoff/handoff.service.js';
 
 const SID = '11111111-2222-3333-4444-555555555555';
 const line = (entry: Record<string, unknown>) => JSON.stringify({ sessionId: SID, timestamp: '2026-09-23T10:00:00Z', ...entry });
@@ -50,15 +71,19 @@ test('после сжатия: до сводки — только слова ч�
   assert.match(digest.text, /поздний ответ/);
 });
 
-test('короткая переписка — один вызов модели', async () => {
+test('короткая переписка — две половины одновременно, «куда идём» первой', async () => {
   const prompts: string[] = [];
   const brief = await writeBrief('ЧЕЛОВЕК: привет', '/acc', async (prompt) => {
     prompts.push(prompt);
-    return '## Цель\nx';
+    return prompt.includes('## Цель —') ? '## Цель\nx' : '## Что сделано\ny';
   });
-  assert.equal(brief, '## Цель\nx');
-  assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /<transcript>\nЧЕЛОВЕК: привет\n<\/transcript>/);
+  assert.equal(brief, '## Цель\nx\n\n## Что сделано\ny');
+  assert.equal(prompts.length, 2);
+  for (const prompt of prompts) assert.match(prompt, /<transcript>\nЧЕЛОВЕК: привет\n<\/transcript>/);
+  assert.match(prompts[0], /## Следующий шаг/);
+  assert.doesNotMatch(prompts[0], /## Что сделано/);
+  assert.match(prompts[1], /## Где искать/);
+  assert.doesNotMatch(prompts[1], /## Где остановились/);
 });
 
 test('длинная переписка — части, затем сводка с последней частью целиком', async () => {
@@ -72,8 +97,8 @@ test('длинная переписка — части, затем сводка 
   const maps = prompts.filter((prompt) => prompt.includes('Это часть'));
   const reduces = prompts.filter((prompt) => prompt.includes('<transcript part="last">'));
   assert.ok(maps.length >= 2, `частей ${maps.length}`);
-  assert.equal(reduces.length, 1);
-  assert.equal(prompts[prompts.length - 1], reduces[0], 'сводка — последним вызовом');
+  assert.equal(reduces.length, 2, 'сводка — двумя половинами');
+  assert.deepEqual(prompts.slice(-2), reduces, 'сводка — последними вызовами');
   assert.match(reduces[0], /<notes part="1">/);
 });
 
@@ -81,14 +106,202 @@ test('опись вырезается, ссылки входа и ключи с�
   const brief = await writeBrief('ЧЕЛОВЕК: привет', '/acc', async () => [
     '<опись>\n- черновик описи\n</опись>',
     '---',
-    '## Цель',
+    '## Цель — чего добивается человек',
     'Сайт: https://cc.example.ru/enter/nMsKcj_ooYAWE4bhfdzm8A, ключ sk-ant-abcdefghijklmnopqrstuv',
     '---',
     '## Следующий шаг',
     'ждать',
   ].join('\n'));
   assert.doesNotMatch(brief, /опись|черновик|nMsKcj|abcdefghijkl|^---$/m);
-  assert.match(brief, /^## Цель/);
+  assert.match(brief, /^## Цель$/m, 'подсказка из задания в заголовке срезана');
   assert.match(brief, /enter\/\[скрыто\]/);
   assert.match(brief, /\[ключ скрыт\]/);
+});
+
+test('задача нового чата попадает в задание модели', async () => {
+  let seen = '';
+  await writeBrief('ЧЕЛОВЕК: привет', '/acc', async (prompt) => {
+    seen ||= prompt;
+    return '## Цель\nX';
+  }, 'допиши отчёт для Славы');
+  assert.match(seen, /Человек уже написал, что делать в новом чате: «допиши отчёт для Славы»/);
+  assert.match(seen, /не больше ~\d+ слов/);
+});
+
+test('хвост после заготовки читается с границы строки, недописанная строка не теряется', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const first = `${line({ type: 'user', message: { content: 'первое' } })}\n`;
+  await writeFile(file, `${first}${line({ type: 'user', message: { content: 'второе' } }).slice(0, 20)}`);
+  const cut = await transcriptLineBoundary(file);
+  assert.equal(cut, Buffer.byteLength(first));
+  await writeFile(file, `${first}${line({ type: 'user', message: { content: 'второе' } })}\n`);
+  const head = await digestTranscriptFile(file, SID, { end: cut });
+  const tail = await digestTranscriptFile(file, SID, { start: cut, end: await transcriptLineBoundary(file) });
+  assert.match(head.text, /первое/);
+  assert.doesNotMatch(head.text, /второе/);
+  assert.match(tail.text, /ЧЕЛОВЕК: второе/);
+  assert.doesNotMatch(tail.text, /первое/);
+});
+
+test('файл разговора: ответы целиком, без действий и служебного', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const long = 'Промпт: '.padEnd(9000, 'я');
+  await writeFile(file, [
+    line({ type: 'user', message: { content: 'Сделай промпт' } }),
+    line({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'черновик' }, { type: 'text', text: long }, { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } }),
+    line({ type: 'user', toolUseResult: {}, message: { content: [{ type: 'tool_result', content: 'вывод команды' }] } }),
+    line({ type: 'user', isMeta: true, message: { content: 'служебное' } }),
+  ].join('\n'));
+  const out = path.join(dir, 'sub', 'dialog.md');
+  await exportDialogFile(file, SID, out, 'Тест');
+  const text = await readFile(out, 'utf8');
+  assert.match(text, /^# Разговор чата «Тест»/);
+  assert.match(text, /Человек\n\nСделай промпт/);
+  assert.ok(text.includes(long), 'длинный ответ — целиком, без обрезки');
+  assert.doesNotMatch(text, /черновик|вывод команды|служебное|ls/);
+});
+
+test('дословный хвост: ключи и ссылки входа скрыты', () => {
+  const text = scrubSecrets('ЧЕЛОВЕК: вот https://cc.example.ru/enter/nMsKcj_ooYAWE4bhfdzm8A и sk-ant-abcdefghijklmnopqrstuv');
+  assert.doesNotMatch(text, /nMsKcj|abcdefghijkl/);
+  assert.match(text, /enter\/\[скрыто\]/);
+});
+
+test('откат чата после заготовки делает её недействительной', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const a = `${line({ type: 'user', message: { content: 'ветка А' } })}\n`;
+  const b = `${line({ type: 'user', message: { content: 'ответ по ветке А' } })}\n`;
+  await writeFile(file, a + b);
+  const bytes = await transcriptLineBoundary(file);
+  const fingerprint = await tailFingerprint(file, bytes);
+  await writeFile(file, `${a + b}${line({ type: 'user', message: { content: 'дальше' } })}\n`);
+  assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), true, 'дописан — заготовка годна');
+  await writeFile(file, a);
+  assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), false, 'урезан — негодна');
+  await writeFile(file, a + `${line({ type: 'user', message: { content: 'ветка Б, другой текст той же длины!!' } })}\n`.padEnd(b.length + 10, ' '));
+  assert.equal(await transcriptUnchangedUpTo(file, bytes, fingerprint), false, 'переписан после отката — негодна');
+});
+
+test('карта файлов: пути из действий агента, только существующие, правленые первыми, с описанием папки', async () => {
+  // Не /tmp: временная папка в карту намеренно не идёт.
+  const root = await mkdtemp('/var/tmp/handoff-home-');
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    const project = path.join(root, 'bot');
+    await mkdir(path.join(project, 'app'), { recursive: true });
+    await writeFile(path.join(project, 'agent.md'), '# как устроен бот');
+    await writeFile(path.join(project, 'app', 'main.py'), 'print(1)');
+    await writeFile(path.join(project, 'app', 'notes.md'), 'заметки');
+    const gone = path.join(project, 'app', 'deleted.py');
+    const digest = digestTranscriptLines([
+      line({ type: 'assistant', message: { content: [
+        { type: 'tool_use', name: 'Read', input: { file_path: path.join(project, 'app', 'notes.md') } },
+        { type: 'tool_use', name: 'Read', input: { file_path: path.join(project, 'app', 'notes.md') } },
+        { type: 'tool_use', name: 'Read', input: { file_path: gone } },
+        { type: 'tool_use', name: 'Edit', input: { file_path: path.join(project, 'app', 'main.py') } },
+      ] } }),
+    ], SID);
+    const map = await buildFileMap(digest.touchedFiles);
+    assert.deepEqual(map.map((entry) => path.basename(entry.path)), ['main.py', 'notes.md'], 'удалённого нет, правленый первым');
+    assert.equal(map[1].reads, 2);
+    assert.match(formatFileList(map), /main\.py` \(правился, 8 Б\)[\s\S]*notes\.md` \(открывался 2/);
+    assert.deepEqual(await folderGuides(map), [path.join(project, 'agent.md')]);
+  } finally {
+    process.env.HOME = oldHome;
+  }
+});
+
+test('карта попадает в задание той половины, что пишет «Где искать»', async () => {
+  const prompts: string[] = [];
+  await writeBrief('ЧЕЛОВЕК: привет', '/acc', async (prompt) => {
+    prompts.push(prompt);
+    return '## X\ny';
+  }, null, '- `/home/x/app.py` (правился, 1 КБ)');
+  const withMap = prompts.filter((prompt) => prompt.includes('/home/x/app.py'));
+  assert.equal(withMap.length, 1);
+  assert.match(withMap[0], /## Где искать — карта/);
+});
+
+test('оглавление разговора указывает на строку своей просьбы', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  await writeFile(file, [
+    line({ type: 'user', message: { content: 'Первая просьба' } }),
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'ответ\nв две строки' }] } }),
+    line({ type: 'user', message: { content: 'Вторая просьба' } }),
+  ].join('\n'));
+  const out = path.join(dir, 'd.md');
+  await exportDialogFile(file, SID, out, 'Т');
+  const lines = (await readFile(out, 'utf8')).split('\n');
+  const refs = lines.filter((l) => l.startsWith('- стр. '));
+  assert.equal(refs.length, 2);
+  for (const ref of refs) {
+    const n = Number(ref.match(/стр\. (\d+)/)?.[1]);
+    const want = ref.includes('Первая') ? 'Первая просьба' : 'Вторая просьба';
+    assert.match(lines[n - 1], /Человек$/, `стр. ${n} — заголовок реплики`);
+    assert.equal(lines[n + 1], want);
+  }
+});
+
+test('пути из команд: файлы и папки, без адресов страниц', () => {
+  assert.deepEqual(
+    pathsInCommand('cd ~/bot && sed -n 1,5p /home/u/CLAUDE.md; curl https://site.ru/api/x > /tmp/a.log; echo $HOME/x'),
+    ['~/bot', '/home/u/CLAUDE.md', '/tmp/a.log'],
+  );
+});
+
+test('карта: ключи входа не показываются, файлы настроек — с пометкой', async () => {
+  const root = await mkdtemp('/var/tmp/handoff-keys-');
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    await mkdir(path.join(root, '.ssh'), { recursive: true });
+    await mkdir(path.join(root, '.secrets'), { recursive: true });
+    await mkdir(path.join(root, '.claude'), { recursive: true });
+    for (const file of ['.ssh/id_ed25519', '.claude/.credentials.json', '.secrets/bot.env']) await writeFile(path.join(root, file), 'x');
+    const touched = ['.ssh/id_ed25519', '.claude/.credentials.json', '.secrets/bot.env']
+      .map((file, order) => ({ path: `~/${file}`, edited: false, reads: 0, mentions: 3, order }));
+    const map = await buildFileMap(touched);
+    assert.deepEqual(map.map((entry) => path.basename(entry.path)), ['bot.env']);
+    assert.match(formatFileList(map), /секреты: содержимое не выводить/);
+  } finally {
+    process.env.HOME = oldHome;
+  }
+});
+
+test('уборка: файлы разговоров старше 30 дней удаляются, свежие и чужие — нет', async () => {
+  const acc = await mkdtemp(path.join(os.tmpdir(), 'handoff-acc-'));
+  const dir = path.join(acc, 'handoffs');
+  await mkdir(dir);
+  const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+  for (const name of ['2026-08-01-aaaaaaaa.md', '2026-09-27-bbbbbbbb.md', 'заметки.md', '2026-08-01-notmine.md']) {
+    await writeFile(path.join(dir, name), 'x');
+  }
+  for (const name of ['2026-08-01-aaaaaaaa.md', 'заметки.md', '2026-08-01-notmine.md']) await utimes(path.join(dir, name), old, old);
+  assert.equal(await sweepOldDialogs(acc), 1);
+  assert.deepEqual((await readdir(dir)).sort(), ['2026-08-01-notmine.md', '2026-09-27-bbbbbbbb.md', 'заметки.md'].sort());
+  assert.equal(await sweepOldDialogs(path.join(acc, 'нет-такой')), 0, 'нет папки — не ошибка');
+});
+
+test('последние правки кода — дословно, свежие последними, не больше лимита', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'handoff-'));
+  const file = path.join(dir, 't.jsonl');
+  const edit = (n: number) => line({ type: 'assistant', message: { content: [
+    { type: 'tool_use', name: 'Edit', input: { file_path: `/p/f${n}.ts`, old_string: 'x', new_string: `function f${n}() {}` } },
+  ] } });
+  await writeFile(file, [
+    edit(1), edit(2),
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: '/p/new.md', content: 'строка\n'.repeat(60) } }] } }),
+    edit(3),
+  ].join('\n'));
+  const edits = await recentEdits(file, SID, 3);
+  assert.deepEqual(edits.map((e) => e.file), ['/p/f2.ts', '/p/new.md', '/p/f3.ts']);
+  assert.match(edits[1].text, /обрезано, всего 61 строк/);
+  const text = formatRecentEdits(edits);
+  assert.match(text, /правка: `\/p\/f3\.ts`\n```\nfunction f3\(\) \{\}\n```/);
+  assert.match(text, /файл записан целиком: `\/p\/new\.md`/);
 });

@@ -63,6 +63,8 @@ export interface ProjectSession {
    * Заполнено, когда чат перенесли поимённо («перенести во 2-й сервер»).
    */
   serverScope?: ServerScope | null;
+  /** Ярлык-флажок на чате (меню «…»): только метка, на порядок не влияет. */
+  flagged?: boolean;
   __provider?: LLMProvider;
   // Tags the session with the owning project's DB `projectId` so UI handlers
   // (session switching, sidebar focus, etc.) can match against selectedProject.

@@ -39,6 +39,9 @@ export interface SubagentChildTool {
 }
 
 export interface ChatMessage {
+  /** Письмо соседнего ИИ-чата — показывается серой строкой, не пузырём человека. */
+  isCrossChatLetter?: boolean;
+  letterBody?: string;
   type: string;
   /** Store-assigned NormalizedMessage id, when the source row carried one (e.g. live thinking/stream rows use a well-known id so their list key stays stable while they update in place). */
   id?: string;

@@ -100,6 +100,7 @@ export function useVoiceInput(
       const rec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recorderRef.current = rec;
       chunksRef.current = [];
+      sendRef.current = false;
 
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -108,12 +109,10 @@ export function useVoiceInput(
       rec.onstop = async () => {
         stopTracks();
         if (cancelledRef.current) return;
-        // Capture and clear the send intent for this stop before any async work.
-        const shouldSend = sendRef.current;
-        sendRef.current = false;
         const type = rec.mimeType || 'audio/webm';
         const blob = new Blob(chunksRef.current, { type });
         if (blob.size < 800) {
+          sendRef.current = false;
           setState('idle');
           onError?.('Recording too short');
           return;
@@ -128,6 +127,10 @@ export function useVoiceInput(
           const data = await res.json();
           if (cancelledRef.current) return;
           const text = String(data?.text || '').trim();
+          // The send intent is read only now, not at stop: Enter pressed while the
+          // transcript is still on its way (requestSend) must count too.
+          const shouldSend = sendRef.current;
+          sendRef.current = false;
           if (text) onTranscript(text, shouldSend);
           else onError?.('No speech detected');
         } catch (e) {
@@ -138,6 +141,7 @@ export function useVoiceInput(
             onError?.(lostTranscriptMessage());
           }
         } finally {
+          sendRef.current = false;
           clearTimeout(timeout);
           if (!cancelledRef.current) setState('idle');
         }
@@ -171,10 +175,16 @@ export function useVoiceInput(
     }
   }, []);
 
+  // Enter pressed after the recording was already stopped: send the transcript as
+  // soon as it arrives instead of sending the half-empty box right now.
+  const requestSend = useCallback(() => {
+    sendRef.current = true;
+  }, []);
+
   const toggle = useCallback(() => {
     if (state === 'recording') stop();
     else if (state === 'idle') start();
   }, [state, start, stop]);
 
-  return { state, toggle, stop };
+  return { state, toggle, stop, requestSend };
 }

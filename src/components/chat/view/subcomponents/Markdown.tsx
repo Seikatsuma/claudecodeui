@@ -230,6 +230,44 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
   );
 };
 
+/*
+ * Пометка «не проверено» (Егор 27.09.26): фразу, которую ИИ прикинул, додумал или
+ * не перепроверил, он пишет курсивной разметкой `*фраза* (почему)`. Егор просил
+ * видеть её подчёркнутой, без значка ⚠, цветом полосы открытой вкладки. Курсив в
+ * ответах ИИ используется только для этой пометки (~/CLAUDE.md «Пометки точности»),
+ * поэтому любой курсив рисуем подчёркиванием. HTML-вставки не выполняем.
+ */
+function rehypeUncertainUnderline() {
+  const walk = (node: any) => {
+    const kids = node?.children;
+    if (!Array.isArray(kids)) return;
+    kids.forEach((child: any) => {
+      if (child?.type === 'element' && child.tagName === 'em') {
+        // span, а не <u>: при копировании черту снимаем одним стилем, не трогая
+        // узлы, которыми владеет React (copyParagraphBreaks.ts, neutralizeUncertain).
+        child.tagName = 'span';
+        child.properties = {
+          ...(child.properties || {}),
+          className: ['md-uncertain', 'underline', 'decoration-foreground', 'decoration-1', 'underline-offset-[3px]'],
+          title: 'Не проверено: нейросеть прикинула или не перепроверила',
+        };
+      }
+      walk(child);
+    });
+  };
+  return (tree: any) => walk(tree);
+}
+
+// Абзацы верхнего уровня ответа (не в цитате и не в пункте списка) — только там
+// жирная строка-название превращается в заголовок.
+function rehypeMarkTopLevel() {
+  return (tree: any) => {
+    (tree?.children || []).forEach((n: any) => {
+      if (n?.type === 'element' && n.tagName === 'p') n.properties = { ...(n.properties || {}), dataTop: '1' };
+    });
+  };
+}
+
 const markdownComponents = {
   code: CodeBlock,
   // Fenced/indented code arrives as <pre><code>. Re-render the child CodeBlock
@@ -284,8 +322,37 @@ const markdownComponents = {
    * рвало абзац на три куска. Здесь же видны настоящие потомки: один
    * элемент `strong` и ничего больше — значит подзаголовок.
    */
-  p: ({ children }: { children?: React.ReactNode }) => {
+  p: ({ children, ...rest }: { children?: React.ReactNode; 'data-top'?: string }) => {
+    const topLevel = rest['data-top'] === '1';
     const kids = React.Children.toArray(children);
+    /*
+     * «**Как я понял задачу**» и сразу под ней текст (одна строка переноса) —
+     * это название блока, но разметка видит один абзац с жирным началом, и
+     * название выходило размером с текст (снимок Егора 27.09). Короткую жирную
+     * первую строку, за которой идёт перенос, рисуем заголовком того же
+     * размера, что `##`. Жирное слово внутри строки не трогаем.
+     */
+    const head = kids[0];
+    const brk = kids[1];
+    if (
+      topLevel &&
+      kids.length > 2 &&
+      React.isValidElement(head) && (head as React.ReactElement).type === 'strong' &&
+      React.isValidElement(brk) && (brk as React.ReactElement).type === 'br'
+    ) {
+      const titleNodes = (head as React.ReactElement<{ children?: React.ReactNode }>).props.children;
+      const title = childrenToText(titleNodes);
+      if (title.length > 0 && title.length <= 60) {
+        const restKids = kids.slice(2);
+        if (typeof restKids[0] === 'string') restKids[0] = (restKids[0] as string).replace(/^\n/, '');
+        return (
+          <>
+            <h3 className="mb-2 mt-5 text-[18px] font-bold leading-snug text-foreground first:mt-0">{titleNodes}</h3>
+            <div className="mb-2.5 last:mb-0">{restKids}</div>
+          </>
+        );
+      }
+    }
     const isSubheading =
       kids.length === 1 && React.isValidElement(kids[0]) && (kids[0] as React.ReactElement).type === 'strong';
     return <div className={`mb-2.5 last:mb-0${isSubheading ? ' md-subheading' : ''}`}>{children}</div>;
@@ -326,6 +393,7 @@ export function Markdown({ children, className }: MarkdownProps) {
   // Модель разбивает мысль на строки осмысленно; склеивать их обратно в
   // сплошной абзац — ровно то, на что было больно смотреть.
   const remarkPlugins = useMemo(() => [remarkGfm, remarkBreaks] as any, []);
+  const rehypePlugins = useMemo(() => [rehypeUncertainUnderline, rehypeMarkTopLevel] as any, []);
   const { openFileInEditor } = usePaletteOps();
 
   const components = useMemo(
@@ -369,7 +437,7 @@ export function Markdown({ children, className }: MarkdownProps) {
 
   return (
     <div className={className} {...{ [MARKDOWN_ROOT_ATTR]: '' }}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components as any}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components as any}>
         {content}
       </ReactMarkdown>
     </div>

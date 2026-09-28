@@ -11,6 +11,8 @@ type CommandsRouterDependencies = {
   homeDirectory(): string;
   appRoot: string;
   models: typeof import('../providers/index.js').providerModelsService;
+  /** Claude's own commands (/context, /usage, /loop …); absent in tests that don't need them. */
+  nativeCommands?: { listCommands(): Promise<Array<{ name: string; description: string; argumentHint: string }>> };
   /** Свежий счётчик чата с сервера для окна «Token Usage»; без него — цифры из браузера. */
   tokenUsage?: { getSessionTokenUsage(sessionId: string): Promise<Record<string, any>> };
   runtime: {
@@ -28,6 +30,7 @@ const fs = dependencies.fileSystem;
 const os = { homedir: dependencies.homeDirectory };
 const APP_ROOT = dependencies.appRoot;
 const providerModelsService = dependencies.models;
+const nativeCommandsService = dependencies.nativeCommands;
 // Mirrors getClaudeConfigDir() (shared/utils.ts) using this router's injected
 // homeDirectory() dependency. Reads globalThis.process explicitly because
 // `process` is shadowed below by dependencies.runtime (a narrow
@@ -215,6 +218,15 @@ const builtInCommands = [
     namespace: "builtin",
     metadata: { type: "builtin" },
   },
+  // /clear, отправленный Claude, молча заводит разговор под новым номером, о
+  // котором интерфейс не знает. Поэтому его делает сам интерфейс — новый чат в
+  // той же папке, как «Новый сеанс».
+  {
+    name: "/clear",
+    description: "Start a new chat in this project (clears the conversation)",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
 ];
 
 /**
@@ -270,6 +282,8 @@ Custom commands can be created in:
   },
 
   "/models": (args, context) => executeModelsCommand(args, context, providerModelsService),
+
+  "/clear": async () => ({ type: "builtin", action: "clear", data: {} }),
 
   "/cost": async (args, context) => {
     const provider = readModelProvider(context?.provider);
@@ -494,7 +508,7 @@ Custom commands can be created in:
  */
 router.post("/list", async (req, res) => {
   try {
-    const { projectPath } = req.body;
+    const { projectPath, provider } = req.body;
     const allCommands = [...builtInCommands];
 
     // Scan project-level commands (.claude/commands/)
@@ -525,10 +539,25 @@ router.post("/list", async (req, res) => {
     // Sort commands alphabetically by name
     customCommands.sort((a, b) => a.name.localeCompare(b.name));
 
+    // Команды самого Claude — только для чатов Claude. Совпадающие по имени с
+    // командами интерфейса (/config, /clear …) не показываем: их делает интерфейс.
+    const builtInNames = new Set(builtInCommands.map((cmd) => cmd.name));
+    const nativeCommands =
+      nativeCommandsService && readModelProvider(provider) === "claude"
+        ? (await nativeCommandsService.listCommands())
+            .filter((cmd) => !builtInNames.has(cmd.name))
+            .map((cmd) => ({
+              ...cmd,
+              namespace: "claude",
+              metadata: { type: "claude" },
+            }))
+        : [];
+
     res.json({
       builtIn: builtInCommands,
       custom: customCommands,
-      count: allCommands.length,
+      native: nativeCommands,
+      count: allCommands.length + nativeCommands.length,
     });
   } catch (error) {
     console.error("Error listing commands:", error);

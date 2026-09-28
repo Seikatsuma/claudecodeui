@@ -182,6 +182,7 @@ async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Prom
       // Блок верхней панели у чата. Без него живое обновление списка
       // возвращало бы перенесённый чат обратно в «Проекты» до перезагрузки.
       serverScope: groupedRow.server_scope ?? null,
+      flagged: Boolean(groupedRow.is_flagged),
     },
     project: project
       ? {

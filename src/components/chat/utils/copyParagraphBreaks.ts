@@ -68,6 +68,22 @@ const insertListNumbers = (range: Range, restores: Restore[]) => {
   });
 };
 
+// Пометка «не проверено» (подчёркнутая фраза, Markdown.tsx) — только для глаз в
+// чате. Егор копирует ответ дальше (списки, должности), и черта не должна уехать
+// в Telegram или «Заметки» оформлением. На время копирования снимаем с фразы
+// только стиль черты: узлы не переставляем — ими владеет React, ответ может ещё
+// печататься.
+const neutralizeUncertain = (range: Range, restores: Restore[]) => {
+  document.querySelectorAll<HTMLElement>(`[${MARKDOWN_ROOT_ATTR}] .md-uncertain`).forEach((el) => {
+    if (!range.intersectsNode(el)) return;
+    const previous = el.style.textDecoration;
+    el.style.textDecoration = 'none';
+    restores.push(() => {
+      el.style.textDecoration = previous;
+    });
+  });
+};
+
 const makeSpacer = (): HTMLElement => {
   const spacer = document.createElement('div');
   spacer.setAttribute(SPACER_ATTR, '');
@@ -105,6 +121,7 @@ const insertSpacers = (): { restores: Restore[]; selection: Selection; range: Ra
     }
   });
   insertListNumbers(range, restores);
+  neutralizeUncertain(range, restores);
   if (restores.length > 0) reselect(selection, range);
   return { restores, selection, range };
 };

@@ -280,6 +280,23 @@ export const sessionsService = {
   },
 
   /**
+   * Вешает или снимает ярлык-флажок на чате. Только метка в базе: файл
+   * переписки и порядок чатов не меняются.
+   */
+  setSessionFlagged(sessionId: string, flagged: boolean): { flagged: boolean } {
+    const session = sessionsDb.getSessionById(sessionId);
+    if (!session) {
+      throw new AppError(`Session "${sessionId}" was not found.`, {
+        code: 'SESSION_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+
+    sessionsDb.setSessionFlagged(sessionId, flagged);
+    return { flagged };
+  },
+
+  /**
    * Resolves the provider-native id only for an explicit user copy action.
    * Normal session payloads continue to expose only the stable app id.
    */

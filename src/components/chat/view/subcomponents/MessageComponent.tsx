@@ -1,3 +1,4 @@
+import { Mail } from 'lucide-react';
 import { memo, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -18,6 +19,7 @@ import ChatMessageImages from './ChatMessageImages';
 import ChatMessageFiles from './ChatMessageFiles';
 import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
+import MessageRewindControl from './MessageRewindControl';
 import MessageSpeakControl from './MessageSpeakControl';
 import { isDesktopApp } from '../../../../lib/desktopBridge';
 import { isClaudeNotLoggedInText, refreshClaudeConnect, useClaudeConnect } from '../../../provider-auth/claude-connect/claudeConnectStore';
@@ -54,6 +56,11 @@ type MessageComponentProps = {
   onGrantToolPermission?: (suggestion: ClaudePermissionSuggestion) => PermissionGrantResult | null | undefined;
   showRawParameters?: boolean;
   showThinking?: boolean;
+  /**
+   * «Вернуться сюда»: убрать это сообщение и всё после него, текст — в поле
+   * ввода. Нет обработчика — нет и кнопки (другие провайдеры, архив).
+   */
+  onRewindToMessage?: (message: ChatMessage) => void;
   selectedProject?: Project | null;
   provider: Provider | string;
 };
@@ -80,7 +87,7 @@ function toRequestLabel(content: string): string | undefined {
   return cleaned ? cleaned.slice(0, 300) : undefined;
 }
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, onRewindToMessage, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
 
   /*
@@ -195,6 +202,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                   </Markdown>
                 </div>
                 <div className="mt-1 flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                  {onRewindToMessage && (
+                    <MessageRewindControl onRewind={() => onRewindToMessage(message)} />
+                  )}
                   {shouldShowUserCopyControl && (
                     <MessageCopyControl content={userCopyContent} messageType="user" />
                   )}
@@ -213,6 +223,20 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               U
             </div>
           )}
+        </div>
+      ) : message.isCrossChatLetter ? (
+        /* Письмо соседнего ИИ-чата: серая строка слева, само письмо — по нажатию */
+        <div className="w-full">
+          <details className="group py-0.5">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+              <span>{message.content}</span>
+              <span className="underline underline-offset-2 group-open:hidden">показать</span>
+            </summary>
+            <div className="mt-1.5 whitespace-pre-wrap rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              {String(message.letterBody || '')}
+            </div>
+          </details>
         </div>
       ) : message.isTaskNotification ? (
         /* Compact task notification on the left */

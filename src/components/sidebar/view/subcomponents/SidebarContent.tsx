@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { Archive, Folder, RotateCcw, Terminal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -7,9 +7,9 @@ import { cn } from '../../../../lib/utils';
 import type { AppTab, Project, ProjectSession } from '../../../../types/app';
 import type { ReleaseInfo } from '../../../../shared/types';
 import type { ConversationSearchResults, SearchProgress } from '../../hooks/useSidebarController';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, RecentConversationListItem, SidebarSearchMode } from '../../types/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, RecentConversationListItem, SessionWithProvider, SidebarSearchMode } from '../../types/types';
 import LLMProviderLogo from '../../../llm-provider-logo/LLMProviderLogo';
-import { formatCompactAge, getAllSessions } from '../../utils/utils';
+import { formatCompactAge, getAllSessions, getSessionDate } from '../../utils/utils';
 
 import SidebarFooter from './SidebarFooter';
 import SidebarHeader from './SidebarHeader';
@@ -246,6 +246,41 @@ export default function SidebarContent({
   const flatDisplayProject = singleStarredProject
     ? (pickerProject ?? singleStarredProject)
     : null;
+  // Чаты, перенесённые в этот блок поимённо из папки другого блока. Файл
+  // переписки остаётся в своей папке, и раньше такой чат был виден только
+  // через «все папки»: Егор 25.09.26 перенёс рабочий чат из «2-го сервера»
+  // в «Проекты» и потерял его — во «2-м сервере» чата уже нет, а плоский
+  // список «Проектов» показывает одну ведущую папку. Теперь они стоят в
+  // общем списке блока, по дате, и открываются в своей папке. Список папок
+  // приходит уже отобранным по блоку, поэтому у папки чужого блока здесь
+  // только перенесённые сюда чаты.
+  const flatSessions = useMemo(() => {
+    const sessionProjects = new Map<string, Project>();
+    if (!flatDisplayProject) {
+      return { sessions: [] as SessionWithProvider[], sessionProjects };
+    }
+    const own = projectListProps.getProjectSessions(flatDisplayProject);
+    if (pickerProject || !secondServerLabel) {
+      return { sessions: own, sessionProjects };
+    }
+    const movedIn: SessionWithProvider[] = [];
+    for (const project of projectListProps.projects) {
+      if (project.projectId === flatDisplayProject.projectId || (project.serverScope ?? 'main') === serverScope) {
+        continue;
+      }
+      for (const session of projectListProps.getProjectSessions(project)) {
+        sessionProjects.set(session.id, project);
+        movedIn.push(session);
+      }
+    }
+    if (movedIn.length === 0) {
+      return { sessions: own, sessionProjects };
+    }
+    const sessions = [...own, ...movedIn].sort(
+      (a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
+    );
+    return { sessions, sessionProjects };
+  }, [flatDisplayProject, pickerProject, secondServerLabel, serverScope, projectListProps.projects, projectListProps.getProjectSessions]);
   // Кнопка «все папки» переехала в полосу вкладок, на место убранной вкладки
   // Conversations. Собирается здесь, а не в шапке: ей нужен список проектов и
   // обработчик выбора, которые живут в этом компоненте.
@@ -616,7 +651,8 @@ export default function SidebarContent({
               flat
               project={flatDisplayProject}
               isExpanded={true}
-              sessions={projectListProps.getProjectSessions(flatDisplayProject)}
+              sessions={flatSessions.sessions}
+              sessionProjects={flatSessions.sessionProjects}
               selectedSession={projectListProps.selectedSession}
               initialSessionsLoaded={projectListProps.initialSessionsLoaded.has(flatDisplayProject.projectId)}
               hasMoreSessions={Boolean(flatDisplayProject.sessionMeta?.hasMore)}

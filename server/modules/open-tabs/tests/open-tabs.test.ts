@@ -62,3 +62,10 @@ test('список чистится: повторы, пустые, лишние 
   );
   assert.deepEqual(normalizeOpenTabs('nope'), []);
 });
+
+test('время открытия вкладки хранится — по нему страница убирает самую давнюю сверх 15', () => {
+  assert.deepEqual(
+    normalizeOpenTabs([{ sessionId: 'a', openedAt: 1758800000000.4 }, { sessionId: 'b', openedAt: 'вчера' }, { sessionId: 'c', openedAt: -1 }]),
+    [{ sessionId: 'a', openedAt: 1758800000000 }, { sessionId: 'b' }, { sessionId: 'c' }],
+  );
+});

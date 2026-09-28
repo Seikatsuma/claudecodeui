@@ -341,6 +341,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ serverScope }),
     }),
+  // Вешает (true) или снимает (false) ярлык-флажок на чате.
+  setSessionFlagged: (sessionId, flagged) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/flag`, {
+      method: 'POST',
+      body: JSON.stringify({ flagged }),
+    }),
   // Clusters this project's currently ungrouped sessions by topic via one
   // LLM call. Assignments land through the usual session_upserted websocket
   // broadcast, so this response is mainly useful for immediate UI feedback

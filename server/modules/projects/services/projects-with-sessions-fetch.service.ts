@@ -20,6 +20,8 @@ type SessionSummary = {
   groupLabel: string | null;
   /** Свой сервер у чата: null — как у папки. */
   serverScope: ServerScope | null;
+  /** Ярлык-флажок на чате. */
+  flagged: boolean;
 };
 
 type SessionRepositoryRow = {
@@ -31,6 +33,7 @@ type SessionRepositoryRow = {
   group_id?: string | null;
   group_label?: string | null;
   server_scope?: ServerScope | null;
+  is_flagged?: number | null;
 };
 
 export type ProjectListItem = {
@@ -139,6 +142,7 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
     groupId: row.group_id ?? null,
     groupLabel: row.group_label ?? null,
     serverScope: row.server_scope ?? null,
+    flagged: Boolean(row.is_flagged),
   };
 }
 

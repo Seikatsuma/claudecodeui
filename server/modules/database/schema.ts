@@ -146,6 +146,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- 'main'/'second'. Так чат переносится во второй блок панели, не
     -- переезжая файлом в другую папку.
     server_scope TEXT,
+    -- Ярлык-флажок на чате (меню «…» → «Повесить ярлык»). Только метка:
+    -- порядок чатов от него не меняется.
+    is_flagged INTEGER NOT NULL DEFAULT 0,
     isArchived BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

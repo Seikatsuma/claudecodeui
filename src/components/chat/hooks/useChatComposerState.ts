@@ -39,6 +39,7 @@ import { usePromptPresetsContext } from '../../../contexts/PromptPresetsContext'
 import { isTouchKeyboard } from '../../../utils/touchKeyboard';
 import type { Project, ProjectSession, LLMProvider, ProviderModelOption } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
+import { prepareStep } from '../utils/contextLevel';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -55,9 +56,11 @@ const COMPOSER_ROOM_FLOOR_PX = 96;
 let pendingHandoff: { projectId: string; message: string } | null = null;
 /** Идёт ли опрос задачи — один на вкладку, даже если экран чата пересоздан. */
 let handoffPolling = false;
+/** На каком десятке процентов окна этой вкладкой уже просили заготовку — по чатам. */
+const preparedHandoffSteps = new Map<string, number>();
 
 /** Начатая задача переноса — в браузере, чтобы пережить выгрузку вкладки. */
-type HandoffJobRecord = { sessionId: string; projectId: string; startedAt: number };
+type HandoffJobRecord = { sessionId: string; projectId: string; startedAt: number; goal?: string };
 const HANDOFF_JOB_KEY = 'handoff_job';
 /** Сервер хранит задачу 30 минут после конца; дольше ждать нечего. */
 const HANDOFF_JOB_MAX_AGE_MS = 30 * 60 * 1000;
@@ -456,11 +459,19 @@ export function useChatComposerState({
           onShowSettings?.();
           break;
 
+        // /clear — новый пустой чат в той же папке, как «Новый сеанс»: Claude
+        // сам завёл бы разговор под новым номером, которого интерфейс не видит.
+        case 'clear':
+          if (selectedProject && onStartNewChat) {
+            onStartNewChat(selectedProject);
+          }
+          break;
+
         default:
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage],
+    [onFileOpen, onShowSettings, addMessage, selectedProject, onStartNewChat],
   );
 
   const closeCommandModal = useCallback(() => {
@@ -1411,26 +1422,38 @@ export function useChatComposerState({
    * Опрос задачи до готовности. `resumeSessionId` — продолжить уже начатую
    * (вкладку выгрузили, пока модель писала): тогда без нового POST.
    */
-  const runHandoff = useCallback(async (sourceProject: Project, sourceSessionId: string, resume: boolean) => {
+  const runHandoff = useCallback(async (sourceProject: Project, sourceSessionId: string, resume: boolean, goal = '') => {
     if (!onStartNewChat || handoffPolling) return;
     handoffPolling = true;
     setHandoffStatus('running');
     if (!resume) {
-      writeHandoffJob({ sessionId: sourceSessionId, projectId: sourceProject.projectId, startedAt: Date.now() });
+      writeHandoffJob({ sessionId: sourceSessionId, projectId: sourceProject.projectId, startedAt: Date.now(), goal: goal || undefined });
     }
     const fail = (message: string) => {
       clearHandoffJob();
       setHandoffStatus('idle');
+      // Задача, взятая из поля, не пропадает: возвращается туда же, если
+      // человек всё ещё в этом чате и ничего нового не набрал.
+      if (goal && sessionKeyRef.current === sourceSessionId && !inputValueRef.current.trim()) {
+        inputValueRef.current = goal;
+        setInput(goal);
+      }
       addMessage({ type: 'error', content: `Не получилось продолжить в новом чате: ${message}`, timestamp: new Date() });
     };
     try {
       const url = `/api/handoff/${encodeURIComponent(sourceSessionId)}`;
-      let response = await authenticatedFetch(url, resume ? undefined : { method: 'POST' });
+      let response = await authenticatedFetch(url, resume ? undefined : {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal: goal || undefined }),
+      });
       let body = await response.json().catch(() => ({}));
       if (!response.ok) return fail(body?.error || `ошибка ${response.status}`);
       const deadline = Date.now() + 12 * 60 * 1000;
+      let polls = 0;
       while (body?.status === 'running' && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        // Из заготовки выжимка готова за секунды — первые опросы чаще.
+        await new Promise((resolve) => setTimeout(resolve, polls++ < 5 ? 1000 : 3000));
         response = await authenticatedFetch(url);
         body = await response.json().catch(() => ({}));
         if (!response.ok) return fail(body?.error || `ошибка ${response.status}`);
@@ -1454,11 +1477,71 @@ export function useChatComposerState({
     }
   }, [addMessage, onStartNewChat]);
 
+  /*
+   * Текст, набранный в поле перед нажатием, — задача нового чата (Amp:
+   * «цель нового треда задаёт человек»; Anthropic: сжатие портится, когда
+   * модель не знает, куда пойдёт работа). Поле очищается: текст переезжает.
+   */
   const startHandoff = useCallback(() => {
     const sourceSessionId = sessionKeyRef.current;
     if (!sourceSessionId || !selectedProject || handoffStatus === 'running') return;
-    void runHandoff(selectedProject, sourceSessionId, false);
+    const goal = inputValueRef.current.trim();
+    if (goal) {
+      inputValueRef.current = '';
+      setInput('');
+    }
+    void runHandoff(selectedProject, sourceSessionId, false, goal);
   }, [handoffStatus, runHandoff, selectedProject]);
+
+  /*
+   * «Сжать в этом чате» (Егор 27.09.26, вариант 1 после сравнения со встроенным
+   * /compact): тот же чат, встроенное сжатие Claude. Текст из поля — что важно
+   * дальше; к нему добавляется то, что сжатие теряет чаще всего. Уходит обычной
+   * отправкой: /compact сайт не перехватывает, его выполняет сам Claude.
+   */
+  const compactHere = useCallback(() => {
+    if (!sessionKeyRef.current || handoffStatus === 'running') return;
+    const goal = inputValueRef.current.replace(/\s+/g, ' ').trim();
+    const focus = [
+      goal ? `Дальше: ${goal}. Сохрани в первую очередь всё, что для этого нужно.` : '',
+      'Сохрани подробно: решения с причинами и отвергнутое; поправки и требования человека почти дословно; текущую правку кода — файлы, функции, что сделано и что осталось; следующий шаг; полные пути к нужным файлам.',
+    ].filter(Boolean).join(' ');
+    const command = `/compact ${focus}`;
+    inputValueRef.current = command;
+    setInput(command);
+    window.setTimeout(() => {
+      if (inputValueRef.current !== command) return;
+      void handleSubmitRef.current?.(createFakeSubmitEvent());
+    }, 30);
+  }, [handoffStatus]);
+
+  /*
+   * Заготовка выжимки заранее: чат перешёл на половину окна (кнопка
+   * пожелтела) или на следующий десяток процентов — сервер собирает выжимку
+   * фоном, и нажатие потом берёт готовую за секунду вместо полутора-двух
+   * минут. Повтор того же десятка сервер отбрасывает сам.
+   */
+  const handoffPrepareStep = prepareStep(tokenBudget);
+  useEffect(() => {
+    if (!canHandoff || !sessionKey || handoffPrepareStep === 0) return;
+    if ((preparedHandoffSteps.get(sessionKey) ?? 0) >= handoffPrepareStep) return;
+    preparedHandoffSteps.delete(sessionKey);
+    preparedHandoffSteps.set(sessionKey, handoffPrepareStep);
+    // Вкладка живёт неделями (приложение на телефоне) — помним последние 200 чатов.
+    if (preparedHandoffSteps.size > 200) {
+      const oldest = preparedHandoffSteps.keys().next().value;
+      if (oldest) preparedHandoffSteps.delete(oldest);
+    }
+    void authenticatedFetch(`/api/handoff/${encodeURIComponent(sessionKey)}/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ step: handoffPrepareStep }),
+    }).then(async (response) => {
+      const body = await response.json().catch(() => ({}));
+      // Сервер занят другими заготовками — попробуем на следующем шаге.
+      if (!response.ok || body?.status === 'busy') preparedHandoffSteps.delete(sessionKey);
+    }).catch(() => preparedHandoffSteps.delete(sessionKey));
+  }, [canHandoff, sessionKey, handoffPrepareStep]);
 
   // iPhone выгружает свёрнутое приложение, и опрос в памяти вкладки умирает.
   // Начатая задача записана в браузере: вернулись — опрос продолжается.
@@ -1467,7 +1550,8 @@ export function useChatComposerState({
       if (document.visibilityState !== 'visible' || handoffPolling) return;
       const job = readHandoffJob();
       if (!job || !selectedProject || selectedProject.projectId !== job.projectId) return;
-      void runHandoff(selectedProject, job.sessionId, true);
+      // Задача из поля хранится вместе с записью — при сбое вернётся в поле.
+      void runHandoff(selectedProject, job.sessionId, true, job.goal ?? '');
     };
     resume();
     document.addEventListener('visibilitychange', resume);
@@ -1745,6 +1829,7 @@ export function useChatComposerState({
     showCostModal,
     handoffStatus,
     startHandoff,
+    compactHere,
     canHandoff,
   };
 }
