@@ -319,6 +319,10 @@ Custom commands can be created in:
           tokenBreakdown: {
             input: Number(fresh.session.inputTokens) || 0,
             output: Number(fresh.session.outputTokens) || 0,
+            // Для понятного окна: сколько из прочитанного — повтор уже знакомого
+            // (кэш) и за сколько шагов Claude всё это набралось.
+            cacheRead: Number(fresh.session.cacheReadTokens) || 0,
+            steps: Number(fresh.session.requests) || 0,
           },
           provider,
           model: fresh.model && contextWindow ? `${fresh.model} · ${windowLabel} context` : (fresh.model || model),
