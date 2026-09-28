@@ -1049,7 +1049,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     // тогда не трогаем: два процесса под одним номером испортили бы переписку.
     if (sdkOptions.resume
       && !activeSessions.has(sessionKey())
-      && !(await hasTranscriptOnDisk(sdkOptions.env?.CLAUDE_CONFIG_DIR, sdkOptions.resume))) {
+      && !(await hasTranscriptOnDisk(sdkOptions.env?.CLAUDE_CONFIG_DIR || getClaudeConfigDir(), sdkOptions.resume))) {
       console.warn(`[Claude SDK] переписки ${sdkOptions.resume} нет на диске — начинаю разговор под тем же номером`);
       sdkOptions.sessionId = sdkOptions.resume;
       delete sdkOptions.resume;
@@ -1286,7 +1286,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       // Лимиты подписки приходят прямо в потоке — забираем их бесплатно,
       // вместо отдельного прогона, который тратил бы ту же квоту.
       if (message?.type === 'rate_limit_event' && message.rate_limit_info) {
-        recordRateLimitEvent(sdkOptions?.env?.CLAUDE_CONFIG_DIR || '', message.rate_limit_info);
+        recordRateLimitEvent(sdkOptions?.env?.CLAUDE_CONFIG_DIR || getClaudeConfigDir(), message.rate_limit_info);
       }
       // Capture session ID from first message
       if (message.session_id && !capturedSessionId) {

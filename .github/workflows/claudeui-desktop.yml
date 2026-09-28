@@ -217,7 +217,8 @@ jobs:
           echo "с папкой ~/.claude: $WITH_DIR"
           security delete-generic-password -a "$USER" -s "Claude Code-credentials" >/dev/null || true
           echo "$NO_DIR" | grep -q '"loggedIn": *true' || { echo "без папки вход не виден"; exit 1; }
-          echo "$WITH_DIR" | grep -q '"loggedIn": *false' && echo "причина подтверждена: с явной папкой вход из Связки не виден"
+          echo "$WITH_DIR" | grep -q '"loggedIn": *false' || { echo "с явной папкой вход виден — причина на этой macOS не подтвердилась"; exit 1; }
+          echo "причина подтверждена: с явной папкой вход из Связки не виден"
       - name: Установка на Windows — установщиком, без вопросов
         if: matrix.kind == 'win'
         shell: pwsh
