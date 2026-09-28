@@ -785,6 +785,19 @@ body.linux .titlebar {
   white-space: nowrap;
 }
 
+.tb-update-ok {
+  color: var(--ok);
+}
+
+.tb-update-spin {
+  display: inline-flex;
+  animation: tb-update-spin 1s linear infinite;
+}
+
+@keyframes tb-update-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 760px) {
   .v-sidebar {
     grid-template-columns: 1fr;

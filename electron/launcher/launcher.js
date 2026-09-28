@@ -104,6 +104,7 @@ window.__MOCK_STATE__ = {
     phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/>',
     x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    check: '<polyline points="20 6 9 17 4 12"/>',
     logOut: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   };
   var FILLED = { play: true };
@@ -330,7 +331,15 @@ window.__MOCK_STATE__ = {
       case 'app-update':
         return CC.run('', function () { return bridge.installAppUpdate(); });
       case 'app-update-check':
-        return CC.run('', function () { return bridge.checkAppUpdate(); });
+        // Кнопка справа сверху: проверить сейчас; новой нет — пара секунд «✓ Последняя версия».
+        return CC.run('', function () { return bridge.checkAppUpdate(); }).then(function () {
+          var after = (CC.state && CC.state.appUpdate) || {};
+          if (after.status === 'idle') {
+            CC._updateJustChecked = Date.now();
+            CC.render(CC.state);
+            setTimeout(function () { CC.render(CC.state); }, 4200);
+          }
+        });
       case 'app-update-page':
         return CC.run('Открываю страницу скачивания…', function () { return bridge.openAppUpdatePage(); });
       case 'refresh-tab':
@@ -403,7 +412,18 @@ window.__MOCK_STATE__ = {
         esc('Сборка ' + update.latestBuild + ' требует переустановки: скачать установщик') + '">' +
         icon('download', 14) + '<span>Новая версия</span></button>';
     }
-    return '';
+    // Новой версии нет — кнопка всё равно на месте (Егор 28.09: «справа сверху небольшая
+    // кнопка со своим значком»): тихий значок загрузки, нажатие проверяет сейчас.
+    if (update.status === 'checking') {
+      return '<button class="icon-btn tb-action tb-update no-drag" disabled title="Проверяю, есть ли новая версия…">' +
+        '<span class="tb-update-spin">' + icon('refresh', 16) + '</span></button>';
+    }
+    if (CC._updateJustChecked && Date.now() - CC._updateJustChecked < 4000) {
+      return '<button class="btn sm tb-action tb-update tb-update-ok no-drag" data-cc-action="app-update-check" title="' +
+        esc('У вас последняя версия — сборка ' + update.build) + '">' + icon('check', 14) + '<span>Последняя версия</span></button>';
+    }
+    return '<button class="icon-btn tb-action tb-update no-drag" data-cc-action="app-update-check" title="' +
+      esc('Обновления программы · сейчас сборка ' + update.build + '. Нажмите, чтобы проверить новую') + '">' + icon('download', 16) + '</button>';
   };
 
   CC.buildUpdateSection = function (state) {

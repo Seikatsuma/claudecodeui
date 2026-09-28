@@ -67,10 +67,12 @@ const sha256 = await new Promise((resolve, reject) => {
 });
 const { size } = await fs.stat(archive);
 
-// «Что нового» — тема последней правки; служебные сообщения git не нужны.
+// «Что нового» — тема последней правки; служебные сообщения git не нужны. Слияния
+// («Merge commit …» — так в программу вливается сайт) пропускаем: берём тему последней
+// настоящей правки, она по-русски и о деле.
 let notes = '';
 try {
-  notes = execFileSync('git', ['log', '-1', '--format=%s'], { cwd: rootDir, encoding: 'utf8' })
+  notes = execFileSync('git', ['log', '-1', '--no-merges', '--format=%s'], { cwd: rootDir, encoding: 'utf8' })
     .trim().replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, '').replace(/\s*\[skip ci\]\s*/i, '');
 } catch {
   notes = '';
