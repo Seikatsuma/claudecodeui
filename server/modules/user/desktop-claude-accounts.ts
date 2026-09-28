@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  clearClaudeAuthStatusCache,
+  readOwnClaudeLogin,
+  setDesktopLoginSuccessListener,
+} from '@/modules/providers/list/claude/claude-desktop-login.js';
+
 /**
  * Подписки Claude владельца в настольной программе: приходят готовыми с сервера
  * аккаунтов, без входа через «Настройки → Агенты».
@@ -12,42 +18,67 @@ import path from 'node:path';
  * окружение заново, так что переключение действует со следующего сообщения.
  * Список ключей из окружения сразу убираем — иначе его унаследовали бы команды,
  * которые Claude запускает на компьютере.
+ *
+ * Свой вход через браузер (`claude auth login --claudeai`) главнее ключа: только
+ * при нём приходят подключения аккаунта claude.ai — Google Диск, Gmail, Календарь
+ * и другие (при ключе setup-token Claude их не загружает). Поэтому: вошёл сам — ключ
+ * убираем из окружения; выбрал подписку в переключателе — снова ключ.
  */
 
 type DesktopClaudeAccount = { email: string; token: string };
 
 let accounts: DesktopClaudeAccount[] = [];
 let activeEmail: string | null = null;
+let ownLoginActive = false;
+// Подписку выбрали в переключателе, пока шла проверка своего входа, — выбор важнее.
+let activeEmailChosenSinceStart = false;
 let initialized = false;
+
+type SavedChoice = { email: string | null; own: boolean };
 
 const statePath = (): string | null => {
   const dbPath = process.env.DATABASE_PATH;
   return dbPath ? path.join(path.dirname(dbPath), 'claude-account.json') : null;
 };
 
-const readSavedEmail = (): string | null => {
+const readSavedChoice = (): SavedChoice => {
   const file = statePath();
-  if (!file) return null;
+  if (!file) return { email: null, own: false };
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { email?: unknown };
-    return typeof parsed.email === 'string' ? parsed.email : null;
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { email?: unknown; own?: unknown };
+    return { email: typeof parsed.email === 'string' ? parsed.email : null, own: parsed.own === true };
   } catch {
-    return null;
+    return { email: null, own: false };
   }
 };
 
-const saveEmail = (email: string): void => {
+const saveChoice = (choice: { email?: string; own?: boolean }): void => {
   const file = statePath();
   if (!file) return;
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ email }), 'utf8');
+  fs.writeFileSync(file, JSON.stringify(choice), 'utf8');
 };
 
 const apply = (email: string | null): void => {
   const account = accounts.find((item) => item.email === email) ?? accounts[0];
   if (!account) return;
   activeEmail = account.email;
+  ownLoginActive = false;
   process.env.CLAUDE_CODE_OAUTH_TOKEN = account.token;
+  clearClaudeAuthStatusCache();
+};
+
+/** Перейти на свой вход через браузер: ключ из окружения убрать (со следующего сообщения). */
+const useOwnLogin = (): void => {
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  activeEmail = null;
+  ownLoginActive = true;
+  clearClaudeAuthStatusCache();
+};
+
+const hasOwnClaudeAiLogin = async (): Promise<boolean> => {
+  const own = await readOwnClaudeLogin();
+  return Boolean(own?.loggedIn && own.authMethod === 'claude.ai');
 };
 
 /** Разбирает ключи из окружения один раз, при старте сервера программы. */
@@ -69,7 +100,24 @@ export function initDesktopClaudeAccounts(): void {
   } catch {
     accounts = [];
   }
-  apply(readSavedEmail());
+
+  // Вход через браузер в программе завершился — сразу на него и запомнить выбор.
+  setDesktopLoginSuccessListener(() => {
+    useOwnLogin();
+    saveChoice({ own: true });
+  });
+  if (!accounts.length) return;
+
+  const saved = readSavedChoice();
+  if (saved.email && !saved.own) {
+    apply(saved.email); // подписку выбрали в переключателе сами — её и держим
+    return;
+  }
+  // Пока проверяем свой вход (1–2 секунды) — работает ключ, чтобы первое сообщение не упало.
+  apply(null);
+  void hasOwnClaudeAiLogin().then((own) => {
+    if (own && !activeEmailChosenSinceStart) useOwnLogin();
+  }).catch(() => {});
 }
 
 export function hasDesktopClaudeAccounts(): boolean {
@@ -77,7 +125,7 @@ export function hasDesktopClaudeAccounts(): boolean {
 }
 
 export function getDesktopClaudeActiveEmail(): string | null {
-  return activeEmail;
+  return ownLoginActive ? null : activeEmail;
 }
 
 /** Тот же ответ, что у сайта (/api/user/owner-accounts): номер = место в списке с 1. */
@@ -85,7 +133,7 @@ export function listDesktopClaudeAccounts() {
   const activeIndex = accounts.findIndex((item) => item.email === activeEmail);
   return {
     success: true,
-    activeSlot: activeIndex >= 0 ? activeIndex + 1 : null,
+    activeSlot: !ownLoginActive && activeIndex >= 0 ? activeIndex + 1 : null,
     accounts: accounts.map((item, index) => ({ slot: index + 1, email: item.email, available: true })),
   };
 }
@@ -95,7 +143,8 @@ export function activateDesktopClaudeAccount(slotInput: unknown) {
   if (!account) {
     return null;
   }
+  activeEmailChosenSinceStart = true;
   apply(account.email);
-  saveEmail(account.email);
+  saveChoice({ email: account.email });
   return listDesktopClaudeAccounts();
 }

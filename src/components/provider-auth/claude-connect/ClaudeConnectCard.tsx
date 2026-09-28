@@ -69,7 +69,20 @@ export default function ClaudeConnectCard({ variant }: Props) {
             {accountLine(connect.email, connect.subscriptionType) && (
               <div className="mt-0.5 truncate text-sm text-muted-foreground">{accountLine(connect.email, connect.subscriptionType)}</div>
             )}
-            {(variant === 'settings' || connect.forcedOpen) && (
+            {connect.authMethod === 'oauth_token' && (
+              <div className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                Сейчас Claude работает по ключу подписки. Чтобы заработали Google Диск, Gmail, Календарь и другие подключения, войдите в Claude через браузер — один раз.
+              </div>
+            )}
+            {connect.authMethod === 'oauth_token' ? (
+              <button
+                type="button"
+                onClick={() => void startClaudeConnect()}
+                className="mt-3 rounded-lg bg-[#d97757] px-4 py-2 text-sm font-medium text-white hover:bg-[#c96442]"
+              >
+                Войти через браузер
+              </button>
+            ) : (variant === 'settings' || connect.forcedOpen) && (
               <button
                 type="button"
                 onClick={() => void startClaudeConnect()}

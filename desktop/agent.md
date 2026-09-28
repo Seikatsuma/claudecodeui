@@ -34,6 +34,11 @@
   зашифрованный файл DPAPI `~/.claudeui/keys/<имя>.txt` Windows; открыть ссылку на Windows — `explorer`, не `start ""`: без Git Bash команды идут в PowerShell) и `plugin/skills/tools` (uv без администратора, `scripts/photos_info.py` —
   дата/место/адрес фото с HEIC, `scripts/video_frames.py` — кадры, дата, место, звук; ffmpeg из imageio-ffmpeg).
   `claude mcp login` и `/mcp` во встроенном Claude 2.1.165 нет — вход в MCP только тем инструментом.
+  Владелец (годовые ключи setup-token с сервера аккаунтов) без своего входа подключений claude.ai не получает —
+  `desktop-claude-accounts.ts`: свой вход claude.ai (проверка `readOwnClaudeLogin` без ключа в окружении,
+  1–2 с после старта; успех «Войти через браузер» — сразу) главнее ключа, выбор в переключателе подписок — снова
+  ключ; выбор в `<данные>/claude-account.json` (`{own:true}` или `{email}`). Карточка при `authMethod: oauth_token`
+  объясняет и даёт «Войти через браузер» (видна в настройках и по `/login` в чате).
   `applyDesktopBrains` добавляет в PATH Claude `~/.local/bin` и `~/.claudeui/node(/bin)` — туда ставятся uv и Node.
 - Узкое окно — `src/components/app/AppContent.tsx`: 768–1023 точки → полоска значков, панель выезжает
   поверх чата; уже 768 — телефонная раскладка. Окно сжимается до 420 (`desktopWindow.js`).

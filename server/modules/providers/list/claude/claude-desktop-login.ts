@@ -45,6 +45,12 @@ let timeoutTimer: NodeJS.Timeout | null = null;
 let output = '';
 let state: DesktopLoginState = { phase: 'idle', url: null, message: null, startedAt: null, codeSent: false };
 let statusCache: { at: number; value: ClaudeCliAuthStatus } | null = null;
+/** Вход через браузер завершён — программа переходит на него с годового ключа (desktop-claude-accounts). */
+let successListener: (() => void) | null = null;
+
+export function setDesktopLoginSuccessListener(listener: (() => void) | null): void {
+  successListener = listener;
+}
 
 export const isDesktopLoginEnabled = (): boolean => process.env.CLAUDE_UI_DESKTOP === '1';
 
@@ -128,6 +134,7 @@ export function startDesktopLogin(): DesktopLoginState {
     if (state.phase !== 'waiting') return;
     if (code === 0) {
       state = { ...state, phase: 'success', message: null };
+      try { successListener?.(); } catch (error) { console.warn('[claude-login] не переключился на свой вход:', error); }
     } else {
       const detail = lastOutputLine();
       if (detail) console.warn('[claude-login] вход не завершён:', detail);
@@ -182,7 +189,26 @@ export function cancelDesktopLogin(): DesktopLoginState {
  */
 export async function readClaudeCliAuthStatus(force = false): Promise<ClaudeCliAuthStatus | null> {
   if (!force && statusCache && Date.now() - statusCache.at < STATUS_CACHE_MS) return statusCache.value;
-  const value = await new Promise<ClaudeCliAuthStatus | null>((resolve) => {
+  const value = await runAuthStatus(process.env);
+  if (value) statusCache = { at: Date.now(), value };
+  return value;
+}
+
+/**
+ * Собственный вход человека в Claude — без годового ключа с сервера аккаунтов.
+ * Нужен, чтобы выбрать его: подключения аккаунта claude.ai (Google Диск, Gmail,
+ * Календарь…) приходят только при таком входе, при годовом ключе — нет.
+ */
+export function readOwnClaudeLogin(): Promise<ClaudeCliAuthStatus | null> {
+  return runAuthStatus(loginEnv());
+}
+
+export function clearClaudeAuthStatusCache(): void {
+  statusCache = null;
+}
+
+function runAuthStatus(env: NodeJS.ProcessEnv): Promise<ClaudeCliAuthStatus | null> {
+  return new Promise<ClaudeCliAuthStatus | null>((resolve) => {
     let text = '';
     let settled = false;
     const done = (result: ClaudeCliAuthStatus | null) => {
@@ -192,7 +218,7 @@ export async function readClaudeCliAuthStatus(force = false): Promise<ClaudeCliA
     };
     let proc: ChildProcess;
     try {
-      proc = spawn(cliPath(), ['auth', 'status', '--json'], { env: process.env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+      proc = spawn(cliPath(), ['auth', 'status', '--json'], { env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
     } catch {
       done(null);
       return;
@@ -218,6 +244,4 @@ export async function readClaudeCliAuthStatus(force = false): Promise<ClaudeCliA
       }
     });
   });
-  if (value) statusCache = { at: Date.now(), value };
-  return value;
 }

@@ -19,6 +19,8 @@ export type ClaudeConnectState = {
   loggedIn: boolean | null;
   email: string | null;
   subscriptionType: string | null;
+  /** 'claude.ai' — свой вход через браузер; 'oauth_token' — годовой ключ с сервера аккаунтов. */
+  authMethod: string | null;
   phase: ClaudeLoginPhase;
   url: string | null;
   message: string | null;
@@ -35,6 +37,7 @@ let state: ClaudeConnectState = {
   loggedIn: null,
   email: null,
   subscriptionType: null,
+  authMethod: null,
   phase: 'idle',
   url: null,
   message: null,
@@ -58,7 +61,7 @@ const setState = (patch: Partial<ClaudeConnectState>): void => {
 };
 
 type ServerLogin = { phase: ClaudeLoginPhase; url: string | null; message: string | null; codeSent: boolean };
-type ServerStatus = { loggedIn: boolean; email: string | null; subscriptionType: string | null } | null;
+type ServerStatus = { loggedIn: boolean; email: string | null; subscriptionType: string | null; authMethod?: string | null } | null;
 
 const readJson = async (response: Response): Promise<{ login?: ServerLogin; status?: ServerStatus } | null> => {
   try {
@@ -83,6 +86,7 @@ const applyServer = (data: { login?: ServerLogin; status?: ServerStatus } | null
     patch.loggedIn = data.status.loggedIn;
     patch.email = data.status.email;
     patch.subscriptionType = data.status.subscriptionType;
+    patch.authMethod = data.status.authMethod ?? null;
     if (data.status.loggedIn && wasLoggedIn === false) {
       patch.justConnected = true;
       patch.forcedOpen = false;
