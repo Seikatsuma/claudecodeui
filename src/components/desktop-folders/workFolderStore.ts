@@ -44,12 +44,25 @@ export async function chooseWorkFolder(): Promise<string | null> {
   if (!response.ok || !body?.success) throw new Error(body?.error || 'Не получилось сохранить папку — попробуйте ещё раз.');
   const saved = body.data?.workFolder || picked;
   set({ loaded: true, workFolder: saved });
-  window.dispatchEvent(new CustomEvent('claudeui:open-folder-project', { detail: { path: saved } }));
+  // Панель открывает папку слева с новым чатом и сообщает, если не вышло.
+  const openError = await new Promise<string | null>((resolve) => {
+    const timer = window.setTimeout(() => resolve(null), 20000);
+    window.dispatchEvent(new CustomEvent('claudeui:open-folder-project', {
+      detail: { path: saved, onDone: (message: string | null) => { window.clearTimeout(timer); resolve(message); } },
+    }));
+  });
+  if (openError) throw new Error(`Папка сохранена, но открыть её слева не получилось: ${openError}. Откройте её кнопкой «+».`);
   return saved;
 }
 
 export const openFolderPicker = (): void => {
   window.dispatchEvent(new CustomEvent('claudeui:open-new-project'));
+};
+
+/** Один и тот же путь на Windows пишут по-разному: регистр букв и косые черты. */
+export const samePath = (a: string, b: string): boolean => {
+  const norm = (value: string) => value.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+  return norm(a) === norm(b);
 };
 
 /** Путь для человека: внутри главной папки — «Главная › Проекты › Отчёт», иначе полный. */

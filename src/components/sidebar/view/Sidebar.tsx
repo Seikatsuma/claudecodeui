@@ -13,6 +13,7 @@ import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import type { Project, LLMProvider, ServerScope } from '../../../types/app';
 import type { MCPServerStatus, SidebarProps } from '../types/types';
+import { samePath } from '../../desktop-folders/workFolderStore';
 
 import SidebarCollapsed from './subcomponents/SidebarCollapsed';
 import SidebarContent from './subcomponents/SidebarContent';
@@ -240,16 +241,23 @@ function Sidebar({
   useEffect(() => {
     const openPicker = () => setShowNewProject(true);
     const openFolder = (event: Event) => {
-      const folderPath = (event as CustomEvent<{ path?: string }>).detail?.path;
+      const detail = (event as CustomEvent<{ path?: string; onDone?: (error: string | null) => void }>).detail;
+      const folderPath = detail?.path;
       if (!folderPath) return;
       void api.createProject({ path: folderPath }).then(async (response: Response) => {
         const body = await response.json().catch(() => null);
-        if (response.ok && body?.project) handleProjectCreated(body.project);
-        else {
+        if (response.ok && body?.project) {
+          handleProjectCreated(body.project);
+          detail?.onDone?.(null);
+        } else if (response.status === 409) {
           setPendingOpenPath(folderPath); // уже слева — найти после обновления списка
           void paletteOps.refreshProjects();
+          detail?.onDone?.(null);
+        } else {
+          const message = body?.error?.message || body?.error || `ошибка ${response.status}`;
+          detail?.onDone?.(typeof message === 'string' ? message : `ошибка ${response.status}`);
         }
-      }).catch(() => {});
+      }).catch(() => detail?.onDone?.('нет связи с программой'));
     };
     window.addEventListener('claudeui:open-new-project', openPicker);
     window.addEventListener('claudeui:open-folder-project', openFolder);
@@ -260,7 +268,7 @@ function Sidebar({
   });
   useEffect(() => {
     if (!pendingOpenPath) return;
-    const found = scopedProjects.find((item) => (item.fullPath || item.path) === pendingOpenPath);
+    const found = scopedProjects.find((item) => samePath(item.fullPath || item.path || '', pendingOpenPath));
     if (found) {
       setPendingOpenPath(null);
       onNewSession(found);
