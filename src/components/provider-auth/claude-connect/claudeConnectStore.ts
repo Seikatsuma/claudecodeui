@@ -165,7 +165,7 @@ export const dismissJustConnected = (): void => setState({ justConnected: false,
 /** Ответ Claude, означающий «вход устарел»: вход лежит, но не работает. */
 // Только точные сообщения самого Claude в начале текста: ответ, где Claude разбирает
 // чужую ошибку «401», сюда не попадает (замечание проверяющего 28.09.26).
-const EXPIRED_LOGIN = /^\s*(?:Claude Code returned an error result:\s*)?(?:Failed to authenticate\b|Failed to refresh OAuth token\b|OAuth (?:access )?token has expired\b|API Error: 401\b[^\n]*OAuth)/i;
+const EXPIRED_LOGIN = /^\s*(?:Claude Code returned an error result:\s*)?(?:Failed to authenticate\b|Failed to refresh OAuth token\b|OAuth (?:access )?token has expired\b)/i;
 
 export function isClaudeLoginExpiredText(text: unknown): boolean {
   return typeof text === 'string' && text.length <= 600 && EXPIRED_LOGIN.test(text);
