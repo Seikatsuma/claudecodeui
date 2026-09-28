@@ -32,7 +32,7 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
-import { createCompleteMessage, createNormalizedMessage, getClaudeConfigDir, getClaudeJsonPath } from '@/shared/utils.js';
+import { createCompleteMessage, createNormalizedMessage, claudeConfigDirForEnv, getClaudeConfigDir, getClaudeJsonPath } from '@/shared/utils.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import { INHERITED_CLAUDE_AUTH_ENV_KEYS } from '@/shared/claude-login.js';
 import { noteSurvivorProviderSession, spawnSurvivableClaude } from '@/modules/providers/list/claude/survivor-runs.js';
@@ -279,7 +279,8 @@ function mapCliOptionsToSDK(options = {}) {
   // resolve to exactly what was already in `...process.env` above, so this
   // changes nothing for them - CLAUDE_CONFIG_DIR/ANTHROPIC_API_KEY end up with
   // the same values, just spelled out explicitly instead of inherited.
-  const resolvedConfigDir = options.claudeConfigDir || getClaudeConfigDir();
+  // Программа на компьютере: обычную ~/.claude не называем — см. claudeConfigDirForEnv.
+  const resolvedConfigDir = claudeConfigDirForEnv(options.claudeConfigDir || getClaudeConfigDir());
   if (resolvedConfigDir) {
     sdkOptions.env.CLAUDE_CONFIG_DIR = resolvedConfigDir;
   }

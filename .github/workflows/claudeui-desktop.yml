@@ -198,6 +198,26 @@ jobs:
           cp -R "/Volumes/ClaudeUI/Claude UI.app" /Applications/
           hdiutil detach /Volumes/ClaudeUI
           echo "SMOKE_APP=/Applications/Claude UI.app/Contents/MacOS/Claude UI" >> "$GITHUB_ENV"
+      - name: Mac — вход Claude из Связки ключей виден при отправке сообщения
+        # 28.09: программа называла Claude папку ~/.claude явно, и Claude искал вход
+        # в записи «Claude Code-credentials-<8 знаков>» вместо «Claude Code-credentials»
+        # — вход через браузер не находился («Not logged in»). Здесь — сама причина на
+        # настоящей macOS: пробный вход в Связке, вопрос встроенному Claude с папкой и без.
+        if: matrix.kind == 'mac'
+        continue-on-error: true
+        run: |
+          CLI="$(find "/Applications/Claude UI.app" -path '*claude-agent-sdk-darwin*' -name claude -type f | head -1)"
+          echo "встроенный Claude: $CLI"
+          EXP=$(( ($(date +%s) + 86400) * 1000 ))
+          security add-generic-password -U -a "$USER" -s "Claude Code-credentials" \
+            -w "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-probe\",\"refreshToken\":\"sk-ant-ort01-probe\",\"expiresAt\":$EXP,\"scopes\":[\"user:inference\",\"user:profile\"],\"subscriptionType\":\"max\"}}"
+          NO_DIR=$(env -u CLAUDE_CONFIG_DIR "$CLI" auth status --json 2>&1 | tr -d '\n' | cut -c1-300)
+          WITH_DIR=$(CLAUDE_CONFIG_DIR="$HOME/.claude" "$CLI" auth status --json 2>&1 | tr -d '\n' | cut -c1-300)
+          echo "без папки:        $NO_DIR"
+          echo "с папкой ~/.claude: $WITH_DIR"
+          security delete-generic-password -a "$USER" -s "Claude Code-credentials" >/dev/null || true
+          echo "$NO_DIR" | grep -q '"loggedIn": *true' || { echo "без папки вход не виден"; exit 1; }
+          echo "$WITH_DIR" | grep -q '"loggedIn": *false' && echo "причина подтверждена: с явной папкой вход из Связки не виден"
       - name: Установка на Windows — установщиком, без вопросов
         if: matrix.kind == 'win'
         shell: pwsh

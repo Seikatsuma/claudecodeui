@@ -102,6 +102,27 @@ export function isPlatformOwnerWebUser(userId: number): boolean {
  * tests), this falls through to the exact same `process.env` behavior as
  * before.
  */
+/**
+ * Что положить в CLAUDE_CONFIG_DIR запускаемому Claude. В программе на компьютере
+ * обычную папку ~/.claude явно не называем: заданная переменная (даже с путём по
+ * умолчанию) меняет, где Claude ищет вход, — на Mac запись в Связке ключей
+ * получает добавку `-<8 знаков>` («Claude Code-credentials-1a2b3c4d»), и вход
+ * человека через браузер («Claude Code-credentials») не находится: «Not logged
+ * in», хотя `claude auth status` без переменной отвечает «вошёл». Заодно
+ * .claude.json уезжает из ~ в ~/.claude. null — переменную не задавать.
+ */
+export function claudeConfigDirForEnv(dir: string | null | undefined): string | null {
+  if (!dir) return null;
+  if (
+    process.env.CLAUDE_UI_DESKTOP === '1'
+    && !process.env.CLAUDE_CONFIG_DIR
+    && path.resolve(dir) === path.join(os.homedir(), '.claude')
+  ) {
+    return null;
+  }
+  return dir;
+}
+
 export function getClaudeConfigDir(): string {
   const requestConfigDir = getRequestRuntimeContext()?.claudeConfigDir;
   if (requestConfigDir) {

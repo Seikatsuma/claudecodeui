@@ -41,6 +41,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { getConnection } from '@/modules/database/connection.js';
 import { chatGroupsDb, ensureChatGroupsSchema } from '@/modules/database/repositories/chat-groups.js';
+import { claudeConfigDirForEnv } from '@/shared/utils.js';
 
 export { isMachineMadeChat } from '@/modules/database/repositories/chat-groups.js';
 
@@ -355,7 +356,8 @@ export async function askClassifierModel(prompt: string, accountDir: string): Pr
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === 'string') env[key] = value;
   }
-  env.CLAUDE_CONFIG_DIR = accountDir;
+  const configDir = claudeConfigDirForEnv(accountDir);
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
   await mkdir(CLASSIFIER_CWD, { recursive: true }).catch(() => undefined);
 
   const instance = query({

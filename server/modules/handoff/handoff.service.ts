@@ -65,6 +65,7 @@ import {
   type TranscriptDigest,
 } from '@/modules/handoff/handoff-digest.js';
 import { canonicalizeAccountDir, getActiveAccountDir } from '@/shared/session-scope.js';
+import { claudeConfigDirForEnv } from '@/shared/utils.js';
 
 /** Переписка длиннее — разбирается частями, потом части сводятся. */
 const SINGLE_PASS_MAX_CHARS = 300_000;
@@ -300,7 +301,8 @@ async function askModelOnce(prompt: string, accountDir: string): Promise<string>
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === 'string') env[key] = value;
   }
-  env.CLAUDE_CONFIG_DIR = accountDir;
+  const configDir = claudeConfigDirForEnv(accountDir);
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
   await mkdir(MODEL_CWD, { recursive: true }).catch(() => undefined);
 
   const instance = query({

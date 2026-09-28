@@ -33,6 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { claudeConfigDirForEnv } from '@/shared/utils.js';
 
 /** Сколько мыслей принимается за один запрос; длинную работу клиент шлёт страницами. */
 export const MAX_THOUGHTS_PER_REQUEST = 60;
@@ -215,7 +216,8 @@ async function askModel(texts: string[], claudeConfigDir: string | null): Promis
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === 'string') env[key] = value;
   }
-  if (claudeConfigDir) env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+  const configDir = claudeConfigDirForEnv(claudeConfigDir);
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
   await mkdir(DIGEST_CWD, { recursive: true }).catch(() => undefined);
 
   const instance = query({
