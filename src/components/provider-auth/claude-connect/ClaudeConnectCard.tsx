@@ -48,7 +48,7 @@ export default function ClaudeConnectCard({ variant }: Props) {
   const connected = connect.loggedIn === true;
 
   if (variant === 'composer') {
-    const visible = connect.loggedIn === false || waiting || connect.phase === 'error' || connect.forcedOpen || connect.justConnected;
+    const visible = connect.loggedIn === false || waiting || connect.phase === 'error' || connect.forcedOpen || connect.justConnected || connect.authExpired;
     if (!visible || connect.loggedIn === null) return null;
   }
 
@@ -56,8 +56,8 @@ export default function ClaudeConnectCard({ variant }: Props) {
     ? 'mx-auto mb-3 max-w-[54.25rem] rounded-2xl border border-[#d97757]/40 bg-card px-4 py-3.5 shadow-sm'
     : 'rounded-xl border border-border/60 bg-muted/30 px-4 py-3.5';
 
-  // Подключено: коротко и спокойно.
-  if (connected && !waiting) {
+  // Подключено: коротко и спокойно. Вход устарел — ниже, как «не подключён», с «Войти заново».
+  if (connected && !waiting && !connect.authExpired) {
     return (
       <div className={shell} role="status">
         <div className="flex items-start gap-3">
@@ -158,19 +158,21 @@ export default function ClaudeConnectCard({ variant }: Props) {
           ) : (
             <>
               <div className="text-[15px] font-semibold text-foreground">
-                {connect.phase === 'error' ? 'Подключить Claude не получилось' : 'Подключите Claude'}
+                {connect.phase === 'error' ? 'Подключить Claude не получилось' : connect.authExpired ? 'Вход в Claude устарел' : 'Подключите Claude'}
               </div>
               <div className="mt-1 text-sm leading-relaxed text-muted-foreground">
                 {connect.phase === 'error' && connect.message
                   ? connect.message
-                  : 'Claude думает по вашей подписке Claude Pro или Max. Нажмите кнопку — откроется браузер, войдите и нажмите «Разрешить». Это нужно один раз.'}
+                  : connect.authExpired
+                    ? `Claude перестал отвечать: вход${connect.email ? ` (${connect.email})` : ''} больше не действует. Нажмите кнопку — откроется браузер: войдите в свой аккаунт Claude с подпиской и нажмите «Разрешить». Потом отправьте сообщение ещё раз.`
+                    : 'Claude думает по вашей подписке Claude Pro или Max. Нажмите кнопку — откроется браузер, войдите и нажмите «Разрешить». Это нужно один раз.'}
               </div>
               <button
                 type="button"
                 onClick={() => void startClaudeConnect()}
                 className="mt-3 rounded-lg bg-[#d97757] px-4 py-2 text-sm font-medium text-white hover:bg-[#c96442]"
               >
-                {connect.phase === 'error' ? 'Попробовать ещё раз' : 'Подключить Claude'}
+                {connect.phase === 'error' ? 'Попробовать ещё раз' : connect.authExpired ? 'Войти заново' : 'Подключить Claude'}
               </button>
             </>
           )}

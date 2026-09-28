@@ -22,15 +22,20 @@ import MessageCopyControl from './MessageCopyControl';
 import MessageRewindControl from './MessageRewindControl';
 import MessageSpeakControl from './MessageSpeakControl';
 import { isDesktopApp } from '../../../../lib/desktopBridge';
-import { isClaudeNotLoggedInText, refreshClaudeConnect, useClaudeConnect } from '../../../provider-auth/claude-connect/claudeConnectStore';
+import { isClaudeLoginExpiredText, isClaudeNotLoggedInText, markClaudeLoginExpired, refreshClaudeConnect, useClaudeConnect } from '../../../provider-auth/claude-connect/claudeConnectStore';
 
 /** Строка в ленте вместо «Not logged in · Please run /login». Заодно перепроверяет вход — карточка над полем ввода появится сама. */
-function ClaudeNotLoggedInNotice() {
+function ClaudeNotLoggedInNotice({ expired, recent }: { expired: boolean; recent: boolean }) {
   const connect = useClaudeConnect();
   useEffect(() => { void refreshClaudeConnect(true); }, []);
-  const text = connect.loggedIn
-    ? 'Тогда Claude ещё не был подключён к подписке и не ответил. Сейчас подключён — напишите сообщение ещё раз.'
-    : 'Claude ещё не подключён к вашей подписке, поэтому не ответил. Подключите его кнопкой «Подключить Claude» внизу, над полем ввода, — и напишите сообщение ещё раз.';
+  // Вход устарел: «вошли» по-прежнему, но Claude не отвечает — карточка «Войти заново».
+  // Только свежая ошибка (15 мин): старые из истории карточку не открывают — вход мог уже обновиться.
+  useEffect(() => { if (expired && recent) markClaudeLoginExpired(); }, [expired, recent]);
+  const text = expired && !connect.justConnected
+    ? 'Вход в Claude устарел, поэтому он не ответил. Нажмите «Войти заново» внизу, над полем ввода, — войдите в свой аккаунт Claude в браузере и отправьте сообщение ещё раз.'
+    : connect.loggedIn
+      ? 'Тогда Claude ещё не был подключён к подписке и не ответил. Сейчас подключён — напишите сообщение ещё раз.'
+      : 'Claude ещё не подключён к вашей подписке, поэтому не ответил. Подключите его кнопкой «Подключить Claude» внизу, над полем ввода, — и напишите сообщение ещё раз.';
   return (
     <div className="w-full">
       <div className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-3 text-sm text-foreground">
@@ -250,7 +255,12 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
         /* Программа на компьютере, Claude не вошёл в подписку: вместо английской
            ошибки — одна русская строка; кнопка — в карточке над полем ввода.
            «Not logged in» и следом «returned an error result» — одна строка. */
-        isClaudeNotLoggedInText(prevMessage?.content) ? null : <ClaudeNotLoggedInNotice />
+        isClaudeNotLoggedInText(prevMessage?.content) ? null : (
+          <ClaudeNotLoggedInNotice
+            expired={isClaudeLoginExpiredText(message.content)}
+            recent={Date.now() - new Date(message.timestamp || 0).getTime() < 15 * 60 * 1000}
+          />
+        )
       ) : (
         /* Claude/Error/Tool messages on the left */
         <div className="w-full">

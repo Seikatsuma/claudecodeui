@@ -29,6 +29,12 @@ export type ClaudeConnectState = {
   forcedOpen: boolean;
   /** Только что подключились — короткое «Готово». */
   justConnected: boolean;
+  /**
+   * Claude ответил «вход истёк» (401 OAuth access token has expired): вход лежит,
+   * а не работает — `auth status` при этом всё равно говорит «вошли» (28.09.26,
+   * снимок Егора). Показать «Войти заново», пока вход не обновится.
+   */
+  authExpired: boolean;
 };
 
 const BASE = '/api/providers/claude/desktop-login';
@@ -44,6 +50,7 @@ let state: ClaudeConnectState = {
   codeSent: false,
   forcedOpen: false,
   justConnected: false,
+  authExpired: false,
 };
 const listeners = new Set<() => void>();
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -76,6 +83,11 @@ const applyServer = (data: { login?: ServerLogin; status?: ServerStatus } | null
   if (!data) return;
   const patch: Partial<ClaudeConnectState> = {};
   if (data.login) {
+    if (data.login.phase === 'success' && state.phase === 'waiting') {
+      patch.authExpired = false;
+      patch.justConnected = true;
+      patch.forcedOpen = false;
+    }
     patch.phase = data.login.phase;
     patch.url = data.login.url;
     patch.message = data.login.message;
@@ -147,10 +159,24 @@ export function openClaudeConnect(): void {
 
 export const dismissJustConnected = (): void => setState({ justConnected: false, forcedOpen: false });
 
-/** Ответ Claude, означающий «не вошли в подписку». */
+/** Ответ Claude, означающий «вход устарел»: вход лежит, но не работает. */
+const EXPIRED_LOGIN = /OAuth (?:access )?token has expired|Failed to (?:authenticate|refresh OAuth token)|token (?:has been )?revoked|API Error: 401|sign in again/i;
+
+export function isClaudeLoginExpiredText(text: unknown): boolean {
+  return typeof text === 'string' && text.length <= 600 && EXPIRED_LOGIN.test(text);
+}
+
+/** Ответ Claude, означающий «не вошли в подписку» или «вход устарел». */
 export function isClaudeNotLoggedInText(text: unknown): boolean {
   if (typeof text !== 'string' || text.length > 600) return false;
-  return /Not logged in|Please run \/login|\/login isn't available|OAuth token has expired|Invalid API key|authentication_error/i.test(text);
+  return EXPIRED_LOGIN.test(text)
+    || /Not logged in|Please run \/login|\/login isn't available|Invalid API key|authentication_error/i.test(text);
+}
+
+/** Чат получил «вход устарел» — развернуть карточку с «Войти заново». */
+export function markClaudeLoginExpired(): void {
+  if (!isDesktopApp() || state.authExpired) return;
+  setState({ authExpired: true, forcedOpen: true, justConnected: false });
 }
 
 const subscribe = (listener: () => void): (() => void) => {
