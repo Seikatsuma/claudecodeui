@@ -211,8 +211,9 @@ jobs:
           EXP=$(( ($(date +%s) + 86400) * 1000 ))
           security add-generic-password -U -a "$USER" -s "Claude Code-credentials" \
             -w "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-probe\",\"refreshToken\":\"sk-ant-ort01-probe\",\"expiresAt\":$EXP,\"scopes\":[\"user:inference\",\"user:profile\"],\"subscriptionType\":\"max\"}}"
-          NO_DIR=$(env -u CLAUDE_CONFIG_DIR "$CLI" auth status --json 2>&1 | tr -d '\n' | cut -c1-300)
-          WITH_DIR=$(CLAUDE_CONFIG_DIR="$HOME/.claude" "$CLI" auth status --json 2>&1 | tr -d '\n' | cut -c1-300)
+          # Только строка входа: с явной папкой Claude ещё и ругается на .claude.json — длинный текст.
+          NO_DIR=$(env -u CLAUDE_CONFIG_DIR "$CLI" auth status --json 2>/dev/null | grep -o '"loggedIn": *[a-z]*')
+          WITH_DIR=$(CLAUDE_CONFIG_DIR="$HOME/.claude" "$CLI" auth status --json 2>/dev/null | grep -o '"loggedIn": *[a-z]*')
           echo "без папки:        $NO_DIR"
           echo "с папкой ~/.claude: $WITH_DIR"
           security delete-generic-password -a "$USER" -s "Claude Code-credentials" >/dev/null || true
