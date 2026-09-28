@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 
+import { refreshWorkFolder } from '../../../desktop-folders/workFolderStore';
 import { getDesktopBridge } from '../../../../lib/desktopBridge';
 import { authenticatedFetch } from '../../../../utils/api';
 import { Button } from '../../../../shared/view/ui';
@@ -59,6 +60,7 @@ export default function FoldersSettingsTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       }));
+      if (patch.workFolder !== undefined) void refreshWorkFolder(); // строка над полем ввода и первый экран
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -74,8 +76,8 @@ export default function FoldersSettingsTab() {
   return (
     <div className="space-y-8">
       <SettingsSection
-        title="Рабочая папка"
-        description="Claude работает в папке, которую вы открыли слева кнопкой «+»: всё, что он создаёт, ложится туда. Выйти за её пределы он может только с вашего разрешения."
+        title="Главная папка"
+        description="Картотека Claude: в ней он работает и сам раскладывает всё по полкам — у каждого проекта своя папка (в «Проекты»), заметки о людях и темах отдельно. Новые проекты появляются слева сами."
       >
         <SettingsCard>
           <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -87,8 +89,8 @@ export default function FoldersSettingsTab() {
               </div>
               <div className="mt-0.5 text-sm text-muted-foreground">
                 {!settings ? '' : settings.workFolder
-                  ? 'С неё начинается окно выбора, когда вы нажимаете «+». Внутри можно завести папку под каждую задачу.'
-                  : 'Сейчас окно выбора начинается с «Документов». Выберите папку, например на диске D, — дальше «+» будет открываться в ней.'}
+                  ? 'С неё же начинается окно выбора, когда вы нажимаете «+». Папки проектов из «Проекты» Claude показывает слева сам.'
+                  : 'Выберите папку, например на диске D, — Claude будет хранить там всё и раскладывать по порядку.'}
               </div>
             </div>
             <Button type="button" variant="outline" size="sm" disabled={busy || !settings} onClick={() => void chooseWorkFolder()} className="shrink-0">

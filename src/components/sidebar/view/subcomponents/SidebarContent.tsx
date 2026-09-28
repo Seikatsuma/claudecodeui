@@ -10,6 +10,9 @@ import type { ConversationSearchResults, SearchProgress } from '../../hooks/useS
 import type { ArchivedProjectListItem, ArchivedSessionListItem, RecentConversationListItem, SessionWithProvider, SidebarSearchMode } from '../../types/types';
 import LLMProviderLogo from '../../../llm-provider-logo/LLMProviderLogo';
 import { formatCompactAge, getAllSessions, getSessionDate } from '../../utils/utils';
+import { useSecondServerLabel, useServerScope } from '../../hooks/useServerScope';
+import { useWorkFolder } from '../../../desktop-folders/workFolderStore';
+import { isDesktopApp } from '../../../../lib/desktopBridge';
 
 import SidebarFooter from './SidebarFooter';
 import SidebarHeader from './SidebarHeader';
@@ -17,7 +20,6 @@ import SidebarUsageLimits from './SidebarUsageLimits';
 import SidebarProjectList, { type SidebarProjectListProps } from './SidebarProjectList';
 import SidebarProjectPickerTrigger from './SidebarProjectPickerTrigger';
 import SidebarProjectSessions from './SidebarProjectSessions';
-import { useSecondServerLabel, useServerScope } from '../../hooks/useServerScope';
 
 function HighlightedSnippet({ snippet, highlights }: { snippet: string; highlights: { start: number; end: number }[] }) {
   const parts: ReactNode[] = [];
@@ -209,6 +211,7 @@ export default function SidebarContent({
 
   const [serverScope] = useServerScope();
   const secondServerLabel = useSecondServerLabel();
+  const workFolderState = useWorkFolder();
   // Flat-mode: when exactly ONE project is starred, show its sessions directly
   // without the project-header/expand-step clutter.  0 or 2+ starred = normal mode.
   const starredProjects = projectListProps.projects.filter((p) =>
@@ -218,7 +221,10 @@ export default function SidebarContent({
   // папки: той, где больше всего чатов. Раньше без звёздочки новая копия
   // показывала список папок, и выглядела «неполной и совсем другой»
   // (Егор, 17.09.26). Две и больше звёздочек — по-прежнему список папок.
-  const mainProjectWithoutStars = starredProjects.length === 0 && projectListProps.projects.length > 0
+  // Программа на компьютере с главной папкой — список папок: там у каждого проекта
+  // своя папка, и новые (из «Проекты») должны быть видны слева, а не за выбором папки.
+  const withWorkFolder = isDesktopApp() && Boolean(workFolderState.workFolder);
+  const mainProjectWithoutStars = !withWorkFolder && starredProjects.length === 0 && projectListProps.projects.length > 0
     ? projectListProps.projects.reduce((best, project) => (
       (project.sessionMeta?.total ?? 0) > (best.sessionMeta?.total ?? 0) ? project : best
     ))

@@ -11,6 +11,8 @@ import { deleteOrArchiveProject, restoreArchivedProject } from '@/modules/projec
 import { applyLegacyStarredProjectIds, setProjectServerScope, toggleProjectStar } from '@/modules/projects/services/project-star.service.js';
 import { autoGroupProjectSessions } from '@/modules/providers/index.js';
 
+import { syncWorkFolderProjects } from '@/modules/desktop/desktop-settings.js';
+
 const router = express.Router();
 
 /**
@@ -111,6 +113,8 @@ router.get(
       readQueryStringValue(req.query.skipSync).trim() === '1';
     const sessionsLimit = readOptionalNumericQueryValue(req.query.sessionsLimit) ?? undefined;
     const sessionsOffset = readOptionalNumericQueryValue(req.query.sessionsOffset) ?? undefined;
+    // Программа на компьютере: новые папки в «<главная папка>/Проекты» — сразу слева.
+    await syncWorkFolderProjects().catch(() => {});
     const projects = await getProjectsWithSessions({
       skipSynchronization,
       sessionsLimit,

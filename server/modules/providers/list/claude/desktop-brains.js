@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { appConfigDb } from '@/modules/database/repositories/app-config.js';
+
 const PROTOCOL_SKIP = /^(?:да|нет|ок|окей|ага|угу|хорошо|спасибо|понял|ясно|дальше|продолжай|стоп|делай|давай)[\s.!,)]*$/i;
 const SERVICE_MARKERS = ['<task-notification', '<system', '<command-', '<local-command', '[Request interrupted'];
 
@@ -133,13 +135,24 @@ export function applyDesktopBrains(sdkOptions) {
   if (!dir) return null;
   const brains = loadBrains(dir);
 
+  // Главная папка человека (настройки → «Папки»): там его проекты, люди, темы —
+  // порядок по разделу 12 правил. Claude видит её целиком из любой подпапки.
+  const workFolder = appConfigDb.get('desktop.work_folder') || null;
+  const workFolderNote = workFolder
+    ? `Главная папка человека: ${workFolder}\nТекущая папка чата: ${sdkOptions.cwd || 'не задана'}\nПорядок в главной папке — раздел 12 правил (Указатель.md, Проекты/, Люди/, Темы/).`
+    : 'Главная папка человека не выбрана. Когда нужно что-то сохранить надолго (проект, заметки о людях, знания), одной строкой предложи выбрать её: «Настройки → Папки → Выбрать папку» — дальше всё будет храниться там по порядку.';
+  if (workFolder && sdkOptions.cwd !== workFolder) {
+    const dirs = Array.isArray(sdkOptions.additionalDirectories) ? sdkOptions.additionalDirectories : [];
+    if (!dirs.includes(workFolder)) sdkOptions.additionalDirectories = [...dirs, workFolder];
+  }
+
   if (brains.rules) {
     const current = sdkOptions.systemPrompt && typeof sdkOptions.systemPrompt === 'object'
       ? sdkOptions.systemPrompt
       : { type: 'preset', preset: 'claude_code' };
     sdkOptions.systemPrompt = {
       ...current,
-      append: [current.append, brains.rules].filter(Boolean).join('\n\n'),
+      append: [current.append, brains.rules, workFolderNote].filter(Boolean).join('\n\n'),
     };
   }
 

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isDesktopApp } from '../../../lib/desktopBridge';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownIcon } from 'lucide-react';
 
+import { isDesktopApp } from '../../../lib/desktopBridge';
 import type { SessionActivity } from '../../../hooks/useSessionProtection';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
@@ -14,13 +14,13 @@ import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useSessionStore } from '../../../stores/useSessionStore';
 import { authenticatedFetch } from '../../../utils/api';
+import { knownRunStartedAt } from '../utils/liveRunCursor';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatRequestBar from './subcomponents/ChatRequestBar';
 import ChatComposer from './subcomponents/ChatComposer';
 import CommandResultModal from './subcomponents/CommandResultModal';
 import RewindConfirmDialog from './subcomponents/RewindConfirmDialog';
-import { knownRunStartedAt } from '../utils/liveRunCursor';
 
 /**
  * Сколько ждать после восстановления связи, прежде чем признать ответ
@@ -647,6 +647,7 @@ function ChatInterface({
           onSelectPermissionMode={(mode) => selectPermissionMode(mode as PermissionMode)}
           providerLabel={selectedProviderLabel}
           showClaudeConnect={isDesktopApp() && provider === 'claude'}
+          workFolderPath={isDesktopApp() ? (selectedProject?.fullPath || selectedProject?.path || '') : undefined}
           effort={currentProviderEffort}
           availableEffortOptions={currentProviderEffortOptions}
           onSelectEffort={handleSelectComposerEffort}

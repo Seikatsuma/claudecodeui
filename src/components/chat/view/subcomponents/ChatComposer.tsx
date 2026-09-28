@@ -30,15 +30,16 @@ import {
   PromptInputSubmit,
   ActionMenu,
 } from '../../../../shared/view/ui';
+import ClaudeConnectCard from '../../../provider-auth/claude-connect/ClaudeConnectCard';
+import WorkFolderBar from '../../../desktop-folders/WorkFolderBar';
+import { contextLevel } from '../../utils/contextLevel';
 
 import CommandMenu from './CommandMenu';
 import ActivityIndicator from './ActivityIndicator';
 import ComposerAttachment from './ComposerAttachment';
 import VoiceInputButton from './VoiceInputButton';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
-import ClaudeConnectCard from '../../../provider-auth/claude-connect/ClaudeConnectCard';
 import TokenUsageSummary from './TokenUsageSummary';
-import { contextLevel } from '../../utils/contextLevel';
 import MessageQueueDock from './MessageQueueDock';
 import ComposerModelMenu from './ComposerModelMenu';
 import ComposerPermissionMenu from './ComposerPermissionMenu';
@@ -74,6 +75,8 @@ interface ChatComposerProps {
   providerLabel: string;
   /** Программа на компьютере и выбран Claude — карточка «Подключите Claude», пока он не подключён. */
   showClaudeConnect?: boolean;
+  /** Программа на компьютере: папка чата — строка «Claude работает в папке …». */
+  workFolderPath?: string;
   effort: string;
   availableEffortOptions: NonNullable<ProviderModelOption['effort']>['values'];
   onSelectEffort: (effort: string) => void;
@@ -144,6 +147,7 @@ export default function ChatComposer({
   onSelectPermissionMode,
   providerLabel,
   showClaudeConnect = false,
+  workFolderPath,
   effort,
   availableEffortOptions,
   onSelectEffort,
@@ -397,6 +401,7 @@ export default function ChatComposer({
       )}
 
       {showClaudeConnect && <ClaudeConnectCard variant="composer" />}
+      {workFolderPath && <WorkFolderBar projectPath={workFolderPath} />}
 
       {pendingPermissionRequests.length > 0 && (
         <div className="mx-auto mb-3 max-w-[54.25rem]">

@@ -131,3 +131,22 @@ test('программа: проект Codex, убранный человеко�
     assert.equal(archived('/home/r/codex-keep-away'), 0, 'после «+» память о ручном убирании стёрта');
   });
 });
+
+test('программа: папки в «<главная папка>/Проекты» сами встают слева, убранные вручную — нет', async () => {
+  await withDesktopDatabase(async () => {
+    const { appConfigDb } = await import('@/modules/database/repositories/app-config.js');
+    const { mkdir, mkdtemp } = await import('node:fs/promises');
+    const { syncWorkFolderProjects } = await import('@/modules/desktop/desktop-settings.js');
+    const root = await mkdtemp(path.join(tmpdir(), 'glavnaya-'));
+    await mkdir(path.join(root, 'Проекты', 'Отчёт по продажам'), { recursive: true });
+    await mkdir(path.join(root, 'Проекты', 'Старое'), { recursive: true });
+    appConfigDb.set('desktop.work_folder', root);
+
+    projectsDb.createProjectPath(path.join(root, 'Проекты', 'Старое'));
+    projectsDb.updateProjectIsArchived(path.join(root, 'Проекты', 'Старое'), true); // человек убрал
+
+    await syncWorkFolderProjects();
+    assert.equal(archived(path.join(root, 'Проекты', 'Отчёт по продажам')), 0);
+    assert.equal(archived(path.join(root, 'Проекты', 'Старое')), 1, 'убранный вручную не возвращается');
+  });
+});

@@ -9,6 +9,9 @@ import { formatCompactAge, getAllSessions, getProjectLastActivity, getSessionDat
 import { effectiveScope, scopeProjectsToServer, useSecondServerLabel, useServerScope } from '../../../sidebar/hooks/useServerScope';
 import { cn } from '../../../../lib/utils';
 import { api } from '../../../../utils/api';
+import WorkFolderStartCard from '../../../desktop-folders/WorkFolderStartCard';
+import { useWorkFolder } from '../../../desktop-folders/workFolderStore';
+import { isDesktopApp } from '../../../../lib/desktopBridge';
 
 import MobileMenuButton from './MobileMenuButton';
 
@@ -67,6 +70,9 @@ export default function MainContentStateView({
   const secondServerLabel = useSecondServerLabel();
   const serverScope = secondServerLabel ? storedServerScope : 'main';
   const { t } = useTranslation();
+  // Программа на компьютере без главной папки: на пустом экране одно предложение — выбрать её.
+  const workFolderState = useWorkFolder();
+  const askWorkFolder = isDesktopApp() && workFolderState.loaded && !workFolderState.workFolder;
 
   // Экран может простоять открытым долго — «3 ч» не должно застывать.
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -269,6 +275,9 @@ export default function MainContentStateView({
       ) : scopedProjects.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="mx-auto max-w-md px-6 text-center">
+            <WorkFolderStartCard />
+            {!askWorkFolder && (
+              <>
             <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50">
               <Folder className="h-7 w-7 text-muted-foreground" />
             </div>
@@ -279,11 +288,14 @@ export default function MainContentStateView({
                 <strong>{t('mainContent.tip')}:</strong> {isMobile ? t('mainContent.createProjectMobile') : t('mainContent.createProjectDesktop')}
               </p>
             </div>
+              </>
+            )}
           </div>
         </div>
       ) : (
         <div className="flex flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-xl px-4 pb-10 pt-5 sm:px-6 sm:pt-12">
+            <WorkFolderStartCard />
             {lastHit && (
               <button
                 type="button"

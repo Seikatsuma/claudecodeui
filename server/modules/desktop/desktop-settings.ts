@@ -20,6 +20,32 @@ import { getClaudeConfigDir, validateWorkspacePath } from '@/shared/utils.js';
  */
 
 const KEY_WORK_FOLDER = 'desktop.work_folder';
+/** Подпапка главной папки, где у каждого проекта своя папка — они сами появляются слева. */
+export const PROJECTS_SUBFOLDER = 'Проекты';
+
+export const getWorkFolder = (): string | null => appConfigDb.get(KEY_WORK_FOLDER) || null;
+
+/**
+ * Папки внутри «<главная папка>/Проекты» — в список слева, как проекты. Claude сам
+ * заводит там папку нового проекта (правила мозгов, раздел 12), человек видит её
+ * слева без «+». Убранные вручную не возвращаются (discovered — DO NOTHING).
+ */
+export async function syncWorkFolderProjects(): Promise<void> {
+  if (process.env.CLAUDE_UI_DESKTOP !== '1') return;
+  const root = getWorkFolder();
+  if (!root) return;
+  let entries;
+  try {
+    entries = await fs.readdir(path.join(root, PROJECTS_SUBFOLDER), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory() && !entry.name.startsWith('.')) {
+      projectsDb.createProjectPath(path.join(root, PROJECTS_SUBFOLDER, entry.name), null, { hidden: false });
+    }
+  }
+}
 export const KEY_SHOW_OTHER_AGENTS = 'desktop.show_other_agents';
 
 export const showOtherAgentsProjects = (): boolean => appConfigDb.get(KEY_SHOW_OTHER_AGENTS) === '1';
@@ -57,7 +83,7 @@ async function folderSizeBytes(dir: string, deadline: number): Promise<number | 
 // Настройки — сразу; размер истории — отдельным запросом (обход папки до 3 с не держит раздел).
 function readSettings() {
   return {
-    workFolder: appConfigDb.get(KEY_WORK_FOLDER) || null,
+    workFolder: getWorkFolder(),
     showOtherAgents: showOtherAgentsProjects(),
     historyFolder: historyDir(),
   };
@@ -95,7 +121,12 @@ router.put('/settings', async (req, res) => {
         res.status(400).json({ success: false, error: check.valid ? 'Такой папки нет — выберите существующую.' : check.error });
         return;
       }
-      appConfigDb.set(KEY_WORK_FOLDER, check.resolvedPath || body.workFolder);
+      const root = check.resolvedPath || body.workFolder;
+      appConfigDb.set(KEY_WORK_FOLDER, root);
+      // Заготовка «Проекты» (папки проектов оттуда сами встают слева). Саму главную
+      // папку открывает слева интерфейс — как «+», с новым чатом в ней.
+      await fs.mkdir(path.join(root, PROJECTS_SUBFOLDER), { recursive: true }).catch(() => {});
+      await syncWorkFolderProjects();
     }
   }
 

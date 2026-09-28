@@ -5,7 +5,7 @@ import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
 import { useVersionCheck } from '../../../hooks/useVersionCheck';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useAuth } from '../../auth/context/AuthContext';
-import { authenticatedFetch } from '../../../utils/api';
+import { api, authenticatedFetch } from '../../../utils/api';
 import { useSidebarController } from '../hooks/useSidebarController';
 import { scopeProjectsToServer, setSecondServerLabel, useSecondServerLabel, useServerScope } from '../hooks/useServerScope';
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
@@ -232,6 +232,40 @@ function Sidebar({
       }
     });
   };
+
+  // Программа на компьютере: чат и первый экран просят «открыть выбор папки» или
+  // «открыть эту папку» (главная папка из настроек → «Папки») — делает панель,
+  // как «+»: папка встаёт слева, в ней сразу новый чат.
+  const [pendingOpenPath, setPendingOpenPath] = useState<string | null>(null);
+  useEffect(() => {
+    const openPicker = () => setShowNewProject(true);
+    const openFolder = (event: Event) => {
+      const folderPath = (event as CustomEvent<{ path?: string }>).detail?.path;
+      if (!folderPath) return;
+      void api.createProject({ path: folderPath }).then(async (response: Response) => {
+        const body = await response.json().catch(() => null);
+        if (response.ok && body?.project) handleProjectCreated(body.project);
+        else {
+          setPendingOpenPath(folderPath); // уже слева — найти после обновления списка
+          void paletteOps.refreshProjects();
+        }
+      }).catch(() => {});
+    };
+    window.addEventListener('claudeui:open-new-project', openPicker);
+    window.addEventListener('claudeui:open-folder-project', openFolder);
+    return () => {
+      window.removeEventListener('claudeui:open-new-project', openPicker);
+      window.removeEventListener('claudeui:open-folder-project', openFolder);
+    };
+  });
+  useEffect(() => {
+    if (!pendingOpenPath) return;
+    const found = scopedProjects.find((item) => (item.fullPath || item.path) === pendingOpenPath);
+    if (found) {
+      setPendingOpenPath(null);
+      onNewSession(found);
+    }
+  }, [pendingOpenPath, scopedProjects, onNewSession]);
 
   const projectListProps: SidebarProjectListProps = {
     projects: scopedProjects,
