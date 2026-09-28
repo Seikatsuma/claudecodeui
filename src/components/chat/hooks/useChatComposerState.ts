@@ -167,6 +167,10 @@ export type CostCommandData = {
   tokenBreakdown?: {
     input?: number;
     output?: number;
+    /** Из прочитанного — повтор уже знакомой переписки (кэш). */
+    cacheRead?: number;
+    /** Сколько раз Claude обращался к модели: каждый ответ и каждое действие — шаг. */
+    steps?: number;
   };
   provider?: string;
   model?: string;

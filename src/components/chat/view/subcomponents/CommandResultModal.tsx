@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BadgeCheck,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { Badge, Button, Dialog, DialogContent, DialogTitle, Input } from '../../../../shared/view/ui';
+import { api } from '../../../../utils/api';
 import type {
   LLMProvider,
   ProviderModelActions,
@@ -67,7 +68,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const FALLBACK_COMMANDS: CommandEntry[] = [
   { name: '/models', description: 'Browse available models for the active provider.' },
-  { name: '/cost', description: 'Review token usage for the active session.' },
+  { name: '/cost', description: 'Лимит подписки и расход этого чата.' },
   { name: '/status', description: 'Inspect runtime, version, provider, and environment status.' },
   { name: '/memory', description: 'Open the project CLAUDE.md memory file.' },
   { name: '/config', description: 'Open settings and configuration.' },
@@ -80,13 +81,6 @@ const getProviderLabel = (provider: string | undefined, fallback = 'Unknown') =>
   }
 
   return PROVIDER_LABELS[provider] || provider;
-};
-
-const formatNumber = (value: number) => {
-  if (!Number.isFinite(value)) {
-    return '0';
-  }
-  return value.toLocaleString();
 };
 
 function MetricCard({
@@ -419,90 +413,148 @@ function ModelsContent({
   );
 }
 
-function formatCompactTokens(value: number): string {
+/** «136 тыс.», «4,5 тыс.», «1,2 млн» — крупные числа словами, как говорят. */
+function formatTokensRu(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0';
-  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(value % 1_000_000 === 0 ? 0 : 2))}M`;
-  if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
+  const short = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10).replace('.', ','));
+  if (value >= 1_000_000) return `${short(value / 1_000_000)} млн`;
+  if (value >= 1_000) return `${short(value / 1_000)} тыс.`;
   return String(Math.round(value));
 }
 
+type SubscriptionLimit = { kind: string; percent: number; resetsAt: string | null; expired: boolean };
+
+function resetsInRu(resetsAt: string | null): string | null {
+  const left = resetsAt ? Date.parse(resetsAt) - Date.now() : NaN;
+  if (!Number.isFinite(left) || left <= 0) return null;
+  const minutes = Math.round(left / 60000);
+  if (minutes < 60) return `через ${minutes} мин`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `через ${hours} ч`;
+  return `через ${Math.round(hours / 24)} дн`;
+}
+
+// Цвет полосы: спокойно — зелёная, половина — жёлтая, почти всё — красная.
+const barTone = (percent: number) => (percent >= 80 ? 'bg-red-500' : percent >= 50 ? 'bg-amber-500' : 'bg-emerald-500');
+
+function Bar({ percent }: { percent: number }) {
+  const width = Math.max(0, Math.min(100, percent));
+  return (
+    <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+      <div className={`h-full rounded-full ${barTone(width)}`} style={{ width: `${Math.max(width, 2)}%` }} />
+    </div>
+  );
+}
+
+/**
+ * Окно «Расход» (команда /cost). Люди открывают его с вопросом «сколько у меня
+ * осталось и почему так много тратится» (снимок Ричарда 28.09.26: английские
+ * «Input tokens 136 443» он принял за лимит). Поэтому сверху — лимит подписки
+ * теми же окнами, что в боковой панели (5 часов, неделя), ниже — этот чат
+ * словами: память, сколько прочитано и почему, сколько написано.
+ */
 function CostContent({ data }: { data: CostCommandData }) {
-  const used = Number(data.tokenUsage?.used ?? 0);
-  const total = Number(data.tokenUsage?.total ?? 0);
-  const model = data.model || 'Unknown';
-  const provider = getProviderLabel(data.provider, data.provider || 'Unknown');
-  const hasBreakdown =
-    typeof data.tokenBreakdown?.input === 'number' ||
-    typeof data.tokenBreakdown?.output === 'number';
-  const usageRows = [
-    { label: 'Total tokens used', value: formatNumber(used), icon: Activity },
-    ...(hasBreakdown
-      ? [
-          {
-            label: 'Input tokens',
-            value: formatNumber(Number(data.tokenBreakdown?.input ?? 0)),
-            icon: TerminalSquare,
-          },
-          {
-            label: 'Output tokens',
-            value: formatNumber(Number(data.tokenBreakdown?.output ?? 0)),
-            icon: Coins,
-          },
-        ]
-      : [
-          {
-            label: 'Breakdown',
-            value: 'Unavailable',
-            icon: TerminalSquare,
-          },
-        ]),
-    ...(total > 0
-      ? [{
-          label: 'Context window',
-          // Занято / всего (%), как счётчик контекста в терминальном Claude Code.
-          value: typeof data.tokenUsage?.contextUsed === 'number'
-            // Коротко («283K/1M · 28%»): полные числа на телефоне вытесняли подпись до «C..».
-            ? `${formatCompactTokens(Number(data.tokenUsage.contextUsed))}/${formatCompactTokens(total)} · ${Math.round(Number(data.tokenUsage.contextPercent ?? 0))}%`
-            : formatNumber(total),
-          icon: Gauge,
-        }]
-      : []),
-  ];
+  const [limits, setLimits] = useState<SubscriptionLimit[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.user.usageLimits()
+      .then((response: Response) => (response.ok ? response.json() : null))
+      .then((payload: { limits?: SubscriptionLimit[] } | null) => {
+        if (!cancelled) setLimits((payload?.limits ?? []).filter((limit) => !limit.expired && ['session', 'weekly_all'].includes(limit.kind)));
+      })
+      .catch(() => { if (!cancelled) setLimits([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const contextWindow = Number(data.tokenUsage?.total ?? 0);
+  const contextUsed = Number(data.tokenUsage?.contextUsed ?? 0);
+  const contextPercent = Math.round(Number(data.tokenUsage?.contextPercent ?? (contextWindow ? (contextUsed / contextWindow) * 100 : 0)));
+  const read = Number(data.tokenBreakdown?.input ?? 0);
+  const written = Number(data.tokenBreakdown?.output ?? 0);
+  const repeated = Number(data.tokenBreakdown?.cacheRead ?? 0);
+  const steps = Number(data.tokenBreakdown?.steps ?? 0);
+  const hasBreakdown = typeof data.tokenBreakdown?.input === 'number' || typeof data.tokenBreakdown?.output === 'number';
+  const model = (data.model || '').split(' · ')[0];
+
+  const readHint = [
+    steps > 0 ? `За ${steps} ${steps % 10 === 1 && steps % 100 !== 11 ? 'шаг' : steps % 10 >= 2 && steps % 10 <= 4 && (steps % 100 < 12 || steps % 100 > 14) ? 'шага' : 'шагов'}: каждый ответ и каждое действие с файлами — шаг, и на каждом Claude заново перечитывает весь разговор.` : 'На каждом шаге — ответ или действие с файлами — Claude заново перечитывает весь разговор.',
+    repeated > 0 && read > 0 ? `${formatTokensRu(repeated)} из них (${Math.round((repeated / read) * 100)}%) — повтор уже знакомого.` : null,
+  ].filter(Boolean).join(' ');
+
+  const section = 'rounded-2xl border border-border/70 bg-background/75 p-4';
+  const caption = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground';
 
   return (
     <div className="space-y-4">
-      <div className="overflow-hidden rounded-2xl border border-border/70 bg-background/75">
-        {usageRows.map((row) => {
-          const Icon = row.icon;
-
-          return (
-            <div
-              key={row.label}
-              className="flex items-center justify-between gap-4 border-b border-border/60 px-4 py-3 last:border-b-0"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="truncate text-sm font-medium text-foreground">{row.label}</span>
-              </div>
-              <span className="shrink-0 font-mono text-sm font-semibold text-foreground">{row.value}</span>
-            </div>
-          );
-        })}
+      <div className={section}>
+        <p className={caption}>Лимит подписки</p>
+        {limits === null ? (
+          <p className="mt-2 text-sm text-muted-foreground">Узнаю…</p>
+        ) : limits.length === 0 ? (
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Появится после следующего ответа Claude — его присылает сама подписка.</p>
+        ) : (
+          <div className="mt-1 space-y-3">
+            {limits.map((limit) => {
+              const percent = Math.round(limit.percent);
+              const resets = resetsInRu(limit.resetsAt);
+              return (
+                <div key={limit.kind}>
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="font-medium text-foreground">{limit.kind === 'session' ? 'За 5 часов' : 'За неделю'}</span>
+                    <span className="text-foreground"><span className="font-semibold">{percent}%</span> потрачено</span>
+                  </div>
+                  <Bar percent={percent} />
+                  {resets && <p className="mt-1 text-xs text-muted-foreground">Обнулится {resets}</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Provider</p>
-            <p className="mt-1 text-sm font-semibold text-foreground">{provider}</p>
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Model</p>
-            <p className="mt-1 break-all font-mono text-sm text-foreground">{model}</p>
-          </div>
+      <div className={section}>
+        <p className={caption}>Этот чат</p>
+        <div className="mt-1 space-y-4">
+          {contextWindow > 0 && (
+            <div>
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="font-medium text-foreground">Память чата</span>
+                <span className="text-foreground"><span className="font-semibold">{contextPercent}%</span> занято</span>
+              </div>
+              <Bar percent={contextPercent} />
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {formatTokensRu(contextUsed)} из {formatTokensRu(contextWindow)} — столько разговора Claude держит в голове сейчас.
+                {contextPercent >= 50 ? ' Разговор длинный: каждый шаг обходится дороже — лучше «Сжать в этом чате» или новый чат.' : ''}
+              </p>
+            </div>
+          )}
+          {hasBreakdown ? (
+            <>
+              <div>
+                <div className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="font-medium text-foreground">Прочитал за весь чат</span>
+                  <span className="font-semibold text-foreground">{formatTokensRu(read)}</span>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{readHint}</p>
+              </div>
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="font-medium text-foreground">Написал сам</span>
+                <span className="font-semibold text-foreground">{formatTokensRu(written)}</span>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">Подробности расхода появятся после первого ответа Claude.</p>
+          )}
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Счёт идёт в токенах — кусочках слов: одна тысяча — примерно страница текста.
+          </p>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-border/70 bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
+        <p className="font-medium text-foreground">Как тратить меньше</p>
+        <p className="mt-1">Одна задача — один чат. Разговор разросся — «Сжать в этом чате» или новый чат: Claude перенесёт главное, а перечитывать придётся меньше.</p>
+        {model && <p className="mt-2 text-xs">Модель: <span className="font-mono">{model}</span>{contextWindow > 0 ? ` · память до ${formatTokensRu(contextWindow)}` : ''}</p>}
       </div>
     </div>
   );
@@ -574,9 +626,9 @@ export default function CommandResultModal({
       icon: Cpu,
     },
     cost: {
-      eyebrow: 'Session telemetry',
-      title: 'Token Usage',
-      subtitle: 'Input, output, and total token counts for this session.',
+      eyebrow: 'Расход',
+      title: 'Лимит и этот чат',
+      subtitle: 'Сколько подписки уже потрачено и сколько «весит» этот разговор.',
       icon: Coins,
     },
     status: {
