@@ -54,6 +54,16 @@ for (const item of ['electron', 'dist', 'dist-server', 'public', 'shared', 'desk
   await copy(item);
 }
 
+// Без CLAUDE.md программа выключает мозги целиком — молча (до 28.09 файл прятал
+// .gitignore, и все выпуски шли без правил и навыков). Лучше не собрать, чем так.
+for (const required of ['CLAUDE.md', 'protocol.md', 'manifest.json', 'plugin/.claude-plugin/plugin.json']) {
+  try {
+    await fs.access(path.join(stageDir, 'desktop', 'brains', required));
+  } catch {
+    throw new Error(`в мозгах нет desktop/brains/${required} — без него Claude в программе работает без правил и навыков`);
+  }
+}
+
 // Программа уходит людям, а код сервера, обёртки и страницы лежит внутри
 // читаемым текстом: комментарии разработки (с цитатами и именами) вырезаем.
 // Сжимаются только пробелы — имена в коде те же, поведение то же.
