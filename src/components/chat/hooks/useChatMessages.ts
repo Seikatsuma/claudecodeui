@@ -55,6 +55,31 @@ function parseTaskNotification(content: string): ParsedTaskNotification | null {
   };
 }
 
+type ParsedCrossChatLetter = { from: string; body: string };
+
+/**
+ * Письмо от соседнего ИИ-чата (`<cross-session-message from-name="…">…`).
+ *
+ * Чаты договариваются между собой (кто что выкладывает), и такое письмо приходит
+ * в чат как очередное сообщение пользователя. Без разбора оно рисовалось пузырём
+ * «от человека» — Егор 28.09.26: «странный ряд сообщений от меня, я того не писал;
+ * хочу видеть только свои сообщения от себя». Показываем отдельной серой строкой.
+ */
+function parseCrossChatLetter(content: string): ParsedCrossChatLetter | null {
+  const trimmed = content.trimStart();
+  if (!trimmed.startsWith('<cross-session-message')) {
+    return null;
+  }
+  const open = /^<cross-session-message\b([^>]*)>/.exec(trimmed);
+  if (!open) return null;
+  const attrs = open[1] || '';
+  const from = /from-name="([^"]*)"/.exec(attrs)?.[1]?.trim() || 'соседний чат';
+  const rest = trimmed.slice(open[0].length);
+  const close = rest.indexOf('</cross-session-message>');
+  const body = (close === -1 ? rest : rest.slice(0, close)).trim();
+  return { from, body };
+}
+
 /**
  * Per-source-message conversion cache, keyed by NormalizedMessage object
  * identity. `MessageComponent` is wrapped in `memo()`, which only helps if
@@ -152,6 +177,20 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         if (!content.trim() && !images && !files) break;
 
         if (msg.role === 'user') {
+          // Письмо соседнего ИИ-чата — не сообщение человека.
+          const letter = parseCrossChatLetter(content);
+          if (letter) {
+            entries.push({
+              type: 'assistant',
+              content: `Письмо от соседнего чата «${letter.from}» — служебная договорённость, не ваше сообщение`,
+              timestamp: msg.timestamp,
+              isCrossChatLetter: true,
+              letterBody: letter.body,
+              ...sharedMetadata,
+            });
+            break;
+          }
+
           // Parse task notifications
           const taskNotif = parseTaskNotification(content);
           if (taskNotif) {

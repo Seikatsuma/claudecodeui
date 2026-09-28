@@ -1,3 +1,4 @@
+import { Mail } from 'lucide-react';
 import { memo, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -203,6 +204,20 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               U
             </div>
           )}
+        </div>
+      ) : message.isCrossChatLetter ? (
+        /* Письмо соседнего ИИ-чата: серая строка слева, само письмо — по нажатию */
+        <div className="w-full">
+          <details className="group py-0.5">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+              <span>{message.content}</span>
+              <span className="underline underline-offset-2 group-open:hidden">показать</span>
+            </summary>
+            <div className="mt-1.5 whitespace-pre-wrap rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              {String(message.letterBody || '')}
+            </div>
+          </details>
         </div>
       ) : message.isTaskNotification ? (
         /* Compact task notification on the left */
