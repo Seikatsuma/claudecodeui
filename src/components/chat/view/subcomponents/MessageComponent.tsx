@@ -22,16 +22,18 @@ import MessageCopyControl from './MessageCopyControl';
 import MessageRewindControl from './MessageRewindControl';
 import MessageSpeakControl from './MessageSpeakControl';
 import { isDesktopApp } from '../../../../lib/desktopBridge';
-import { isClaudeLoginExpiredText, isClaudeNotLoggedInText, markClaudeLoginExpired, refreshClaudeConnect, useClaudeConnect } from '../../../provider-auth/claude-connect/claudeConnectStore';
+import { isClaudeLoginExpiredText, isClaudeNotLoggedInText, markClaudeLoginExpired, noteClaudeAnsweredAt, refreshClaudeConnect, useClaudeConnect } from '../../../provider-auth/claude-connect/claudeConnectStore';
 
 /** Строка в ленте вместо «Not logged in · Please run /login». Заодно перепроверяет вход — карточка над полем ввода появится сама. */
-function ClaudeNotLoggedInNotice({ expired, recent }: { expired: boolean; recent: boolean }) {
+function ClaudeNotLoggedInNotice({ expired, recent, errorAt }: { expired: boolean; recent: boolean; errorAt: number }) {
   const connect = useClaudeConnect();
   useEffect(() => { void refreshClaudeConnect(true); }, []);
   // Вход устарел: «вошли» по-прежнему, но Claude не отвечает — карточка «Войти заново».
   // Только свежая ошибка (15 мин): старые из истории карточку не открывают — вход мог уже обновиться.
-  useEffect(() => { if (expired && recent) markClaudeLoginExpired(); }, [expired, recent]);
-  const text = expired && !connect.justConnected
+  useEffect(() => { if (expired && recent) markClaudeLoginExpired(errorAt); }, [expired, recent, errorAt]);
+  const text = expired && !recent
+    ? 'Тогда вход в Claude был устаревшим, и он не ответил. Если сейчас Claude отвечает — всё в порядке; если нет — «Войти заново» над полем ввода.'
+    : expired && !connect.justConnected
     ? 'Вход в Claude устарел, поэтому он не ответил. Нажмите «Войти заново» внизу, над полем ввода, — войдите в свой аккаунт Claude в браузере и отправьте сообщение ещё раз.'
     : connect.loggedIn
       ? 'Тогда Claude ещё не был подключён к подписке и не ответил. Сейчас подключён — напишите сообщение ещё раз.'
@@ -93,6 +95,13 @@ function toRequestLabel(content: string): string | undefined {
 }
 
 const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, onRewindToMessage, selectedProject, provider }: MessageComponentProps) => {
+  const messageTime = new Date(message.timestamp || 0).getTime() || 0;
+  // Нормальный ответ Claude позже ошибки «вход устарел» — вход жив, карточку «Войти заново» убрать.
+  useEffect(() => {
+    if (!isDesktopApp() || message.type !== 'assistant' || message.isToolUse) return;
+    if (typeof message.content !== 'string' || !message.content.trim() || isClaudeNotLoggedInText(message.content)) return;
+    noteClaudeAnsweredAt(messageTime);
+  }, [message.type, message.isToolUse, message.content, messageTime]);
   const { t } = useTranslation('chat');
 
   /*
@@ -258,7 +267,8 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
         isClaudeNotLoggedInText(prevMessage?.content) ? null : (
           <ClaudeNotLoggedInNotice
             expired={isClaudeLoginExpiredText(message.content)}
-            recent={Date.now() - new Date(message.timestamp || 0).getTime() < 15 * 60 * 1000}
+            recent={Date.now() - messageTime < 15 * 60 * 1000}
+            errorAt={messageTime}
           />
         )
       ) : (

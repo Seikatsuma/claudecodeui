@@ -4,6 +4,7 @@ import { CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
 import LLMProviderLogo from '../../llm-provider-logo/LLMProviderLogo';
 import {
   cancelClaudeConnect,
+  dismissClaudeLoginExpired,
   dismissJustConnected,
   sendClaudeConnectCode,
   startClaudeConnect,
@@ -167,13 +168,20 @@ export default function ClaudeConnectCard({ variant }: Props) {
                     ? `Claude перестал отвечать: вход${connect.email ? ` (${connect.email})` : ''} больше не действует. Нажмите кнопку — откроется браузер: войдите в свой аккаунт Claude с подпиской и нажмите «Разрешить». Потом отправьте сообщение ещё раз.`
                     : 'Claude думает по вашей подписке Claude Pro или Max. Нажмите кнопку — откроется браузер, войдите и нажмите «Разрешить». Это нужно один раз.'}
               </div>
-              <button
-                type="button"
-                onClick={() => void startClaudeConnect()}
-                className="mt-3 rounded-lg bg-[#d97757] px-4 py-2 text-sm font-medium text-white hover:bg-[#c96442]"
-              >
-                {connect.phase === 'error' ? 'Попробовать ещё раз' : connect.authExpired ? 'Войти заново' : 'Подключить Claude'}
-              </button>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <button
+                  type="button"
+                  onClick={() => void startClaudeConnect()}
+                  className="rounded-lg bg-[#d97757] px-4 py-2 text-sm font-medium text-white hover:bg-[#c96442]"
+                >
+                  {connect.phase === 'error' ? 'Попробовать ещё раз' : connect.authExpired ? 'Войти заново' : 'Подключить Claude'}
+                </button>
+                {connect.authExpired && connect.phase !== 'error' && (
+                  <button type="button" onClick={dismissClaudeLoginExpired} className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground">
+                    Уже вошли — скрыть
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>

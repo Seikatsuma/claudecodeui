@@ -35,6 +35,8 @@ export type ClaudeConnectState = {
    * снимок Егора). Показать «Войти заново», пока вход не обновится.
    */
   authExpired: boolean;
+  /** Когда поймали «вход устарел» — нормальный ответ Claude позже этого снимает карточку. */
+  authExpiredAt: number;
 };
 
 const BASE = '/api/providers/claude/desktop-login';
@@ -51,6 +53,7 @@ let state: ClaudeConnectState = {
   forcedOpen: false,
   justConnected: false,
   authExpired: false,
+  authExpiredAt: 0,
 };
 const listeners = new Set<() => void>();
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -160,7 +163,9 @@ export function openClaudeConnect(): void {
 export const dismissJustConnected = (): void => setState({ justConnected: false, forcedOpen: false });
 
 /** Ответ Claude, означающий «вход устарел»: вход лежит, но не работает. */
-const EXPIRED_LOGIN = /OAuth (?:access )?token has expired|Failed to (?:authenticate|refresh OAuth token)|token (?:has been )?revoked|API Error: 401|sign in again/i;
+// Только точные сообщения самого Claude в начале текста: ответ, где Claude разбирает
+// чужую ошибку «401», сюда не попадает (замечание проверяющего 28.09.26).
+const EXPIRED_LOGIN = /^\s*(?:Claude Code returned an error result:\s*)?(?:Failed to authenticate\b|Failed to refresh OAuth token\b|OAuth (?:access )?token has expired\b|API Error: 401\b[^\n]*OAuth)/i;
 
 export function isClaudeLoginExpiredText(text: unknown): boolean {
   return typeof text === 'string' && text.length <= 600 && EXPIRED_LOGIN.test(text);
@@ -174,10 +179,20 @@ export function isClaudeNotLoggedInText(text: unknown): boolean {
 }
 
 /** Чат получил «вход устарел» — развернуть карточку с «Войти заново». */
-export function markClaudeLoginExpired(): void {
-  if (!isDesktopApp() || state.authExpired) return;
-  setState({ authExpired: true, forcedOpen: true, justConnected: false });
+export function markClaudeLoginExpired(at: number = Date.now()): void {
+  if (!isDesktopApp() || at <= state.authExpiredAt) return;
+  setState({ authExpired: true, authExpiredAt: at, forcedOpen: true, justConnected: false });
 }
+
+/**
+ * Claude нормально ответил позже ошибки — вход жив (сам продлился, вошли в
+ * терминале или другим аккаунтом), карточку «устарел» убрать.
+ */
+export function noteClaudeAnsweredAt(at: number): void {
+  if (state.authExpired && at > state.authExpiredAt) setState({ authExpired: false, forcedOpen: false });
+}
+
+export const dismissClaudeLoginExpired = (): void => setState({ authExpired: false, forcedOpen: false });
 
 const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener);
