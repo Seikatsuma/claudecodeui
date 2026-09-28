@@ -417,8 +417,9 @@ function ModelsContent({
 function formatTokensRu(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0';
   const short = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10).replace('.', ','));
-  if (value >= 1_000_000) return `${short(value / 1_000_000)} млн`;
-  if (value >= 1_000) return `${short(value / 1_000)} тыс.`;
+  // Порог — после округления: 999 999 — это «1 млн», а не «1000 тыс.».
+  if (value >= 999_500) return `${short(value / 1_000_000)} млн`;
+  if (value >= 999.5) return `${short(value / 1_000)} тыс.`;
   return String(Math.round(value));
 }
 
@@ -475,10 +476,12 @@ function CostContent({ data }: { data: CostCommandData }) {
   const steps = Number(data.tokenBreakdown?.steps ?? 0);
   const hasBreakdown = typeof data.tokenBreakdown?.input === 'number' || typeof data.tokenBreakdown?.output === 'number';
   const model = (data.model || '').split(' · ')[0];
+  // Окно общее для всех помощников — в пояснениях их собственное имя.
+  const agent = !data.provider || data.provider === 'claude' ? 'Claude' : getProviderLabel(data.provider, data.provider);
 
   const readHint = [
-    steps > 0 ? `За ${steps} ${steps % 10 === 1 && steps % 100 !== 11 ? 'шаг' : steps % 10 >= 2 && steps % 10 <= 4 && (steps % 100 < 12 || steps % 100 > 14) ? 'шага' : 'шагов'}: каждый ответ и каждое действие с файлами — шаг, и на каждом Claude заново перечитывает весь разговор.` : 'На каждом шаге — ответ или действие с файлами — Claude заново перечитывает весь разговор.',
-    repeated > 0 && read > 0 ? `${formatTokensRu(repeated)} из них (${Math.round((repeated / read) * 100)}%) — повтор уже знакомого.` : null,
+    steps > 0 ? `За ${steps} ${steps % 10 === 1 && steps % 100 !== 11 ? 'шаг' : steps % 10 >= 2 && steps % 10 <= 4 && (steps % 100 < 12 || steps % 100 > 14) ? 'шага' : 'шагов'}: каждый ответ и каждое действие с файлами — шаг, и на каждом ${agent} заново перечитывает весь разговор.` : `На каждом шаге — ответ или действие с файлами — ${agent} заново перечитывает весь разговор.`,
+    repeated > 0 && read > 0 ? `${Math.round((repeated / read) * 100)}% из этого — повтор уже знакомого.` : null,
   ].filter(Boolean).join(' ');
 
   const section = 'rounded-2xl border border-border/70 bg-background/75 p-4';
@@ -523,7 +526,7 @@ function CostContent({ data }: { data: CostCommandData }) {
               </div>
               <Bar percent={contextPercent} />
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {formatTokensRu(contextUsed)} из {formatTokensRu(contextWindow)} — столько разговора Claude держит в голове сейчас.
+                {formatTokensRu(contextUsed)} из {formatTokensRu(contextWindow)} — столько разговора {agent} держит в голове сейчас.
                 {contextPercent >= 50 ? ' Разговор длинный: каждый шаг обходится дороже — лучше «Сжать в этом чате» или новый чат.' : ''}
               </p>
             </div>
@@ -543,17 +546,17 @@ function CostContent({ data }: { data: CostCommandData }) {
               </div>
             </>
           ) : (
-            <p className="text-sm text-muted-foreground">Подробности расхода появятся после первого ответа Claude.</p>
+            <p className="text-sm text-muted-foreground">Подробности расхода появятся после первого ответа {agent}.</p>
           )}
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Счёт идёт в токенах — кусочках слов: одна тысяча — примерно страница текста.
+            Счёт идёт в токенах — кусочках слов.
           </p>
         </div>
       </div>
 
       <div className="rounded-2xl border border-border/70 bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
         <p className="font-medium text-foreground">Как тратить меньше</p>
-        <p className="mt-1">Одна задача — один чат. Разговор разросся — «Сжать в этом чате» или новый чат: Claude перенесёт главное, а перечитывать придётся меньше.</p>
+        <p className="mt-1">Одна задача — один чат. Разговор разросся — «Сжать в этом чате» или новый чат: главное перенесётся, а перечитывать придётся меньше.</p>
         {model && <p className="mt-2 text-xs">Модель: <span className="font-mono">{model}</span>{contextWindow > 0 ? ` · память до ${formatTokensRu(contextWindow)}` : ''}</p>}
       </div>
     </div>
