@@ -8,7 +8,7 @@
  * тексты возвращаются.
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -144,5 +144,55 @@ test('сообщение, отправленное во время работы 
     assert.deepEqual(uuidsIn(await readFile(jsonlPath, 'utf8')), [U1, A1, U2, T2, A2]);
     const byText = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: null, text: 'Теперь разошли всем' });
     assert.equal(byText.removedLines, 3);
+  });
+});
+
+test('повторное нажатие на уже убранное сообщение — не ошибка: текст возвращается снова', async () => {
+  await withSession(async (jsonlPath) => {
+    const first = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: `${U2}_text_0`, text: null });
+    const afterFirst = await readFile(jsonlPath, 'utf8');
+
+    const byId = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: `${U2}_text_0`, text: null });
+    assert.equal(byId.text, 'Теперь  разошли\nвсем');
+    assert.equal(byId.removedLines, 0);
+    assert.equal(byId.backupPath, first.backupPath);
+
+    const byText = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: null, text: 'Теперь разошли всем' });
+    assert.equal(byText.text, 'Теперь  разошли\nвсем');
+    assert.equal(await readFile(jsonlPath, 'utf8'), afterFirst, 'разговор не тронут');
+  });
+});
+
+test('после возврата разговор продолжился — повтор по старому сообщению снова «не нашёл»', async () => {
+  await withSession(async (jsonlPath) => {
+    await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U2, text: null });
+    await appendFile(jsonlPath, JSON.stringify({ type: 'user', uuid: '88888888-8888-4888-8888-888888888888', message: { role: 'user', content: 'новое' } }) + '\n');
+    await assert.rejects(
+      sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U2, text: null }),
+      /Не нашёл это сообщение/,
+    );
+  });
+});
+
+test('старая копия (больше 30 минут) повтором не считается', async () => {
+  await withSession(async (jsonlPath) => {
+    const first = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U2, text: null });
+    const old = new Date(Date.now() - 31 * 60_000).toISOString().replace(/[:.]/g, '-');
+    await rename(first.backupPath, `${jsonlPath}.before-rewind-${old}`);
+    await assert.rejects(
+      sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U2, text: null }),
+      /Не нашёл это сообщение/,
+    );
+  });
+});
+
+test('повтор возвращает и тексты очереди, снятой первым возвратом', async () => {
+  await withSession(async () => {
+    chatMessageQueueDb.append({ id: 'q2', sessionId: SESSION_ID, userId: null, content: 'и ещё вот это', options: {} });
+    const first = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U3, text: null });
+    assert.deepEqual(first.queuedTexts, ['и ещё вот это']);
+    const again = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U3, text: null });
+    assert.equal(again.text, 'Спасибо');
+    assert.deepEqual(again.queuedTexts, ['и ещё вот это']);
   });
 });
