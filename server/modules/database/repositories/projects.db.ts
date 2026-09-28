@@ -83,18 +83,18 @@ export const projectsDb = {
     /**
      * `discovered` — проект нашёлся в файлах переписки, а не открыт человеком
      * (программа на компьютере, см. sessionsDb.createSession): убранный из
-     * панели не возвращаем, а `hidden` — новый создаём сразу убранным.
+     * панели не возвращаем (кроме `revive`), а `hidden` — новый создаём убранным.
      */
     createProjectPath(
         projectPath: string,
         customProjectName: string | null = null,
-        discovered?: { hidden: boolean },
+        discovered?: { hidden: boolean; revive?: boolean },
     ): CreateProjectPathResult {
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);
         const normalizedProjectName = normalizeProjectDisplayName(normalizedProjectPath, customProjectName);
         const attemptedId = randomUUID();
-        const row = (discovered
+        const row = (discovered && !discovered.revive
             ? db.prepare(`
         INSERT INTO projects (project_id, project_path, custom_project_name, isArchived)
             VALUES (?, ?, ?, ?)

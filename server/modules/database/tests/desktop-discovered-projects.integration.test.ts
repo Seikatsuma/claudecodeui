@@ -42,11 +42,21 @@ test('программа: проект из истории Codex появляе�
   });
 });
 
+test('программа: Codex нашёлся раньше Claude — папка всё равно видна (синхронизаторы параллельны)', async () => {
+  await withDesktopDatabase(() => {
+    sessionsDb.createSession('codex-r', 'codex', '/home/r/both', 'Codex');
+    assert.equal(archived('/home/r/both'), 1);
+    sessionsDb.createSession('claude-r', 'claude', '/home/r/both', 'Claude');
+    assert.equal(archived('/home/r/both'), 0);
+  });
+});
+
 test('программа: убранный проект не возвращается от новой переписки в файлах, а «+» и чат в программе возвращают', async () => {
   await withDesktopDatabase(() => {
-    projectsDb.createProjectPath('/home/r/work');
-    projectsDb.updateProjectIsArchived('/home/r/work', true);
+    sessionsDb.createSession('claude-0', 'claude', '/home/r/work', 'Прежний чат');
+    projectsDb.updateProjectIsArchived('/home/r/work', true); // человек убрал сам
     sessionsDb.createSession('claude-2', 'claude', '/home/r/work', 'Из терминала');
+    sessionsDb.createSession('claude-0', 'claude', '/home/r/work', 'Прежний чат'); // пересверка того же чата
     assert.equal(archived('/home/r/work'), 1, 'переписка из файлов не возвращает убранный проект');
 
     projectsDb.createProjectPath('/home/r/work'); // кнопка «+»

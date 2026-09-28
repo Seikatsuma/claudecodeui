@@ -182,10 +182,17 @@ export const sessionsDb = {
     // Убранный из панели проект так не возвращается, а проекты из чужих историй
     // (Codex, Cursor…) появляются убранными — в панели то, что человек открыл сам,
     // и история Claude. Открыл такую папку кнопкой «+» или начал в ней чат — видна.
+    // Первая переписка Claude в папке возвращает её, даже если папку раньше
+    // убрали как чужую (Codex нашёлся первым — синхронизаторы идут параллельно).
+    // Были уже чаты Claude, и человек убрал папку сам — остаётся убранной.
+    const desktop = process.env.CLAUDE_UI_DESKTOP === '1';
+    const firstClaudeHere = desktop && provider === 'claude' && !db
+      .prepare(`SELECT 1 FROM sessions WHERE project_path = ? AND provider = 'claude' LIMIT 1`)
+      .get(normalizedProjectPath);
     projectsDb.createProjectPath(
       normalizedProjectPath,
       null,
-      process.env.CLAUDE_UI_DESKTOP === '1' ? { hidden: provider !== 'claude' } : undefined,
+      desktop ? { hidden: provider !== 'claude', revive: firstClaudeHere } : undefined,
     );
 
     const existing = db
