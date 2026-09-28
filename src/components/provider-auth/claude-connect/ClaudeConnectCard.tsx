@@ -71,7 +71,7 @@ export default function ClaudeConnectCard({ variant }: Props) {
             )}
             {connect.authMethod === 'oauth_token' && (
               <div className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                Сейчас Claude работает по ключу подписки. Чтобы заработали Google Диск, Gmail, Календарь и другие подключения, войдите в Claude через браузер — один раз.
+                Сейчас Claude работает по ключу подписки. Google Диск, Gmail, Календарь и другие подключения аккаунта Claude заработают, если войти через браузер в свой аккаунт Claude с подпиской Pro или Max — один раз.
               </div>
             )}
             {connect.authMethod === 'oauth_token' ? (

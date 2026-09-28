@@ -76,9 +76,12 @@ const useOwnLogin = (): void => {
   clearClaudeAuthStatusCache();
 };
 
+// Бесплатный аккаунт Claude в программе не работает — ради него рабочий ключ не отдаём.
+const PAID_PLANS = new Set(['pro', 'max', 'team', 'enterprise']);
+
 const hasOwnClaudeAiLogin = async (): Promise<boolean> => {
   const own = await readOwnClaudeLogin();
-  return Boolean(own?.loggedIn && own.authMethod === 'claude.ai');
+  return Boolean(own?.loggedIn && own.authMethod === 'claude.ai' && PAID_PLANS.has(String(own.subscriptionType || '').toLowerCase()));
 };
 
 /** Разбирает ключи из окружения один раз, при старте сервера программы. */
@@ -103,8 +106,12 @@ export function initDesktopClaudeAccounts(): void {
 
   // Вход через браузер в программе завершился — сразу на него и запомнить выбор.
   setDesktopLoginSuccessListener(() => {
-    useOwnLogin();
-    saveChoice({ own: true });
+    void hasOwnClaudeAiLogin().then((own) => {
+      if (!own) return; // вошли бесплатным аккаунтом — остаётся ключ подписки
+      activeEmailChosenSinceStart = true;
+      useOwnLogin();
+      saveChoice({ own: true });
+    }).catch(() => {});
   });
   if (!accounts.length) return;
 
