@@ -942,6 +942,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   const hasLiveBackgroundWork = () => liveBgTaskIds.size > 0 || cliReportedBgCount > 0;
   // Сторож молчания читает это время; поднят сюда, чтобы adoptTurn мог его сбросить.
   let lastMessageAt = Date.now();
+  // Сколько вопросов человеку (разрешение, выбор) сейчас ждут ответа — см. сторож молчания.
+  let awaitingHumanCount = 0;
   // Ход, усыновлённый удержанным процессом: обещание «ход закончен» для вызывающего.
   let adoptedTurnDone = null;
   const settleAdoptedTurn = () => {
@@ -1132,7 +1134,13 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         dedupeKey: `claude:permission:${sessionId || capturedSessionId || 'none'}:${requestId}`
       }));
 
-      const decision = await waitForToolApproval(requestId, {
+      // Пока ждём человека, сторож молчания не считает это тишиной: в программе
+      // окно разрешения ждёт до суток, а сторож через 15 мин объявлял «процесс
+      // умер» (Ричард 28.09.26: «Install googleapis» → вопрос, созвон — обрыв).
+      awaitingHumanCount += 1;
+      let decision;
+      try {
+        decision = await waitForToolApproval(requestId, {
         timeoutMs: requiresInteraction ? 0 : undefined,
         signal: context?.signal,
         metadata: {
@@ -1147,6 +1155,10 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
           ws.send(createNormalizedMessage({ kind: 'permission_cancelled', requestId, reason, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
         }
       });
+      } finally {
+        awaitingHumanCount = Math.max(0, awaitingHumanCount - 1);
+        lastMessageAt = Date.now();
+      }
       if (!decision) {
         return { behavior: 'deny', message: 'Permission request timed out' };
       }
@@ -1234,6 +1246,10 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     const STALL_SILENCE_MS = Number(process.env.CHAT_STALL_TIMEOUT_MS || 15 * 60 * 1000);
     lastMessageAt = Date.now();
     stallTimer = setInterval(() => {
+      if (awaitingHumanCount > 0) {
+        lastMessageAt = Date.now(); // Claude ждёт ответа человека — это не тишина
+        return;
+      }
       if (turnCompleteSent || Date.now() - lastMessageAt < STALL_SILENCE_MS) {
         return;
       }
