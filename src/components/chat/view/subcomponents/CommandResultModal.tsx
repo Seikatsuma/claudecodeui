@@ -705,10 +705,10 @@ export default function CommandResultModal({
         <div className="flex shrink-0 flex-col gap-3 border-t border-border/70 bg-muted/20 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="flex items-center gap-2">
             <Gauge className="h-3.5 w-3.5" />
-            <span>Esc closes the modal.</span>
+            <span>Esc — закрыть окно</span>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={onClose} className="rounded-xl">
-            Close
+            Закрыть
           </Button>
         </div>
       </DialogContent>
