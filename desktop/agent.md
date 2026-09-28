@@ -20,9 +20,21 @@
     второй блок, голос) выключены явно; владелец (тариф owner) — чаты без вопросов, как на сайте.
 - Мозги в работе Claude — `server/modules/providers/list/claude/desktop-brains.js` (включается только
   при CLAUDE_UI_BRAINS_DIR): правила → добавка к системным, `protocol.md` → к каждому сообщению,
-  `plugin/` → 21 помощник и 6 навыков, защита от удаления → перехватчик PreToolUse (Bash|PowerShell;
+  `plugin/` → 21 помощник и 8 навыков, защита от удаления → перехватчик PreToolUse (Bash|PowerShell;
   после «да» — префикс USER_CONFIRMED=da). Перехватчики внутри процесса: на Windows нет bash/python.
   Папку `~/.claude` человека не трогаем — его правила и вход в Claude остаются его.
+- `desktop/brains/CLAUDE.md` — в git только благодаря `!desktop/brains/CLAUDE.md` в .gitignore (общее правило
+  `CLAUDE.md` его прятало: сборки GitHub до 28.09 шли без правил → `getBrainsDir()` = null → мозги выключены
+  целиком, а сервер не отдавал их при той же версии). Теперь `syncFromServer` берёт мозги и при той же версии,
+  если в рабочей копии нет CLAUDE.md. Мозги кнопкой «Обновить» НЕ едут (их нет в пакете начинки) — новая
+  версия доезжает с сервера аккаунтов при входе: поднять `version` в manifest.json → `publish-brains.sh`.
+- Подключения и возможности (28.09.26, Егор: «написал „хочу подключить Google“ — и он такой: да»): навыки
+  `plugin/skills/connect` (лестница: подключения аккаунта claude.ai → папка облака → MCP по адресу с входом
+  через инструмент `mcp__<имя>__authenticate` → MCP с ключом → свой скрипт/браузер; ключи — Связка ключей Mac /
+  `~/.claudeui/keys.env` Windows) и `plugin/skills/tools` (uv без администратора, `scripts/photos_info.py` —
+  дата/место/адрес фото с HEIC, `scripts/video_frames.py` — кадры, дата, место, звук; ffmpeg из imageio-ffmpeg).
+  `claude mcp login` и `/mcp` во встроенном Claude 2.1.165 нет — вход в MCP только тем инструментом.
+  `applyDesktopBrains` добавляет в PATH Claude `~/.local/bin` и `~/.claudeui/node(/bin)` — туда ставятся uv и Node.
 - Узкое окно — `src/components/app/AppContent.tsx`: 768–1023 точки → полоска значков, панель выезжает
   поверх чата; уже 768 — телефонная раскладка. Окно сжимается до 420 (`desktopWindow.js`).
 

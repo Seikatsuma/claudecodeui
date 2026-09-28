@@ -54,7 +54,9 @@ export class BrainsManager {
     const version = payload?.version;
     if (!version || !payload.files || typeof payload.files !== 'object') return false;
     const currentVersion = this.getVersion();
-    if (currentVersion && currentVersion >= version) return false;
+    // Рабочая копия без правил (сборки до 28.09: CLAUDE.md не попадал в установщик) — берём с сервера и при той же версии.
+    const complete = existsSync(path.join(this.currentDir, 'CLAUDE.md'));
+    if (currentVersion && currentVersion >= version && complete) return false;
 
     await this.#replaceWith(async (dir) => {
       for (const [rel, content] of Object.entries(payload.files)) {

@@ -11,6 +11,7 @@
 // ничего у человека не переписывают. Перехватчики здесь, а не скриптами:
 // на Windows нет bash и python, а процесс сервера есть везде.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const PROTOCOL_SKIP = /^(?:да|нет|ок|окей|ага|угу|хорошо|спасибо|понял|ясно|дальше|продолжай|стоп|делай|давай)[\s.!,)]*$/i;
@@ -140,6 +141,19 @@ export function applyDesktopBrains(sdkOptions) {
       ...current,
       append: [current.append, brains.rules].filter(Boolean).join('\n\n'),
     };
+  }
+
+  // Инструменты, которые Claude ставит человеку без администратора (навык tools):
+  // uv — в ~/.local/bin, Node — в ~/.claudeui/node. У программы с Dock/«Пуска»
+  // путь поиска короткий — без этого только что поставленный uv «не найден».
+  if (sdkOptions.env) {
+    const home = os.homedir();
+    const extra = process.platform === 'win32'
+      ? [path.join(home, '.local', 'bin'), path.join(home, '.claudeui', 'node')]
+      : [path.join(home, '.local', 'bin'), path.join(home, '.claudeui', 'node', 'bin')];
+    const pathKey = Object.keys(sdkOptions.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
+    const current = String(sdkOptions.env[pathKey] || '').split(path.delimiter).filter(Boolean);
+    sdkOptions.env[pathKey] = [...extra.filter((dir) => !current.includes(dir)), ...current].join(path.delimiter);
   }
 
   if (brains.pluginDir) {
