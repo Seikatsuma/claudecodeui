@@ -243,7 +243,7 @@ async function findRepeatedRewind(
   jsonlPath: string,
   uuid: string | null,
   text: string | null,
-): Promise<{ text: string; backupPath: string } | null> {
+): Promise<{ text: string; queuedTexts: string[]; backupPath: string } | null> {
   const directory = path.dirname(jsonlPath);
   const prefix = `${path.basename(jsonlPath)}${BACKUP_MARK}`;
   let names: string[];
@@ -262,7 +262,21 @@ async function findRepeatedRewind(
   const target = await locateTarget(backupPath, uuid, text);
   if (!target) return null;
   const { size } = await fsp.stat(jsonlPath);
-  return target.offset === size ? { text: target.text, backupPath } : null;
+  if (target.offset !== size) return null;
+  // Очередь первый возврат уже снял — её тексты лежат рядом с копией.
+  let queuedTexts: string[] = [];
+  try {
+    const saved = JSON.parse(await fsp.readFile(queuedPathFor(backupPath), 'utf8'));
+    if (Array.isArray(saved)) queuedTexts = saved.filter((item) => typeof item === 'string');
+  } catch {
+    // Файла нет — очереди при возврате не было.
+  }
+  return { text: target.text, queuedTexts, backupPath };
+}
+
+/** Тексты очереди, снятой возвратом, — рядом с копией: повтор вернёт и их. */
+function queuedPathFor(backupPath: string): string {
+  return `${backupPath}.queued.json`;
 }
 
 /**
@@ -300,7 +314,12 @@ export const sessionRewindService = {
           sessionId: input.sessionId,
           backupPath: repeated.backupPath,
         });
-        return { text: repeated.text, queuedTexts: [], removedLines: 0, backupPath: repeated.backupPath };
+        return {
+          text: repeated.text,
+          queuedTexts: repeated.queuedTexts,
+          removedLines: 0,
+          backupPath: repeated.backupPath,
+        };
       }
       throw new AppError('Не нашёл это сообщение в разговоре.', {
         code: 'REWIND_MESSAGE_NOT_FOUND',
@@ -348,6 +367,9 @@ export const sessionRewindService = {
 
     const backupPath = `${jsonlPath}.before-rewind-${backupStamp()}`;
     await fsp.copyFile(jsonlPath, backupPath);
+    if (queuedTexts.length > 0) {
+      await fsp.writeFile(queuedPathFor(backupPath), JSON.stringify(queuedTexts), 'utf8');
+    }
     await fsp.truncate(jsonlPath, target.offset);
     forgetTranscriptTail(jsonlPath);
 

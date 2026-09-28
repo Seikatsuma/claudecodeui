@@ -185,3 +185,14 @@ test('старая копия (больше 30 минут) повтором не
     );
   });
 });
+
+test('повтор возвращает и тексты очереди, снятой первым возвратом', async () => {
+  await withSession(async () => {
+    chatMessageQueueDb.append({ id: 'q2', sessionId: SESSION_ID, userId: null, content: 'и ещё вот это', options: {} });
+    const first = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U3, text: null });
+    assert.deepEqual(first.queuedTexts, ['и ещё вот это']);
+    const again = await sessionRewindService.rewind({ sessionId: SESSION_ID, messageId: U3, text: null });
+    assert.equal(again.text, 'Спасибо');
+    assert.deepEqual(again.queuedTexts, ['и ещё вот это']);
+  });
+});
