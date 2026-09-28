@@ -178,7 +178,15 @@ export const sessionsDb = {
 
     // First, ensure the project path is recorded in the projects table,
     // since it's a foreign key in the sessions table.
-    projectsDb.createProjectPath(normalizedProjectPath);
+    // Программа на компьютере: переписку нашли в файлах, а не начали в программе.
+    // Убранный из панели проект так не возвращается, а проекты из чужих историй
+    // (Codex, Cursor…) появляются убранными — в панели то, что человек открыл сам,
+    // и история Claude. Открыл такую папку кнопкой «+» или начал в ней чат — видна.
+    projectsDb.createProjectPath(
+      normalizedProjectPath,
+      null,
+      process.env.CLAUDE_UI_DESKTOP === '1' ? { hidden: provider !== 'claude' } : undefined,
+    );
 
     const existing = db
       .prepare(

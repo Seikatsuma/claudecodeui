@@ -40,6 +40,14 @@
   ключ; выбор в `<данные>/claude-account.json` (`{own:true}` или `{email}`). Карточка при `authMethod: oauth_token`
   объясняет и даёт «Войти через браузер» (видна в настройках и по `/login` в чате).
   `applyDesktopBrains` добавляет в PATH Claude `~/.local/bin` и `~/.claudeui/node(/bin)` — туда ставятся uv и Node.
+- Панель проектов в программе (28.09.26, Ричард: «подтянул мои личные проекты из Codex»): видны папки, открытые
+  человеком («+», чат в программе), и история Claude. `sessionsDb.createSession` (переписка найдена в файлах) при
+  CLAUDE_UI_DESKTOP=1 зовёт `createProjectPath(…, {hidden: provider !== 'claude'})`: убранный проект не возвращает,
+  новый из Codex/Cursor/… создаёт убранным; `createAppSession` и «+» возвращают как раньше. Разово при запуске —
+  `projectsDb.hideProjectsOnlyFromOtherAgents()` (метка `hidden-other-agents-projects.done` рядом с базой): убирает
+  проекты без чатов Claude и без чатов из программы, кроме звёздочки. Проверка —
+  `server/modules/database/tests/desktop-discovered-projects.integration.test.ts`. Папку можно открыть на любом диске
+  (`validateWorkspacePath` в программе не держит рамку домашней папки).
 - Узкое окно — `src/components/app/AppContent.tsx`: 768–1023 точки → полоска значков, панель выезжает
   поверх чата; уже 768 — телефонная раскладка. Окно сжимается до 420 (`desktopWindow.js`).
 

@@ -24,7 +24,7 @@ import {
     startSessionActivitySync,
     stopSessionActivitySync,
 } from '@/modules/providers/index.js';
-import { userDb, initializeDatabase, sessionsDb  } from '@/modules/database/index.js';
+import { userDb, initializeDatabase, sessionsDb, projectsDb } from '@/modules/database/index.js';
 import { createWebSocketServer, dispatchChatQueues } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
@@ -481,10 +481,26 @@ async function removeLocalServerMarker() {
 }
 
 // Initialize database and start server
+// Программа на компьютере: проекты из чужих историй (Codex, Cursor…) убрать из
+// панели один раз — дальше новые такие появляются убранными сами (sessionsDb).
+function hideOtherAgentsProjectsOnce() {
+    if (process.env.CLAUDE_UI_DESKTOP !== '1' || !process.env.DATABASE_PATH) return;
+    const marker = path.join(path.dirname(process.env.DATABASE_PATH), 'hidden-other-agents-projects.done');
+    if (fs.existsSync(marker)) return;
+    try {
+        const hidden = projectsDb.hideProjectsOnlyFromOtherAgents();
+        fs.writeFileSync(marker, `${new Date().toISOString()} ${hidden}\n`);
+        if (hidden) console.log(`[INFO] Убрано из панели проектов из чужих историй: ${hidden}`);
+    } catch (error) {
+        console.warn('[WARN] Не убрал проекты из чужих историй:', (error as Error)?.message || error);
+    }
+}
+
 async function startServer() {
     try {
         // Initialize authentication database
         await initializeDatabase();
+        hideOtherAgentsProjectsOnce();
 
         // Configure Web Push (VAPID keys)
         configureWebPush();

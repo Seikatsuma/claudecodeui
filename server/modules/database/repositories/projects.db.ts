@@ -60,19 +60,55 @@ function normalizeProjectDisplayName(projectPath: string, customProjectName: str
 }
 
 export const projectsDb = {
-    createProjectPath(projectPath: string, customProjectName: string | null = null): CreateProjectPathResult {
+    /**
+     * Программа на компьютере, разово (сборки до 22 показывали всё подряд):
+     * убрать из панели проекты, которые нашлись только в чужих историях —
+     * ни одного чата Claude и ни одного чата, начатого в программе. Звёздочку
+     * и пустые папки, открытые кнопкой «+», не трогаем. Обратимо: папку снова
+     * открывают «+». Возвращает, сколько убрано.
+     */
+    hideProjectsOnlyFromOtherAgents(): number {
+        const db = getConnection();
+        return db.prepare(`
+        UPDATE projects SET isArchived = 1
+            WHERE isArchived = 0 AND COALESCE(isStarred, 0) = 0
+            AND EXISTS (SELECT 1 FROM sessions s WHERE s.project_path = projects.project_path)
+            AND NOT EXISTS (
+                SELECT 1 FROM sessions s WHERE s.project_path = projects.project_path
+                AND (s.provider = 'claude' OR s.origin = 'web')
+            )
+        `).run().changes;
+    },
+
+    /**
+     * `discovered` — проект нашёлся в файлах переписки, а не открыт человеком
+     * (программа на компьютере, см. sessionsDb.createSession): убранный из
+     * панели не возвращаем, а `hidden` — новый создаём сразу убранным.
+     */
+    createProjectPath(
+        projectPath: string,
+        customProjectName: string | null = null,
+        discovered?: { hidden: boolean },
+    ): CreateProjectPathResult {
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);
         const normalizedProjectName = normalizeProjectDisplayName(normalizedProjectPath, customProjectName);
         const attemptedId = randomUUID();
-        const row = db.prepare(`
+        const row = (discovered
+            ? db.prepare(`
+        INSERT INTO projects (project_id, project_path, custom_project_name, isArchived)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(project_path) DO NOTHING
+            RETURNING project_id, project_path, custom_project_name, isStarred, isArchived, server_scope
+        `).get(attemptedId, normalizedProjectPath, normalizedProjectName, discovered.hidden ? 1 : 0)
+            : db.prepare(`
         INSERT INTO projects (project_id, project_path, custom_project_name, isArchived)
             VALUES (?, ?, ?, 0)
             ON CONFLICT(project_path) DO UPDATE SET
             isArchived = 0
             WHERE projects.isArchived = 1
             RETURNING project_id, project_path, custom_project_name, isStarred, isArchived, server_scope
-        `).get(attemptedId, normalizedProjectPath, normalizedProjectName) as ProjectRepositoryRow | undefined;
+        `).get(attemptedId, normalizedProjectPath, normalizedProjectName)) as ProjectRepositoryRow | undefined;
 
         if (row) {
             return {
