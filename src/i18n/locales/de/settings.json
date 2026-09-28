@@ -94,7 +94,8 @@
     "notifications": "Benachrichtigungen",
     "plugins": "Plugins",
     "about": "Info",
-    "presets": "Vorlagen"
+    "presets": "Vorlagen",
+    "folders": "Folders"
   },
   "notifications": {
     "title": "Benachrichtigungen",

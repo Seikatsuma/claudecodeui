@@ -66,6 +66,7 @@ export async function deleteOrArchiveProject(projectId: string, force: boolean):
 
   if (!force) {
     projectsDb.updateProjectIsArchivedById(projectId, true);
+    projectsDb.rememberUserHiddenProject(row.project_path);
     return;
   }
 
@@ -87,4 +88,5 @@ export function restoreArchivedProject(projectId: string): void {
   }
 
   projectsDb.updateProjectIsArchivedById(projectId, false);
+  projectsDb.forgetUserHiddenProject(row.project_path);
 }

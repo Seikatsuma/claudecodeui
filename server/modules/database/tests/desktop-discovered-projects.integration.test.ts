@@ -91,3 +91,43 @@ test('программа: разовая уборка убирает тольк�
     assert.equal(hidden, 1);
   });
 });
+
+test('программа: «Показывать чаты из Codex» в настройках — возвращает их и новые появляются видными', async () => {
+  await withDesktopDatabase(async () => {
+    const { appConfigDb } = await import('@/modules/database/repositories/app-config.js');
+    sessionsDb.createSession('c-old', 'codex', '/home/r/codex-old', 'старый');
+    assert.equal(archived('/home/r/codex-old'), 1);
+
+    appConfigDb.set('desktop.show_other_agents', '1');
+    assert.equal(projectsDb.showProjectsOnlyFromOtherAgents(), 1);
+    assert.equal(archived('/home/r/codex-old'), 0);
+    sessionsDb.createSession('c-new', 'codex', '/home/r/codex-new', 'новый');
+    assert.equal(archived('/home/r/codex-new'), 0);
+
+    appConfigDb.set('desktop.show_other_agents', '0');
+    assert.equal(projectsDb.hideProjectsOnlyFromOtherAgents(), 2);
+  });
+});
+
+test('программа: проект Codex, убранный человеком вручную, переключатель не возвращает; «+» — возвращает', async () => {
+  await withDesktopDatabase(async () => {
+    const { appConfigDb } = await import('@/modules/database/repositories/app-config.js');
+    appConfigDb.set('desktop.show_other_agents', '1');
+    sessionsDb.createSession('c-mine', 'codex', '/home/r/codex-keep-away', 'личное');
+    assert.equal(archived('/home/r/codex-keep-away'), 0);
+    projectsDb.updateProjectIsArchived('/home/r/codex-keep-away', true); // «Убрать проект»
+    projectsDb.rememberUserHiddenProject('/home/r/codex-keep-away');
+
+    appConfigDb.set('desktop.show_other_agents', '0');
+    projectsDb.hideProjectsOnlyFromOtherAgents();
+    appConfigDb.set('desktop.show_other_agents', '1');
+    projectsDb.showProjectsOnlyFromOtherAgents();
+    assert.equal(archived('/home/r/codex-keep-away'), 1, 'убранный вручную остаётся убранным');
+
+    projectsDb.createProjectPath('/home/r/codex-keep-away'); // открыл «+»
+    assert.equal(archived('/home/r/codex-keep-away'), 0);
+    projectsDb.updateProjectIsArchived('/home/r/codex-keep-away', true);
+    projectsDb.showProjectsOnlyFromOtherAgents();
+    assert.equal(archived('/home/r/codex-keep-away'), 0, 'после «+» память о ручном убирании стёрта');
+  });
+});

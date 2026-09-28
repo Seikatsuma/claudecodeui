@@ -113,7 +113,8 @@
     "notifications": "Notificaciones",
     "plugins": "Plugins",
     "about": "Acerca de",
-    "presets": "Preajustes"
+    "presets": "Preajustes",
+    "folders": "Folders"
   },
   "notifications": {
     "title": "Notificaciones",

@@ -94,7 +94,8 @@
     "notifications": "Notifiche",
     "plugins": "Plugin",
     "about": "Informazioni",
-    "presets": "Preset"
+    "presets": "Preset",
+    "folders": "Folders"
   },
   "notifications": {
     "title": "Notifiche",

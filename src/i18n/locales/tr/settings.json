@@ -95,7 +95,8 @@
     "notifications": "Bildirimler",
     "plugins": "Eklentiler",
     "about": "Hakkında",
-    "presets": "Ön ayarlar"
+    "presets": "Ön ayarlar",
+    "folders": "Folders"
   },
   "notifications": {
     "title": "Bildirimler",

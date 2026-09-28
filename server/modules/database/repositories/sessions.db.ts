@@ -192,7 +192,13 @@ export const sessionsDb = {
     projectsDb.createProjectPath(
       normalizedProjectPath,
       null,
-      desktop ? { hidden: provider !== 'claude', revive: firstClaudeHere } : undefined,
+      desktop
+        ? {
+          // «Показывать чаты из Codex и других программ» (настройки → Папки) — тогда видны.
+          hidden: provider !== 'claude' && appConfigDb.get('desktop.show_other_agents') !== '1',
+          revive: firstClaudeHere,
+        }
+        : undefined,
     );
 
     const existing = db

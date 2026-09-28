@@ -94,7 +94,8 @@
     "notifications": "通知",
     "plugins": "プラグイン",
     "about": "概要",
-    "presets": "プリセット"
+    "presets": "プリセット",
+    "folders": "Folders"
   },
   "notifications": {
     "title": "通知",

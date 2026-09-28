@@ -48,6 +48,14 @@
   проекты без чатов Claude и без чатов из программы, кроме звёздочки. Проверка —
   `server/modules/database/tests/desktop-discovered-projects.integration.test.ts`. Папку можно открыть на любом диске
   (`validateWorkspacePath` в программе не держит рамку домашней папки).
+- Настройки → «Папки» (28.09.26, Ричард: «хочу рабочую папку, не захламлять диск C; в настройках не нашёл»):
+  `server/modules/desktop/desktop-settings.ts` (GET/PUT `/api/desktop/settings`, GET `/api/desktop/history-size`,
+  404 вне программы), вкладка `FoldersSettingsTab.tsx` (в `SettingsSidebar` только при `isDesktopApp()`).
+  Рабочая папка (`app_config` `desktop.work_folder`) — с неё открывается выбор у «+» (`WorkspacePathField`);
+  «Чаты из Codex и других программ» (`desktop.show_other_agents`) — `sessionsDb.createSession` делает такие
+  проекты видными, переключение сразу `show/hideProjectsOnlyFromOtherAgents`. История Claude — в его
+  служебной папке (`~/.claude/projects`), раздел показывает путь и размер; переносить её не умеем (там же вход).
+  Проба на сервере: переменные как в `getServerEnv()` (иначе включится режим многих пользователей сайта).
 - Узкое окно — `src/components/app/AppContent.tsx`: 768–1023 точки → полоска значков, панель выезжает
   поверх чата; уже 768 — телефонная раскладка. Окно сжимается до 420 (`desktopWindow.js`).
 

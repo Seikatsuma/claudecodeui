@@ -113,7 +113,8 @@
     "notifications": "알림",
     "plugins": "플러그인",
     "about": "정보",
-    "presets": "프리셋"
+    "presets": "프리셋",
+    "folders": "Folders"
   },
   "notifications": {
     "title": "알림",

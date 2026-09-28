@@ -1,6 +1,7 @@
-import { Bell, Bot, GitBranch, Info, Key, ListChecks, Mic, MonitorPlay, Palette, Puzzle, SlidersHorizontal, Wand2 } from 'lucide-react';
+import { Bell, Bot, FolderOpen, GitBranch, Info, Key, ListChecks, Mic, MonitorPlay, Palette, Puzzle, SlidersHorizontal, Wand2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { isDesktopApp } from '../../../lib/desktopBridge';
 import { cn } from '../../../lib/utils';
 import { PillBar, Pill } from '../../../shared/view/ui';
 import type { SettingsMainTab } from '../types/types';
@@ -16,8 +17,10 @@ type NavItem = {
   icon: typeof Bot;
 };
 
-const NAV_ITEMS: NavItem[] = [
+const ALL_NAV_ITEMS: NavItem[] = [
   { id: 'agents', labelKey: 'mainTabs.agents', icon: Bot },
+  // «Папки» — рабочая папка и чаты других помощников; есть только в программе на компьютере.
+  { id: 'folders', labelKey: 'mainTabs.folders', icon: FolderOpen },
   { id: 'appearance', labelKey: 'mainTabs.appearance', icon: Palette },
   { id: 'chatInput', labelKey: 'mainTabs.chatInput', icon: SlidersHorizontal },
   { id: 'git', labelKey: 'mainTabs.git', icon: GitBranch },
@@ -33,6 +36,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebarProps) {
   const { t } = useTranslation('settings');
+  const NAV_ITEMS = isDesktopApp() ? ALL_NAV_ITEMS : ALL_NAV_ITEMS.filter((item) => item.id !== 'folders');
 
   return (
     <>

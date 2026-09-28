@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { getConnection } from '@/modules/database/connection.js';
+import { appConfigDb } from '@/modules/database/repositories/app-config.js';
 import type { CreateProjectPathResult, ProjectRepositoryRow, ServerScope } from '@/shared/types.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
@@ -59,7 +60,32 @@ function normalizeProjectDisplayName(projectPath: string, customProjectName: str
     return directoryName || projectPath;
 }
 
+// Программа на компьютере: проекты, убранные человеком вручную («Убрать проект»).
+// Переключатель «Чаты из Codex…» их не возвращает — только то, что убрала сама программа.
+const USER_HIDDEN_KEY = 'desktop.user_hidden_projects';
+const readUserHidden = (): string[] => {
+    try {
+        const parsed = JSON.parse(appConfigDb.get(USER_HIDDEN_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+        return [];
+    }
+};
+const writeUserHidden = (paths: string[]): void => appConfigDb.set(USER_HIDDEN_KEY, JSON.stringify([...new Set(paths)]));
+
 export const projectsDb = {
+    rememberUserHiddenProject(projectPath: string): void {
+        if (process.env.CLAUDE_UI_DESKTOP !== '1') return;
+        writeUserHidden([...readUserHidden(), normalizeProjectPath(projectPath)]);
+    },
+
+    forgetUserHiddenProject(projectPath: string): void {
+        if (process.env.CLAUDE_UI_DESKTOP !== '1') return;
+        const target = normalizeProjectPath(projectPath);
+        const current = readUserHidden();
+        if (current.includes(target)) writeUserHidden(current.filter((item) => item !== target));
+    },
+
     /**
      * Программа на компьютере, разово (сборки до 22 показывали всё подряд):
      * убрать из панели проекты, которые нашлись только в чужих историях —
@@ -67,6 +93,21 @@ export const projectsDb = {
      * и пустые папки, открытые кнопкой «+», не трогаем. Обратимо: папку снова
      * открывают «+». Возвращает, сколько убрано.
      */
+    /** Обратное к hideProjectsOnlyFromOtherAgents — «Показывать чаты из Codex…» в настройках. */
+    showProjectsOnlyFromOtherAgents(): number {
+        const db = getConnection();
+        return db.prepare(`
+        UPDATE projects SET isArchived = 0
+            WHERE isArchived = 1
+            AND project_path NOT IN (SELECT value FROM json_each(?))
+            AND EXISTS (SELECT 1 FROM sessions s WHERE s.project_path = projects.project_path)
+            AND NOT EXISTS (
+                SELECT 1 FROM sessions s WHERE s.project_path = projects.project_path
+                AND (s.provider = 'claude' OR s.origin = 'web')
+            )
+        `).run(JSON.stringify(readUserHidden())).changes;
+    },
+
     hideProjectsOnlyFromOtherAgents(): number {
         const db = getConnection();
         return db.prepare(`
@@ -110,6 +151,7 @@ export const projectsDb = {
             RETURNING project_id, project_path, custom_project_name, isStarred, isArchived, server_scope
         `).get(attemptedId, normalizedProjectPath, normalizedProjectName)) as ProjectRepositoryRow | undefined;
 
+        if (!discovered || discovered.revive) projectsDb.forgetUserHiddenProject(normalizedProjectPath);
         if (row) {
             return {
                 outcome: row.project_id === attemptedId ? 'created' : 'reactivated_archived',

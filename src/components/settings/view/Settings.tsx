@@ -8,6 +8,7 @@ import SettingsSidebar from '../view/SettingsSidebar';
 import AgentsSettingsTab from '../view/tabs/agents-settings/AgentsSettingsTab';
 import AppearanceSettingsTab from '../view/tabs/AppearanceSettingsTab';
 import ChatInputSettingsTab from '../view/tabs/ChatInputSettingsTab';
+import FoldersSettingsTab from '../view/tabs/FoldersSettingsTab';
 import CredentialsSettingsTab from '../view/tabs/api-settings/CredentialsSettingsTab';
 import VoiceSettingsTab from '../view/tabs/VoiceSettingsTab';
 import PromptPresetsTab from '../view/tabs/PromptPresetsTab';
@@ -185,6 +186,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
               )}
 
               {activeTab === 'chatInput' && <ChatInputSettingsTab />}
+
+              {activeTab === 'folders' && <FoldersSettingsTab />}
 
               {activeTab === 'git' && <GitSettingsTab />}
 

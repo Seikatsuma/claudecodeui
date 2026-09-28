@@ -113,7 +113,8 @@
     "about": "О программе",
     "voice": "Голос",
     "browser": "Браузер",
-    "presets": "Пресеты"
+    "presets": "Пресеты",
+    "folders": "Папки"
   },
   "about": {
     "sessionTitle": "Сеанс",

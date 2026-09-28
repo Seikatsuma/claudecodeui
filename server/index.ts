@@ -60,6 +60,7 @@ import {
 import providerRoutes from './modules/providers/provider.routes.js';
 import { voiceRoutes } from './modules/voice/index.js';
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
+import desktopSettingsRoutes from './modules/desktop/desktop-settings.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
 import { worktreesRoutes } from './modules/worktrees/index.js';
@@ -263,6 +264,8 @@ app.use('/api/browser-use-mcp', browserUseMcpRoutes);
 
 // Browser API Routes (protected)
 app.use('/api/browser-use', withUserRuntimeContext, browserUseRoutes);
+// Программа на компьютере: настройки → «Папки» (рабочая папка, чаты других помощников).
+app.use('/api/desktop', withUserRuntimeContext, desktopSettingsRoutes);
 
 // Unified provider MCP routes (protected)
 app.use('/api/providers', withUserRuntimeContext, providerRoutes);

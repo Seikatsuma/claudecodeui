@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen } from 'lucide-react';
+
 import { Button, Input } from '../../../shared/view/ui';
 import { browseFilesystemFolders } from '../data/workspaceApi';
 import { getSuggestionRootPath } from '../utils/pathUtils';
 import type { FolderSuggestion } from '../types';
-import FolderBrowserModal from './FolderBrowserModal';
 import { getDesktopBridge } from '../../../lib/desktopBridge';
+import { authenticatedFetch } from '../../../utils/api';
+
+import FolderBrowserModal from './FolderBrowserModal';
 
 type WorkspacePathFieldProps = {
   value: string;
@@ -28,10 +31,19 @@ export default function WorkspacePathField({
   // Программа на компьютере: папку выбирают системным окном Mac/Windows.
   const desktop = getDesktopBridge();
   const [showManualPath, setShowManualPath] = useState(false);
+  // Рабочая папка из настроек → «Папки»: окно выбора открывается в ней, а не в «Документах».
+  const [workFolder, setWorkFolder] = useState<string | null>(null);
+  useEffect(() => {
+    if (!desktop) return;
+    authenticatedFetch('/api/desktop/settings')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => setWorkFolder(body?.data?.workFolder || null))
+      .catch(() => {});
+  }, [desktop]);
   const pickWithSystemDialog = useCallback(async () => {
-    const picked = await desktop?.pickFolder({ defaultPath: value || undefined });
+    const picked = await desktop?.pickFolder({ defaultPath: value || workFolder || undefined });
     if (picked) onChange(picked);
-  }, [desktop, onChange, value]);
+  }, [desktop, onChange, value, workFolder]);
 
   useEffect(() => {
     if (value.trim().length <= 2) {

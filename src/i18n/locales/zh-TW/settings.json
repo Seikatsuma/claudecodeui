@@ -95,7 +95,8 @@
     "notifications": "通知",
     "plugins": "外掛",
     "about": "關於",
-    "presets": "預設"
+    "presets": "預設",
+    "folders": "Folders"
   },
   "notifications": {
     "title": "通知",

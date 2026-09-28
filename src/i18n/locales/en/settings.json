@@ -128,7 +128,8 @@
     "notifications": "Notifications",
     "plugins": "Plugins",
     "about": "About",
-    "presets": "Presets"
+    "presets": "Presets",
+    "folders": "Folders"
   },
   "about": {
     "sessionTitle": "Session",
