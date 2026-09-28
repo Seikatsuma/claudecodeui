@@ -24,6 +24,7 @@
  */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import path from 'node:path';
 import readline from 'node:readline';
 
 import { sessionsDb } from '@/modules/database/index.js';
@@ -40,6 +41,8 @@ const STOP_WAIT_MS = 15_000;
 /** Файл не меняется столько — считаем, что агент затих. */
 const QUIET_MS = 1_000;
 const POLL_MS = 250;
+/** Столько после возврата повторное нажатие на то же сообщение считаем тем же возвратом. */
+const REPEAT_WINDOW_MS = 30 * 60_000;
 
 const UUID_PREFIX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -213,6 +216,55 @@ function backupStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
+const BACKUP_MARK = '.before-rewind-';
+
+/** Время копии по её имени (`…before-rewind-2026-09-28T15-41-10-662Z`); `null` — имя не наше. */
+function backupTime(name: string): number | null {
+  const stamp = name.slice(name.lastIndexOf(BACKUP_MARK) + BACKUP_MARK.length);
+  const iso = stamp.replace(/T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, 'T$1:$2:$3.$4Z');
+  const time = Date.parse(iso);
+  return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * Сообщение уже убрано прошлым возвратом — тогда повторное нажатие не ошибка.
+ *
+ * Так бывает постоянно: возврат с остановкой агента идёт до 20 секунд, ответ
+ * на телефон не доходит (приложение ушло в фон, связь моргнула), окно
+ * остаётся открытым, человек жмёт ещё раз — а сообщения в разговоре уже нет.
+ * 28.09.26 Егор так получил «Не нашёл это сообщение» после успешного возврата
+ * и потерял текст, который должен был вернуться в поле ввода.
+ *
+ * Признак: в свежей копии (за последние 30 минут) сообщение есть и начинается
+ * ровно там, где сейчас кончается разговор, — то есть обрезали именно по нему
+ * и с тех пор ничего не дописали.
+ */
+async function findRepeatedRewind(
+  jsonlPath: string,
+  uuid: string | null,
+  text: string | null,
+): Promise<{ text: string; backupPath: string } | null> {
+  const directory = path.dirname(jsonlPath);
+  const prefix = `${path.basename(jsonlPath)}${BACKUP_MARK}`;
+  let names: string[];
+  try {
+    names = (await fsp.readdir(directory)).filter((name) => name.startsWith(prefix));
+  } catch {
+    return null;
+  }
+  const latest = names
+    .map((name) => ({ name, time: backupTime(name) }))
+    .filter((item): item is { name: string; time: number } => item.time !== null)
+    .sort((a, b) => b.time - a.time)[0];
+  if (!latest || Date.now() - latest.time > REPEAT_WINDOW_MS) return null;
+
+  const backupPath = path.join(directory, latest.name);
+  const target = await locateTarget(backupPath, uuid, text);
+  if (!target) return null;
+  const { size } = await fsp.stat(jsonlPath);
+  return target.offset === size ? { text: target.text, backupPath } : null;
+}
+
 /**
  * Потребитель: `provider.routes.ts` (`POST /sessions/:sessionId/rewind`) —
  * кнопка «Вернуться сюда» под сообщением человека в ленте.
@@ -242,6 +294,14 @@ export const sessionRewindService = {
     // Проверяем, что сообщение есть, ДО остановки агента: если найти его
     // нельзя, работающий ход не должен оборваться зря.
     if (!(await locateTarget(jsonlPath, uuid, input.text))) {
+      const repeated = await findRepeatedRewind(jsonlPath, uuid, input.text);
+      if (repeated) {
+        console.log('[Возврат к сообщению] повторно — уже возвращено', {
+          sessionId: input.sessionId,
+          backupPath: repeated.backupPath,
+        });
+        return { text: repeated.text, queuedTexts: [], removedLines: 0, backupPath: repeated.backupPath };
+      }
       throw new AppError('Не нашёл это сообщение в разговоре.', {
         code: 'REWIND_MESSAGE_NOT_FOUND',
         statusCode: 404,
