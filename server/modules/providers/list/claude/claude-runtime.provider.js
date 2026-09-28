@@ -944,6 +944,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   let lastMessageAt = Date.now();
   // Сколько вопросов человеку (разрешение, выбор) сейчас ждут ответа — см. сторож молчания.
   let awaitingHumanCount = 0;
+  // Процесс Claude этого запуска: сторож проверяет, жив ли он, пока ждём человека.
+  let claudeProcess = null;
   // Ход, усыновлённый удержанным процессом: обещание «ход закончен» для вызывающего.
   let adoptedTurnDone = null;
   const settleAdoptedTurn = () => {
@@ -1188,11 +1190,14 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
     // Процесс агента запускаем сами: так он переживает перезапуск сайта
     // (см. survivor-runs.js — там проба и причина).
-    sdkOptions.spawnClaudeCodeProcess = (spawnOptions) => spawnSurvivableClaude(spawnOptions, {
-      appSessionId: sessionId || null,
-      providerSessionId: providerSessionId || null,
-      configDir: sdkOptions.env?.CLAUDE_CONFIG_DIR || getClaudeConfigDir(),
-    });
+    sdkOptions.spawnClaudeCodeProcess = (spawnOptions) => {
+      claudeProcess = spawnSurvivableClaude(spawnOptions, {
+        appSessionId: sessionId || null,
+        providerSessionId: providerSessionId || null,
+        configDir: sdkOptions.env?.CLAUDE_CONFIG_DIR || getClaudeConfigDir(),
+      });
+      return claudeProcess;
+    };
 
     // Копии присланных сообщений нужны, чтобы знать, когда Claude забрал
     // сообщение «отправить сейчас» (см. pendingSteerIds). Сами копии в ленту
@@ -1246,11 +1251,18 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     const STALL_SILENCE_MS = Number(process.env.CHAT_STALL_TIMEOUT_MS || 15 * 60 * 1000);
     lastMessageAt = Date.now();
     stallTimer = setInterval(() => {
-      if (awaitingHumanCount > 0) {
-        lastMessageAt = Date.now(); // Claude ждёт ответа человека — это не тишина
+      if (turnCompleteSent) {
         return;
       }
-      if (turnCompleteSent || Date.now() - lastMessageAt < STALL_SILENCE_MS) {
+      // Ждём ответа человека (разрешение, выбор) — это не тишина, пока процесс
+      // Claude жив. Умер, пока ждали, — закрываем сразу, а не через 15 мин.
+      const processGone = Boolean(claudeProcess) && (claudeProcess.exitCode !== null || claudeProcess.killed);
+      const diedWhileAwaitingHuman = awaitingHumanCount > 0 && processGone;
+      if (awaitingHumanCount > 0 && !processGone) {
+        lastMessageAt = Date.now();
+        return;
+      }
+      if (!diedWhileAwaitingHuman && Date.now() - lastMessageAt < STALL_SILENCE_MS) {
         return;
       }
       clearInterval(stallTimer);
@@ -1269,7 +1281,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         turnCompleteSent = true;
         ws.send(createNormalizedMessage({
           kind: 'error',
-          content: `Ответ оборвался: ${silentMinutes} мин без единого сообщения от Claude — похоже, процесс умер. Отправьте сообщение заново.`,
+          content: diedWhileAwaitingHuman
+            ? 'Ответ оборвался: Claude завершился, пока ждал вашего ответа. Отправьте сообщение заново.'
+            : `Ответ оборвался: ${silentMinutes} мин без единого сообщения от Claude — похоже, процесс умер. Отправьте сообщение заново.`,
           sessionId: capturedSessionId || sessionId || null,
           provider: 'claude',
         }));
