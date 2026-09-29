@@ -2,6 +2,7 @@ import { Check, ChevronsUpDown, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { selectChatProvider, useCodexAccount, useSelectedChatProvider } from '../../../../hooks/useCodexAccount';
 import { useOwnerAccountSettings } from '../../../settings/hooks/useOwnerAccountSettings';
 
 type SidebarAccountSwitcherProps = {
@@ -40,7 +41,13 @@ export default function SidebarAccountSwitcher({
   const menuRef = useRef<HTMLDivElement>(null);
 
   const available = accounts.filter((account) => account.available);
-  const canSwitch = available.length > 1;
+  // Подписка Codex — третий аккаунт хозяина. Выбор её не переключает слот
+  // Claude, а направляет новые чаты к Codex (см. selectChatProvider).
+  const codex = useCodexAccount();
+  const codexReady = Boolean(codex?.available);
+  const selectedProvider = useSelectedChatProvider();
+  const codexSelected = codexReady && selectedProvider === 'codex';
+  const canSwitch = available.length + (codexReady ? 1 : 0) > 1;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -67,14 +74,16 @@ export default function SidebarAccountSwitcher({
     };
   }, [isOpen]);
 
-  const activeEmail = available.find((account) => account.slot === activeSlot)?.email ?? accountEmail;
+  const activeEmail = codexSelected
+    ? (codex?.email ?? 'Codex')
+    : (available.find((account) => account.slot === activeSlot)?.email ?? accountEmail);
 
   const badgeInner = (
     <>
       <Users className="h-4 w-4 flex-shrink-0 text-violet-500 dark:text-violet-400" />
       <div className="min-w-0 flex-1 text-left">
         <span className="block truncate text-xs font-medium text-violet-700 dark:text-violet-300">
-          {accountLabel}
+          {codexSelected ? 'Codex' : accountLabel}
         </span>
         {activeEmail && (
           <span
@@ -135,10 +144,10 @@ export default function SidebarAccountSwitcher({
                 style={{ left: anchor.left, bottom: anchor.bottom, width: Math.max(anchor.width, 240) }}
               >
                 <div className="border-b border-border/60 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Your Claude accounts
+                  Ваши аккаунты
                 </div>
                 {available.map((account) => {
-                  const isActive = account.slot === activeSlot;
+                  const isActive = account.slot === activeSlot && !codexSelected;
                   const isBusy = pendingSlot === account.slot;
                   return (
                     <button
@@ -146,7 +155,15 @@ export default function SidebarAccountSwitcher({
                       type="button"
                       role="menuitem"
                       disabled={isActive || pendingSlot !== null}
-                      onClick={() => void activateSlot(account.slot)}
+                      onClick={() => {
+                        selectChatProvider('claude');
+                        if (account.slot === activeSlot) {
+                          // Слот уже этот — вернуться с Codex на Claude.
+                          setIsOpen(false);
+                          return;
+                        }
+                        void activateSlot(account.slot);
+                      }}
                       className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/60 disabled:cursor-default"
                     >
                       <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
@@ -155,10 +172,30 @@ export default function SidebarAccountSwitcher({
                       <span className="min-w-0 flex-1 truncate">
                         {account.email ?? `Account ${account.slot}`}
                       </span>
-                      {isBusy && <span className="text-xs text-muted-foreground">…</span>}
+                      {isBusy
+                        ? <span className="text-xs text-muted-foreground">…</span>
+                        : <span className="flex-shrink-0 text-[10px] text-muted-foreground">Claude</span>}
                     </button>
                   );
                 })}
+                {codexReady && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={codexSelected || pendingSlot !== null}
+                    onClick={() => {
+                      selectChatProvider('codex');
+                      setIsOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/60 disabled:cursor-default"
+                  >
+                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
+                      {codexSelected && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{codex?.email ?? 'Codex'}</span>
+                    <span className="flex-shrink-0 text-[10px] text-muted-foreground">Codex</span>
+                  </button>
+                )}
                 {errorMessage && (
                   <p className="border-t border-border/60 px-3 py-2 text-xs text-destructive">{errorMessage}</p>
                 )}

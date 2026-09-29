@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { SELECT_PROVIDER_EVENT } from '../../../hooks/useCodexAccount';
 import { authenticatedFetch } from '../../../utils/api';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type {
@@ -119,6 +120,22 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
   const [provider, setProvider] = useState<LLMProvider>(readStoredProvider);
+
+  // Выбор «Codex» / «Claude» в меню аккаунтов боковой панели: новый чат
+  // сразу пойдёт к выбранному помощнику (открытый чат своего не меняет —
+  // его помощник задан сессией, эффект ниже его восстановит).
+  const hasOpenSessionRef = useRef(false);
+  hasOpenSessionRef.current = Boolean(selectedSession?.id);
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const next = (event as CustomEvent).detail;
+      if (!hasOpenSessionRef.current && PROVIDERS.includes(next as LLMProvider)) {
+        setProvider(next as LLMProvider);
+      }
+    };
+    window.addEventListener(SELECT_PROVIDER_EVENT, onSelect);
+    return () => window.removeEventListener(SELECT_PROVIDER_EVENT, onSelect);
+  }, []);
   const [cursorModel, setCursorModel] = useState<string>(() => {
     return localStorage.getItem('cursor-model') || FALLBACK_DEFAULT_MODEL.cursor;
   });
@@ -464,7 +481,19 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
 
     setProvider(selectedSession.__provider);
     localStorage.setItem('selected-provider', selectedSession.__provider);
+    // Отметка «кто выбран» в меню аккаунтов живёт на том же ключе.
+    window.dispatchEvent(new CustomEvent(SELECT_PROVIDER_EVENT, { detail: selectedSession.__provider }));
   }, [provider, selectedSession]);
+
+  // Новый чат берёт помощника, выбранного последним (меню аккаунтов могло
+  // сменить его, пока был открыт другой чат).
+  useEffect(() => {
+    if (selectedSession?.id) {
+      return;
+    }
+    const stored = readStoredProvider();
+    setProvider((current) => (current === stored ? current : stored));
+  }, [selectedSession?.id]);
 
   // Permission prompts belong to a session, not to the transient provider
   // selection that is synchronized after navigation.

@@ -2,6 +2,7 @@ import { ChevronDown } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useCodexAccount } from '../../../../hooks/useCodexAccount';
 import { api } from '../../../../utils/api';
 import { cn } from '../../../../lib/utils';
 
@@ -73,6 +74,8 @@ export default function SidebarUsageLimits() {
   const { t } = useTranslation('sidebar');
   const [payload, setPayload] = useState<UsageLimitsPayload | null>(null);
   const [isOpen, setIsOpen] = useState(true);
+  // Подписка Codex (третий аккаунт) — те же два окна, числа прямо от Codex.
+  const codex = useCodexAccount();
 
   const load = useCallback(async () => {
     try {
@@ -119,9 +122,24 @@ export default function SidebarUsageLimits() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [load]);
 
-  if (!hasRows) {
+  const codexRows: UsageLimit[] = codex?.available
+    ? codex.limits
+      .filter((limit) => !limit.expired && VISIBLE_KINDS.includes(limit.kind))
+      .map((limit) => ({
+        kind: limit.kind,
+        percent: limit.percent,
+        // Порогов предупреждения Codex не присылает — ставим свои.
+        severity: limit.percent >= 90 ? 'critical' : limit.percent >= 75 ? 'warning' : 'normal',
+        resetsAt: limit.resetsAt,
+        modelName: null,
+        expired: false,
+      }))
+    : [];
+  if (!hasRows && codexRows.length === 0) {
     return null;
   }
+  // Подписи групп нужны, только когда групп две.
+  const showGroupTitles = hasRows && codexRows.length > 0;
 
   const isStale = payload?.fetchedAtMs
     ? Date.now() - payload.fetchedAtMs > STALE_AFTER_MS
@@ -137,28 +155,12 @@ export default function SidebarUsageLimits() {
     return t('usage.other', { defaultValue: 'Прочий лимит' });
   };
 
-  return (
-    <div className="flex-shrink-0 border-b border-border/60 px-3 py-2">
-      <button
-        type="button"
-        onClick={() => setIsOpen((open) => !open)}
-        className="flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronDown className={cn('h-3 w-3 transition-transform', !isOpen && '-rotate-90')} />
-        {t('usage.title', { defaultValue: 'Расход' })}
-        {isStale && (
-          <span className="ml-auto font-normal normal-case text-muted-foreground/70">
-            {t('usage.stale', { defaultValue: 'данные не свежие' })}
-          </span>
-        )}
-      </button>
-
-      {isOpen && (
-        <div className="mt-2 space-y-2">
-          {rows.map((limit) => {
+  const renderRows = (list: UsageLimit[], group: string) => (
+    <>
+      {list.map((limit) => {
             const resetsIn = formatResetsIn(limit.resetsAt);
             return (
-              <div key={`${limit.kind}-${limit.modelName ?? ''}`}>
+              <div key={`${group}-${limit.kind}-${limit.modelName ?? ''}`}>
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-foreground">
                     {labelFor(limit)}
@@ -188,6 +190,31 @@ export default function SidebarUsageLimits() {
               </div>
             );
           })}
+    </>
+  );
+
+  return (
+    <div className="flex-shrink-0 border-b border-border/60 px-3 py-2">
+      <button
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        className="flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronDown className={cn('h-3 w-3 transition-transform', !isOpen && '-rotate-90')} />
+        {t('usage.title', { defaultValue: 'Расход' })}
+        {isStale && (
+          <span className="ml-auto font-normal normal-case text-muted-foreground/70">
+            {t('usage.stale', { defaultValue: 'данные не свежие' })}
+          </span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="mt-2 space-y-2">
+          {showGroupTitles && <p className="text-[10px] font-medium text-muted-foreground">Claude</p>}
+          {renderRows(rows, 'claude')}
+          {showGroupTitles && <p className="pt-1 text-[10px] font-medium text-muted-foreground">Codex</p>}
+          {renderRows(codexRows, 'codex')}
         </div>
       )}
     </div>

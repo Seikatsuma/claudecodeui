@@ -2,8 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { AppError, getClaudeConfigDir, getClaudeJsonPath, isPlatformOwnerWebUser } from '@/shared/utils.js';
-import { getLiveLimits } from '@/modules/providers/index.js';
+import { AppError, getClaudeConfigDir, getClaudeJsonPath, isCodexAllowedForWebUser, isPlatformOwnerWebUser } from '@/shared/utils.js';
+import { getLiveLimits, readCodexAccountLimits } from '@/modules/providers/index.js';
 import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
 import { resolveWebUserRuntimeContext } from '@/shared/web-user-runtime.js';
 import { getOfficialUsage } from '@/modules/user/official-usage.js';
@@ -239,6 +239,18 @@ export function createUserService(dependencies: UserDependencies) {
       }
 
       return { success: true, fetchedAtMs: null, limits: [] };
+    },
+
+    /**
+     * Подписка Codex — «третий аккаунт» хозяина: почта, тариф и два окна
+     * (5 ч, неделя) прямо от Codex. Вход в Codex на сервере один (~/.codex),
+     * поэтому гостю общего экземпляра отвечаем «нет», а не чужими цифрами.
+     */
+    async getCodexAccount(userId: number) {
+      if (!isCodexAllowedForWebUser(userId)) {
+        return { success: true, available: false, email: null, planType: null, fetchedAtMs: null, limits: [] };
+      }
+      return { success: true, ...(await readCodexAccountLimits()) };
     },
 
     async getOwnerAccountEmail(userId: number) {

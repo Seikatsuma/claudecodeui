@@ -38,7 +38,7 @@ import type {
   RealtimeClientConnection,
 } from '@/shared/types.js';
 import type { ProviderAdoptedTurn, ProviderAdoptPayload, ProviderSteerPayload } from '@/shared/interfaces.js';
-import { isPlatformOwnerWebUser, OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
+import { isCodexAllowedForWebUser, isPlatformOwnerWebUser, OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
 import {
   getImageAssetsDirForUser,
   hasOwnClaudeAccess,
@@ -253,6 +253,13 @@ async function handleChatSend(
       sessionId,
       clientMessageId,
     );
+    return;
+  }
+
+  // Вход в Codex на сервере один — хозяина (~/.codex). Гость общего
+  // экземпляра писал бы на его подписку.
+  if (provider === 'codex' && !isCodexAllowedForWebUser(userId)) {
+    sendProtocolError(ws, 'UNSUPPORTED_PROVIDER', 'Codex недоступен для этого аккаунта.', sessionId, clientMessageId);
     return;
   }
 
@@ -570,6 +577,11 @@ async function runQueuedChatMessage(
     && !(await hasOwnClaudeAccess(runtimeContext))
   ) {
     console.warn(`[Очередь чата] пользователь ${String(userId)} не вошёл в Claude и не добавил ключ — сообщение ${message.id} отброшено`);
+    return true;
+  }
+
+  if (provider === 'codex' && !isCodexAllowedForWebUser(userId)) {
+    console.warn(`[Очередь чата] Codex недоступен пользователю ${String(userId)} — сообщение ${message.id} отброшено`);
     return true;
   }
 
