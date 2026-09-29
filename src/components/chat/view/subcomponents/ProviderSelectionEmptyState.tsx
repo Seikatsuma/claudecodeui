@@ -133,14 +133,23 @@ export default function ProviderSelectionEmptyState({
   const { t } = useTranslation("chat");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [modelLibraryOpen, setModelLibraryOpen] = useState(false);
+  const [pickerProvider, setPickerProvider] = useState<LLMProvider>(provider);
 
   const visibleProviderGroups = useMemo<ProviderGroup[]>(() => {
-    return PROVIDER_META.map((p) => ({
+    // A single long list hid Codex below all Anthropic models, with no visible
+    // hint that another provider existed. Provider tabs keep every assistant
+    // reachable and make a new Codex chat open directly on OpenAI models.
+    return PROVIDER_META.filter((p) => p.id === pickerProvider).map((p) => ({
       id: p.id,
       name: p.name,
       models: providerModelCatalog[p.id]?.OPTIONS ?? [],
     }));
-  }, [providerModelCatalog]);
+  }, [pickerProvider, providerModelCatalog]);
+
+  const handleDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setPickerProvider(provider);
+    setDialogOpen(open);
+  }, [provider]);
 
   const nextTaskPrompt = t("tasks.nextTaskPrompt", {
     defaultValue: "Start the next task",
@@ -215,7 +224,7 @@ export default function ProviderSelectionEmptyState({
             </p>
           </div>
 
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
             <DialogTrigger asChild>
               <Card
                 className="group mx-auto max-w-xs cursor-pointer border-border/60 transition-all duration-150 hover:border-border hover:shadow-md active:scale-[0.99]"
@@ -280,6 +289,32 @@ export default function ProviderSelectionEmptyState({
                     defaultValue: "Search models...",
                   })}
                 />
+                <div
+                  className="flex gap-1 overflow-x-auto border-b border-border/60 px-2 py-2"
+                  role="tablist"
+                  aria-label={t("providerSelection.providers", { defaultValue: "Providers" })}
+                >
+                  {PROVIDER_META.map((providerOption) => {
+                    const isActive = providerOption.id === pickerProvider;
+                    return (
+                      <button
+                        key={providerOption.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => setPickerProvider(providerOption.id)}
+                        className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+                          isActive
+                            ? "bg-accent font-medium text-foreground"
+                            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                        }`}
+                      >
+                        <LLMProviderLogo provider={providerOption.id} className="h-3.5 w-3.5 shrink-0" />
+                        {providerOption.name}
+                      </button>
+                    );
+                  })}
+                </div>
                 <CommandList className="max-h-[350px]">
                   <CommandEmpty>
                     {t("providerSelection.noModelsFound", {
