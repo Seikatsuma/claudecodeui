@@ -475,6 +475,7 @@ export const api = {
   // User endpoints
   user: {
     usageLimits: () => authenticatedFetch('/api/user/usage-limits'),
+    codexAccount: () => authenticatedFetch('/api/user/codex-account'),
     thoughtDigest: (texts) =>
       authenticatedFetch('/api/user/thought-digest', {
         method: 'POST',

@@ -75,6 +75,27 @@ export function isPlatformOwnerWebUser(userId: number): boolean {
 }
 
 /**
+ * Whether this web user may use the host's Codex login (~/.codex/auth.json).
+ *
+ * Codex has no per-user login on this server: the SDK and the limits reader
+ * both use the one ~/.codex of the process owner. On a multi-tenant
+ * (OPEN_REGISTRATION) instance that login belongs to the platform owner, so
+ * every other registered user would otherwise chat on - and spend - the
+ * owner's subscription. Single-tenant instances keep the old behaviour.
+ *
+ * Used by the chat gateway (refuse runs), provider auth status (hide the
+ * owner's email) and the user module (Codex account + limits endpoint).
+ * `userId` may be null/NaN for unauthenticated contexts: treated as not owner.
+ */
+export function isCodexAllowedForWebUser(userId: number | string | null | undefined): boolean {
+  if (!OPEN_REGISTRATION) {
+    return true;
+  }
+  const numericUserId = userId === null || userId === undefined ? Number.NaN : Number(userId);
+  return Number.isFinite(numericUserId) && isPlatformOwnerWebUser(numericUserId);
+}
+
+/**
  * Resolves this process's Claude Code CLI config directory - the directory
  * that normally holds settings.json, .credentials.json, projects/, commands/,
  * skills/. Honors CLAUDE_CONFIG_DIR exactly like the `claude` CLI itself does

@@ -1,5 +1,7 @@
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type { LLMProvider, ProviderAuthStatus } from '@/shared/types.js';
+import { isCodexAllowedForWebUser } from '@/shared/utils.js';
 
 export const providerAuthService = {
   /**
@@ -7,6 +9,11 @@ export const providerAuthService = {
    */
   async getProviderAuthStatus(providerName: string): Promise<ProviderAuthStatus> {
     const provider = providerRegistry.resolveProvider(providerName);
+    // Гостю общего экземпляра вход хозяина в Codex не показываем (ни «вошёл»,
+    // ни его почту): пользоваться им гость всё равно не может.
+    if (providerName === 'codex' && !isCodexAllowedForWebUser(getRequestRuntimeContext()?.userId)) {
+      return { installed: false, provider: 'codex', authenticated: false, email: null, method: null, error: 'Codex недоступен для этого аккаунта' };
+    }
     return provider.auth.getStatus();
   },
 

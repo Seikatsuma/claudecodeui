@@ -112,6 +112,15 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
     }
   });
 
+  // Codex subscription of the platform owner: email, plan, 5 h / weekly windows.
+  router.get('/codex-account', async (req, res, next) => {
+    try {
+      res.json(await service.getCodexAccount(readUserId(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/owner-account-info', async (req, res, next) => {
     try {
       res.json(await service.getOwnerAccountEmail(readUserId(req)));
