@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import TOML from '@iarna/toml';
 
+import { readCodexModelList } from '@/modules/providers/services/codex-account-limits.service.js';
+
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderCurrentActiveModel,
@@ -100,8 +102,21 @@ const CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 
 /** Provider registry model adapter for Codex predefined models and active config. */
 export class CodexProviderModels implements IProviderModels {
+  /**
+   * Curated catalog narrowed to what the signed-in account accepts (Codex
+   * `model/list`): a ChatGPT subscription refuses API-only models with 400.
+   * Models Codex lists but the catalog lacks are added by id. No answer -
+   * the curated catalog as is.
+   */
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
-    return CODEX_PREDEFINED_MODELS;
+    const list = await readCodexModelList();
+    if (!list) {
+      return CODEX_PREDEFINED_MODELS;
+    }
+    const known = new Map(CODEX_PREDEFINED_MODELS.OPTIONS.map((option) => [option.value, option]));
+    const options = list.ids.map((id) => known.get(id) ?? { value: id, label: id });
+    const defaultId = list.defaultId && list.ids.includes(list.defaultId) ? list.defaultId : list.ids[0];
+    return { ...CODEX_PREDEFINED_MODELS, OPTIONS: options, DEFAULT: defaultId };
   }
 
   async getCurrentActiveModel(): Promise<ProviderCurrentActiveModel> {

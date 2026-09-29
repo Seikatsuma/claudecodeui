@@ -179,6 +179,88 @@ function queryAppServer(): Promise<CodexAccountLimits> {
   });
 }
 
+type CodexModelList = { ids: string[]; defaultId: string | null };
+
+const MODEL_LIST_TTL_MS = 10 * 60 * 1000;
+let modelListCache: { at: number; list: CodexModelList } | null = null;
+let modelListInFlight: Promise<CodexModelList | null> | null = null;
+
+/** One short-lived app-server: `model/list` - the models THIS login may use. */
+function queryModelList(): Promise<CodexModelList | null> {
+  return new Promise((resolve) => {
+    const child = spawn(resolveCodexBinary(), ['app-server'], {
+      env: { ...process.env, CODEX_HOME: codexHome() },
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    let buffer = '';
+    let settled = false;
+    const finish = (list: CodexModelList | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      resolve(list);
+    };
+    const timer = setTimeout(() => finish(null), REQUEST_TIMEOUT_MS);
+    const send = (message: Record<string, unknown>) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    child.on('error', () => finish(null));
+    child.on('exit', () => finish(null));
+    child.stdout.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      let newline: number;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        let message: JsonRpcMessage;
+        try {
+          message = JSON.parse(line) as JsonRpcMessage;
+        } catch {
+          continue;
+        }
+        if (message.id === 1) {
+          send({ method: 'initialized' });
+          send({ id: 2, method: 'model/list', params: {} });
+        } else if (message.id === 2) {
+          const data = (message.result?.data ?? []) as Array<{ id?: string; hidden?: boolean; isDefault?: boolean }>;
+          const visible = data.filter((model) => typeof model.id === 'string' && !model.hidden);
+          finish(visible.length > 0
+            ? { ids: visible.map((model) => model.id as string), defaultId: visible.find((model) => model.isDefault)?.id ?? null }
+            : null);
+        }
+      }
+    });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'cloudcli-models', version: '1' } } });
+  });
+}
+
+/**
+ * Models the signed-in Codex account accepts, from Codex itself (10 min cache).
+ * A ChatGPT login refuses API-only models (29.09.26: `gpt-5.4` → 400 "not
+ * supported when using Codex with a ChatGPT account"), so the picker must not
+ * offer them. `null` - no login or no answer: the caller keeps its catalog.
+ *
+ * Consumer: codex-models.provider.ts (model picker catalog).
+ */
+export async function readCodexModelList(): Promise<CodexModelList | null> {
+  if (!existsSync(path.join(codexHome(), 'auth.json'))) {
+    return null;
+  }
+  if (modelListCache && Date.now() - modelListCache.at < MODEL_LIST_TTL_MS) {
+    return modelListCache.list;
+  }
+  if (!modelListInFlight) {
+    modelListInFlight = queryModelList()
+      .then((list) => {
+        if (list) modelListCache = { at: Date.now(), list };
+        return list ?? modelListCache?.list ?? null;
+      })
+      .finally(() => {
+        modelListInFlight = null;
+      });
+  }
+  return modelListInFlight;
+}
+
 /**
  * Codex account (email, plan) and its 5-hour / weekly windows, cached for two
  * minutes with one read in flight at a time. Without ~/.codex/auth.json it
