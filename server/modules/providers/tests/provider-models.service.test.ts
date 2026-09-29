@@ -346,8 +346,31 @@ test('resolveResumeModel never consults provider-global state', async () => {
     },
   });
 
-  const model = await service.resolveResumeModel('codex', 'session-456', 'gpt-5.5');
+  const model = await service.resolveResumeModel('cursor', 'session-456', 'composer-2-fast');
 
-  assert.equal(model, 'gpt-5.5');
+  assert.equal(model, 'composer-2-fast');
+  assert.equal(providerLookups, 0);
+});
+
+test('codex: a model the login does not accept falls back to the catalog default', async () => {
+  let providerLookups = 0;
+  const { service } = createTestService({
+    sessions: createSessionStore({ 'session-old': 'gpt-5.4', 'session-new': null }),
+    activeModel: () => {
+      providerLookups += 1;
+      return 'global-config-model';
+    },
+  });
+
+  // Recorded on the chat before the catalog was narrowed to the login's list.
+  assert.equal(await service.resolveResumeModel('codex', 'session-old', 'gpt-5.4'), 'codex-default');
+  // A stale client default for a brand-new chat.
+  assert.equal(await service.resolveResumeModel('codex', undefined, 'gpt-5.4'), 'codex-default');
+  // A usable requested model is kept.
+  assert.equal(await service.resolveResumeModel('codex', 'session-new', 'codex-default'), 'codex-default');
+  // The label the composer shows matches what runs.
+  const shown = await service.resolveSessionModel('codex', { sessionId: 'session-old' });
+  assert.equal(shown.model, 'codex-default');
+  assert.equal(shown.source, 'session');
   assert.equal(providerLookups, 0);
 });

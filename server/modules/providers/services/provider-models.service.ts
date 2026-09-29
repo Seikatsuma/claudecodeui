@@ -292,6 +292,19 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
   };
 
   /**
+   * Codex only: the model a run may actually use. A ChatGPT login answers 400
+   * to models outside its `model/list` (29.09.26: chats recorded with
+   * `gpt-5.4` failed on every message), and the catalog is already narrowed to
+   * that list - so the first candidate in it wins, else the catalog default.
+   * Other providers keep their ids as recorded (aliases, custom models).
+   */
+  const pickCodexUsableModel = async (candidates: Array<string | null | undefined>): Promise<string> => {
+    const catalog = await getProviderModels('codex');
+    const usable = candidates.find((candidate) => candidate && catalog.OPTIONS.some((option) => option.value === candidate));
+    return usable || catalog.DEFAULT;
+  };
+
+  /**
    * Answers "which model is this session using?" for every display surface.
    *
    * Precedence, highest first:
@@ -315,7 +328,9 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
         return {
           provider,
           sessionId: normalizedSessionId,
-          model: recordedSelection.model,
+          model: provider === 'codex'
+            ? await pickCodexUsableModel([recordedSelection.model, normalizedRequestedModel])
+            : recordedSelection.model,
           effort: recordedSelection.effort,
           source: 'session',
         };
@@ -374,9 +389,12 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
     sessionId: string | undefined,
     requestedModel?: string | null,
   ): Promise<string | undefined> => {
-    void provider;
     const normalizedRequestedModel = typeof requestedModel === 'string' ? requestedModel.trim() : '';
     const normalizedSessionId = sessionId?.trim();
+    if (provider === 'codex') {
+      const recorded = normalizedSessionId ? readRecordedSessionSelection(normalizedSessionId)?.model : null;
+      return pickCodexUsableModel([recorded, normalizedRequestedModel]);
+    }
     if (!normalizedSessionId) {
       return normalizedRequestedModel || undefined;
     }
