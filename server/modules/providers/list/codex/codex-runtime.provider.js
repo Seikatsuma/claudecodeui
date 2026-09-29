@@ -264,7 +264,11 @@ export async function queryCodex(command, options = {}, ws, context) {
   const sessionKey = () => sessionId || capturedSessionId || null;
 
   try {
-    codex = new Codex();
+    // Размышления — как у Claude (Егор 29.09.26: «у Codex не пишутся
+    // размышления»). Без пересказа Codex присылает их только зашифрованными
+    // (summary пустой), и в чате видны одни команды. `detailed` проверен на
+    // входе ChatGPT: приходят элементы `reasoning` с текстом.
+    codex = new Codex({ config: { model_reasoning_summary: 'detailed' } });
 
     const threadOptions = {
       workingDirectory,
