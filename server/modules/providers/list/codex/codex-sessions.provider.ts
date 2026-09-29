@@ -629,7 +629,11 @@ export class CodexSessionsProvider implements IProviderSessions {
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('codex');
 
-    if (raw.type === 'thinking' || raw.isReasoning) {
+    // Живое размышление приходит из transformCodexEvent с ролью assistant и
+    // флагом в message.isReasoning — без этой проверки оно уходило обычным
+    // текстом (Егор 29.09.26: размышления крупными заголовками посреди ответа,
+    // блоком «Ход работы · размышления» — только после перезагрузки).
+    if (raw.type === 'thinking' || raw.isReasoning || raw.message?.isReasoning) {
       const thinkingContent = typeof raw.message?.content === 'string'
         ? raw.message.content
         : '';
