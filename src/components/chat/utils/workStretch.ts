@@ -272,7 +272,14 @@ export function workStretchLiveTail(
       return;
     }
     if (message.isToolUse) {
-      const text = toolInputDescription(message.toolInput) ?? String(message.toolName ?? 'Действие');
+      const description = toolInputDescription(message.toolInput);
+      const toolName = String(message.toolName ?? 'Действие');
+      // Codex code-mode tools do not carry Claude's human `description`.
+      // Repeating their plumbing names in the live tail (exec, Bash, exec…)
+      // hides the useful commentary text. The action still remains counted,
+      // visible when expanded, and represented by the bottom activity bar.
+      if (!description && (toolName === 'exec' || toolName === 'Bash')) return;
+      const text = description ?? toolName;
       lines.push({
         key,
         kind: 'step',

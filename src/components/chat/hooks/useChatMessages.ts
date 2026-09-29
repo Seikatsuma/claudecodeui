@@ -164,6 +164,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       isLocalCommand: msg.isLocalCommand,
       isLocalCommandStdout: msg.isLocalCommandStdout,
       isCompactSummary: msg.isCompactSummary,
+      isCommentary: msg.isCommentary,
       // Шаг помощника (вызов Agent): без пометки его действия считались шагами
       // чата, а промежуточные реплики помощника — ответом чата.
       parentToolUseId: msg.parentToolUseId,

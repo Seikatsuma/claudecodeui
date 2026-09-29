@@ -131,3 +131,20 @@ test('живой хвост: этапы мысли по-русски, шаги �
   ], 'неразобранная или неважная мысль в хвост не идёт');
   assert.equal(workStretchLiveTail(stretch, () => null, 2).length, 2, 'хвост ограничен последними строками');
 });
+
+test('живой хвост не забивается безымянными exec/Bash вместо текста этапов', () => {
+  const described: ChatMessage = {
+    ...tool('Bash', 4),
+    toolInput: JSON.stringify({ command: 'npm test', description: 'Проверяю тесты' }),
+  };
+  const stretch = groupWorkStretches([
+    user('проверь', 1),
+    think(LONG, 2),
+    tool('exec', 3),
+    tool('Bash', 4),
+    described,
+  ])[1] as Stretch;
+
+  const tail = workStretchLiveTail(stretch, (message) => message.isThinking ? 'Нашёл причину сбоя' : null);
+  assert.deepEqual(tail.map((line) => line.text), ['Нашёл причину сбоя', 'Проверяю тесты']);
+});

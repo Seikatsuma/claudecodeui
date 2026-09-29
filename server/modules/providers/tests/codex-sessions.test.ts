@@ -241,6 +241,28 @@ test('Codex live reasoning is normalized as thinking, not assistant text', () =>
   assert.equal(message?.content, '**Checking primes**');
 });
 
+test('Codex commentary is normalized as work text while final answers stay replies', () => {
+  const provider = new CodexSessionsProvider();
+  const [commentary] = provider.normalizeMessage({
+    type: 'item',
+    itemType: 'agent_message',
+    phase: 'commentary',
+    message: { role: 'assistant', content: 'Проверяю живой сайт после сборки.' },
+  }, 'session-1');
+  const [finalAnswer] = provider.normalizeMessage({
+    type: 'item',
+    itemType: 'agent_message',
+    phase: 'final_answer',
+    message: { role: 'assistant', content: 'Готово.' },
+  }, 'session-1');
+
+  assert.equal(commentary?.kind, 'thinking');
+  assert.equal(commentary?.content, 'Проверяю живой сайт после сборки.');
+  assert.equal(commentary?.isCommentary, true);
+  assert.equal(finalAnswer?.kind, 'text');
+  assert.equal(finalAnswer?.role, 'assistant');
+});
+
 test('Codex live command output is emitted as a tool result', () => {
   const messages = new CodexSessionsProvider().normalizeMessage({
     type: 'item',

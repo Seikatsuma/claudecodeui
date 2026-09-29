@@ -85,7 +85,10 @@ async function requestDigestPage(page: string[]): Promise<void> {
  * ничего не пропадает.
  */
 function useThoughtDigest(thoughts: ChatMessage[], enabled: boolean) {
-  const texts = thoughts.map((message) => String(message.content ?? ''));
+  // Codex commentary is already concise, user-facing progress narration. It
+  // must appear immediately and verbatim; only raw reasoning needs the digest.
+  const digestThoughts = thoughts.filter((message) => !message.isCommentary);
+  const texts = digestThoughts.map((message) => String(message.content ?? ''));
   // Ключ по тексту, а не по массиву: массив новый на каждый пересбор ленты.
   const textsKey = texts.join('\u0000');
   const [state, setState] = useState<DigestState>('idle');
@@ -123,9 +126,9 @@ function useThoughtDigest(thoughts: ChatMessage[], enabled: boolean) {
     };
   }, [enabled, textsKey]);
 
-  const known = thoughts.every((message) => digestByText.has(String(message.content ?? '')));
-  const shown = new Set<ChatMessage>();
-  for (const message of thoughts) {
+  const known = digestThoughts.every((message) => digestByText.has(String(message.content ?? '')));
+  const shown = new Set<ChatMessage>(thoughts.filter((message) => message.isCommentary));
+  for (const message of digestThoughts) {
     const digest = digestByText.get(String(message.content ?? ''));
     if (digest ? digest.keep : state === 'failed') shown.add(message);
   }
@@ -135,11 +138,13 @@ function useThoughtDigest(thoughts: ChatMessage[], enabled: boolean) {
     shown,
     stageCount: known ? shown.size : undefined,
     textFor: (message: ChatMessage): string => {
+      if (message.isCommentary) return String(message.content ?? '');
       const digest = digestByText.get(String(message.content ?? ''));
       return digest?.keep && digest.ru ? digest.ru : String(message.content ?? '');
     },
     /** Русский текст мысли, только если она — важный этап и уже разобрана. */
     stageText: (message: ChatMessage): string | null => {
+      if (message.isCommentary) return String(message.content ?? '') || null;
       const digest = digestByText.get(String(message.content ?? ''));
       return digest?.keep && digest.ru ? digest.ru : null;
     },

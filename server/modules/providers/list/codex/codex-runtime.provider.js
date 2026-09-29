@@ -75,6 +75,10 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'agent_message',
+            // Preserve a future/extended phase field when available. Current
+            // Codex CLI omits it from the live SDK stream, so queryCodex also
+            // classifies every agent message except the last one as commentary.
+            phase: item.phase,
             message: {
               role: 'assistant',
               content: item.text
@@ -312,6 +316,18 @@ export async function queryCodex(command, options = {}, ws, context) {
       signal: abortController.signal
     });
 
+    // Experimental JSON emits both progress commentary and the final answer
+    // as `agent_message` without the transcript's `phase` field. Keep one
+    // message pending: a following event proves it was progress, while
+    // `turn.completed` proves the pending message is the final answer.
+    let pendingAgentMessage = null;
+    const emitTransformed = (transformed) => {
+      const normalizedMsgs = context.normalizeMessage(transformed, capturedSessionId || sessionId || null);
+      for (const msg of normalizedMsgs) {
+        sendMessage(ws, msg);
+      }
+    };
+
     for await (const event of streamedTurn.events) {
       // Capture thread/session id lazily from the stream (Codex emits this asynchronously).
       if (event.type === 'thread.started') {
@@ -343,16 +359,36 @@ export async function queryCodex(command, options = {}, ws, context) {
       }
 
       if (event.type === 'item.started' || event.type === 'item.updated') {
+        // The next tool has started, so the pending agent message is certainly
+        // progress commentary. Emit it now instead of waiting for the tool to
+        // finish; this keeps the live work log genuinely live.
+        if (pendingAgentMessage && event.item?.type !== 'agent_message') {
+          emitTransformed({ ...pendingAgentMessage, phase: 'commentary' });
+          pendingAgentMessage = null;
+        }
         continue;
       }
 
       const transformed = transformCodexEvent(event);
 
-      // Normalize the transformed event into NormalizedMessage(s) via adapter
-      const normalizedMsgs = context.normalizeMessage(transformed, capturedSessionId || sessionId || null);
-      for (const msg of normalizedMsgs) {
-        sendMessage(ws, msg);
+      if (transformed?.type === 'item' && transformed.itemType === 'agent_message') {
+        if (pendingAgentMessage) {
+          emitTransformed({ ...pendingAgentMessage, phase: 'commentary' });
+        }
+        pendingAgentMessage = transformed;
+        continue;
       }
+
+      if (pendingAgentMessage) {
+        const isFinalAnswer = event.type === 'turn.completed';
+        emitTransformed(isFinalAnswer
+          ? pendingAgentMessage
+          : { ...pendingAgentMessage, phase: 'commentary' });
+        pendingAgentMessage = null;
+      }
+
+      // Normalize the transformed event into NormalizedMessage(s) via adapter.
+      emitTransformed(transformed);
 
       if (event.type === 'turn.failed' && !terminalFailure) {
         terminalFailure = event.error || new Error('Turn failed');

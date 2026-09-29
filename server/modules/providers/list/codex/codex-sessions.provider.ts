@@ -312,7 +312,11 @@ async function getCodexSessionMessages(
           const textContent = extractCodexTextContent(entry.payload.content);
           if (textContent.trim()) {
             messages.push({
-              type: 'assistant',
+              // Codex uses commentary for the same progress narration Claude
+              // exposes as work/thinking. It must not split the work stretch
+              // into a sequence of apparent final answers.
+              type: entry.payload.phase === 'commentary' ? 'thinking' : 'assistant',
+              isCommentary: entry.payload.phase === 'commentary',
               timestamp: entry.timestamp,
               message: {
                 role: 'assistant',
@@ -633,7 +637,12 @@ export class CodexSessionsProvider implements IProviderSessions {
     // флагом в message.isReasoning — без этой проверки оно уходило обычным
     // текстом (Егор 29.09.26: размышления крупными заголовками посреди ответа,
     // блоком «Ход работы · размышления» — только после перезагрузки).
-    if (raw.type === 'thinking' || raw.isReasoning || raw.message?.isReasoning) {
+    if (
+      raw.type === 'thinking'
+      || raw.phase === 'commentary'
+      || raw.isReasoning
+      || raw.message?.isReasoning
+    ) {
       const thinkingContent = typeof raw.message?.content === 'string'
         ? raw.message.content
         : '';
@@ -647,6 +656,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         provider: PROVIDER,
         kind: 'thinking',
         content: thinkingContent,
+        isCommentary: Boolean(raw.isCommentary || raw.phase === 'commentary'),
       })];
     }
 
@@ -749,6 +759,17 @@ export class CodexSessionsProvider implements IProviderSessions {
     if (raw.type === 'item') {
       switch (raw.itemType) {
         case 'agent_message':
+          if (raw.phase === 'commentary') {
+            return [createNormalizedMessage({
+              id: baseId,
+              sessionId,
+              timestamp: ts,
+              provider: PROVIDER,
+              kind: 'thinking',
+              content: raw.message?.content || '',
+              isCommentary: true,
+            })];
+          }
           return [createNormalizedMessage({
             id: baseId,
             sessionId,
