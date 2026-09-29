@@ -733,7 +733,11 @@ router.get(
     const serverScope = typeof req.query.serverScope === 'string'
       ? normalizeServerScope(req.query.serverScope)
       : undefined;
-    const page = sessionsService.listRecentSessions(limit, offset, serverScope);
+    // `space` — чаты Codex или все остальные (Codex — свой список).
+    const providerSpace = req.query.space === 'codex' || req.query.space === 'claude'
+      ? req.query.space
+      : undefined;
+    const page = sessionsService.listRecentSessions(limit, offset, serverScope, providerSpace);
     res.json(createApiSuccessResponse(page));
   }),
 );

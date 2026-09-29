@@ -128,5 +128,16 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
       secondPage.sessions.map((session) => session.session_id),
       ['session-middle', 'session-oldest'],
     );
+
+    // Codex — свой список: лента по помощнику не смешивает чаты.
+    const codexPage = sessionsDb.getRecentSessionsPage(10, 0, undefined, 'codex');
+    assert.equal(codexPage.total, 1);
+    assert.deepEqual(codexPage.sessions.map((session) => session.session_id), ['session-newest']);
+    const claudePage = sessionsDb.getRecentSessionsPage(10, 0, undefined, 'claude');
+    assert.equal(claudePage.total, 3);
+    assert.deepEqual(
+      claudePage.sessions.map((session) => session.session_id),
+      ['session-same-second', 'session-middle', 'session-oldest'],
+    );
   });
 });

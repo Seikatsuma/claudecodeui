@@ -611,15 +611,24 @@ export const sessionsDb = {
    * and correctly ordered across projects instead of flattening only the
    * per-project slices already loaded by the client.
    */
-  getRecentSessionsPage(limit: number, offset: number, serverScope?: ServerScope): RecentSessionsPage {
+  getRecentSessionsPage(
+    limit: number,
+    offset: number,
+    serverScope?: ServerScope,
+    providerSpace?: 'codex' | 'claude',
+  ): RecentSessionsPage {
     const db = getConnection();
     // Лента отдаётся по одному блоку верхней панели за раз. Отбирать на
     // клиенте нельзя: страница берётся по 40 чатов, и при отборе после
     // выдачи страница второго сервера почти всегда оказывалась бы пустой,
     // а «показать ещё» не находило бы конца.
-    const scopeClause = serverScope
+    const scopeClause = (serverScope
       ? ` AND COALESCE(sessions.server_scope, projects.server_scope, 'main') = ?`
-      : '';
+      : '')
+      // Чаты Codex — свой список, как второй блок (Егор 29.09.26: «его чат
+      // находится среди других чатов — странно и неудобно»).
+      + (providerSpace === 'codex' ? ` AND sessions.provider = 'codex'` : '')
+      + (providerSpace === 'claude' ? ` AND sessions.provider != 'codex'` : '');
     const visibilityClause = `
       sessions.isArchived = 0
       AND (projects.isArchived IS NULL OR projects.isArchived = 0)

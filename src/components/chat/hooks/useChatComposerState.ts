@@ -1486,12 +1486,11 @@ export function useChatComposerState({
   }, [handoffStatus, runHandoff, selectedProject]);
 
   /*
-   * Выбор помощника в меню аккаунтов при открытом чате (Егор 29.09.26:
-   * «переключился на Codex — чат не работает»). Чат Claude переезжает в новый
-   * чат Codex той же дорогой, что «Продолжить в новом чате», выжимку пишет
-   * Codex (у Claude в этот момент обычно кончился лимит). Новый чат берёт
-   * Codex из выбора, записанного меню. Из чата Codex выбор Claude просто
-   * открывает новый чат: переносить переписку Codex сервер не умеет.
+   * Выбор помощника в меню аккаунтов при открытом чате чужого помощника —
+   * новый пустой чат выбранного, как вход во второй блок. Переписку НЕ
+   * переносим (Егор 29.09.26: перенос «перезаписывает чаты странно» — каждое
+   * переключение рождало «↪ Продолжение чата» с простынёй выжимки). Старый
+   * чат остаётся в своём списке. Новый чат берёт помощника из выбора меню.
    */
   const providerRef = useRef(provider);
   providerRef.current = provider;
@@ -1500,21 +1499,11 @@ export function useChatComposerState({
       const target = (event as CustomEvent).detail;
       const sourceSessionId = sessionKeyRef.current;
       if (!sourceSessionId || !selectedProject || !onStartNewChat || target === providerRef.current) return;
-      if (target === 'codex' && providerRef.current === 'claude') {
-        if (handoffStatus === 'running') return;
-        const goal = inputValueRef.current.trim();
-        if (goal) {
-          inputValueRef.current = '';
-          setInput('');
-        }
-        void runHandoff(selectedProject, sourceSessionId, false, goal, 'codex');
-      } else if (target === 'claude') {
-        onStartNewChat(selectedProject);
-      }
+      onStartNewChat(selectedProject);
     };
     window.addEventListener(CONTINUE_IN_PROVIDER_EVENT, onContinue);
     return () => window.removeEventListener(CONTINUE_IN_PROVIDER_EVENT, onContinue);
-  }, [handoffStatus, onStartNewChat, runHandoff, selectedProject]);
+  }, [onStartNewChat, selectedProject]);
 
   /*
    * «Сжать в этом чате» (Егор 27.09.26, вариант 1 после сравнения со встроенным

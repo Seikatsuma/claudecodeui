@@ -276,15 +276,16 @@ export const api = {
   // делает сервер: страница берётся по 40 чатов, и отбор после выдачи
   // оставлял бы второй блок почти пустым.
   /**
-   * @param {{ limit?: number, offset?: number, serverScope?: 'main' | 'second' }} [options]
+   * @param {{ limit?: number, offset?: number, serverScope?: 'main' | 'second', providerSpace?: 'codex' | 'claude' }} [options]
    */
   recentConversations: (options = {}) => {
-    const { limit = 40, offset = 0, serverScope } = options;
+    const { limit = 40, offset = 0, serverScope, providerSpace } = options;
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
     });
     if (serverScope) params.set('serverScope', serverScope);
+    if (providerSpace) params.set('space', providerSpace);
     return authenticatedFetch(`/api/providers/sessions/recent?${params.toString()}`);
   },
   providerSessionId: (sessionId) =>

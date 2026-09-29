@@ -105,6 +105,38 @@ export function scopeProjectsToServer(
 }
 
 /*
+ * Чаты Codex — отдельный список, как второй блок (Егор 29.09.26: «его чат
+ * находится среди других чатов — странно и неудобно, должна быть система как
+ * между двумя блоками»). Какой список открыт, решает выбор в меню аккаунтов:
+ * Codex — только чаты Codex, Claude — все остальные. Папки остаются все:
+ * новый чат Codex заводится в той же папке, что и чат Claude.
+ */
+export type ProviderSpace = 'codex' | 'claude';
+
+export function providerSpaceOf(provider: string | null | undefined): ProviderSpace {
+  return provider === 'codex' ? 'codex' : 'claude';
+}
+
+export function scopeProjectsToProvider(projects: Project[], space: ProviderSpace): Project[] {
+  return projects.map((project) => {
+    const allSessions = project.sessions ?? [];
+    const sessions = allSessions.filter(
+      (session) => providerSpaceOf(session.__provider ?? session.provider) === space,
+    );
+    return sessions.length === allSessions.length
+      ? project
+      : {
+        ...project,
+        sessions,
+        sessionMeta: {
+          hasMore: project.sessionMeta?.hasMore ?? false,
+          total: sessions.length,
+        },
+      };
+  });
+}
+
+/*
  * Название второго блока (SECOND_SERVER_LABEL на сервере, у общей площадки —
  * только хозяину). Лежит здесь же, а не ходит пропсами: его спрашивают шапка,
  * карточка чата и карточка папки — три конца панели, между которыми иначе

@@ -161,8 +161,13 @@ export const sessionsService = {
   /**
    * Returns the active conversation feed in true global activity order.
    */
-  listRecentSessions(limit: number, offset: number, serverScope?: ServerScope): RecentSessionsPage {
-    const page = sessionsDb.getRecentSessionsPage(limit, offset, serverScope);
+  listRecentSessions(
+    limit: number,
+    offset: number,
+    serverScope?: ServerScope,
+    providerSpace?: 'codex' | 'claude',
+  ): RecentSessionsPage {
+    const page = sessionsDb.getRecentSessionsPage(limit, offset, serverScope, providerSpace);
     const projectCache = new Map<string, ReturnType<typeof projectsDb.getProjectPath>>();
     const conversations = page.sessions.map((session) => {
       const projectPath = session.project_path?.trim() ? session.project_path : null;

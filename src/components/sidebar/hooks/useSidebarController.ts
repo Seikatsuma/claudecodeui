@@ -22,7 +22,8 @@ import {
   readProjectSortOrder,
   sortProjects,
 } from '../utils/utils';
-import { useServerScope } from './useServerScope';
+import { providerSpaceOf, useServerScope } from './useServerScope';
+import { useSelectedChatProvider } from '../../../hooks/useCodexAccount';
 
 type SnippetHighlight = {
   start: number;
@@ -137,6 +138,7 @@ export function useSidebarController({
   const paletteOps = usePaletteOps();
   // Открытый блок верхней панели: по нему делится и архив.
   const [serverScope] = useServerScope();
+  const providerSpace = providerSpaceOf(useSelectedChatProvider());
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
@@ -328,7 +330,7 @@ export function useSidebarController({
 
     try {
       // Лента отбирается сервером по открытому блоку верхней панели.
-      const response = await api.recentConversations({ limit: 40, offset, serverScope });
+      const response = await api.recentConversations({ limit: 40, offset, serverScope, providerSpace });
       if (!response.ok) {
         throw new Error(`Failed to load recent conversations: ${response.status}`);
       }
@@ -367,7 +369,7 @@ export function useSidebarController({
         setIsLoadingMoreRecentConversations(false);
       }
     }
-  }, [serverScope]);
+  }, [serverScope, providerSpace]);
 
   const reloadRecentConversations = useCallback(() => {
     void fetchRecentConversationsPage(0, false);
@@ -651,8 +653,9 @@ export function useSidebarController({
   // второго сервера всплывали бы среди архива обычных «Проектов» — ровно то
   // перемешивание, ради которого блоки и разделяли.
   const scopedArchivedSessions = useMemo(
-    () => archivedSessions.filter((session) => (session.serverScope ?? 'main') === serverScope),
-    [archivedSessions, serverScope],
+    () => archivedSessions.filter((session) => (session.serverScope ?? 'main') === serverScope
+      && providerSpaceOf(session.provider) === providerSpace),
+    [archivedSessions, serverScope, providerSpace],
   );
 
   const scopedArchivedProjects = useMemo(
