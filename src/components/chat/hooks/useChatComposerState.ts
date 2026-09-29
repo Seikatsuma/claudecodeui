@@ -11,6 +11,7 @@ import type {
 } from 'react';
 import { useDropzone } from 'react-dropzone';
 
+import { CONTINUE_IN_PROVIDER_EVENT } from '../../../hooks/useCodexAccount';
 import { authenticatedFetch } from '../../../utils/api';
 import type { MarkSessionProcessing, SessionActivityMap } from '../../../hooks/useSessionProtection';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
@@ -58,7 +59,7 @@ let handoffPolling = false;
 const preparedHandoffSteps = new Map<string, number>();
 
 /** Начатая задача переноса — в браузере, чтобы пережить выгрузку вкладки. */
-type HandoffJobRecord = { sessionId: string; projectId: string; startedAt: number; goal?: string };
+type HandoffJobRecord = { sessionId: string; projectId: string; startedAt: number; goal?: string; target?: 'codex' };
 const HANDOFF_JOB_KEY = 'handoff_job';
 /** Сервер хранит задачу 30 минут после конца; дольше ждать нечего. */
 const HANDOFF_JOB_MAX_AGE_MS = 30 * 60 * 1000;
@@ -1413,12 +1414,12 @@ export function useChatComposerState({
    * Опрос задачи до готовности. `resumeSessionId` — продолжить уже начатую
    * (вкладку выгрузили, пока модель писала): тогда без нового POST.
    */
-  const runHandoff = useCallback(async (sourceProject: Project, sourceSessionId: string, resume: boolean, goal = '') => {
+  const runHandoff = useCallback(async (sourceProject: Project, sourceSessionId: string, resume: boolean, goal = '', target?: 'codex') => {
     if (!onStartNewChat || handoffPolling) return;
     handoffPolling = true;
     setHandoffStatus('running');
     if (!resume) {
-      writeHandoffJob({ sessionId: sourceSessionId, projectId: sourceProject.projectId, startedAt: Date.now(), goal: goal || undefined });
+      writeHandoffJob({ sessionId: sourceSessionId, projectId: sourceProject.projectId, startedAt: Date.now(), goal: goal || undefined, target });
     }
     const fail = (message: string) => {
       clearHandoffJob();
@@ -1436,7 +1437,7 @@ export function useChatComposerState({
       let response = await authenticatedFetch(url, resume ? undefined : {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal: goal || undefined }),
+        body: JSON.stringify({ goal: goal || undefined, target }),
       });
       let body = await response.json().catch(() => ({}));
       if (!response.ok) return fail(body?.error || `ошибка ${response.status}`);
@@ -1483,6 +1484,37 @@ export function useChatComposerState({
     }
     void runHandoff(selectedProject, sourceSessionId, false, goal);
   }, [handoffStatus, runHandoff, selectedProject]);
+
+  /*
+   * Выбор помощника в меню аккаунтов при открытом чате (Егор 29.09.26:
+   * «переключился на Codex — чат не работает»). Чат Claude переезжает в новый
+   * чат Codex той же дорогой, что «Продолжить в новом чате», выжимку пишет
+   * Codex (у Claude в этот момент обычно кончился лимит). Новый чат берёт
+   * Codex из выбора, записанного меню. Из чата Codex выбор Claude просто
+   * открывает новый чат: переносить переписку Codex сервер не умеет.
+   */
+  const providerRef = useRef(provider);
+  providerRef.current = provider;
+  useEffect(() => {
+    const onContinue = (event: Event) => {
+      const target = (event as CustomEvent).detail;
+      const sourceSessionId = sessionKeyRef.current;
+      if (!sourceSessionId || !selectedProject || !onStartNewChat || target === providerRef.current) return;
+      if (target === 'codex' && providerRef.current === 'claude') {
+        if (handoffStatus === 'running') return;
+        const goal = inputValueRef.current.trim();
+        if (goal) {
+          inputValueRef.current = '';
+          setInput('');
+        }
+        void runHandoff(selectedProject, sourceSessionId, false, goal, 'codex');
+      } else if (target === 'claude') {
+        onStartNewChat(selectedProject);
+      }
+    };
+    window.addEventListener(CONTINUE_IN_PROVIDER_EVENT, onContinue);
+    return () => window.removeEventListener(CONTINUE_IN_PROVIDER_EVENT, onContinue);
+  }, [handoffStatus, onStartNewChat, runHandoff, selectedProject]);
 
   /*
    * «Сжать в этом чате» (Егор 27.09.26, вариант 1 после сравнения со встроенным
@@ -1542,7 +1574,7 @@ export function useChatComposerState({
       const job = readHandoffJob();
       if (!job || !selectedProject || selectedProject.projectId !== job.projectId) return;
       // Задача из поля хранится вместе с записью — при сбое вернётся в поле.
-      void runHandoff(selectedProject, job.sessionId, true, job.goal ?? '');
+      void runHandoff(selectedProject, job.sessionId, true, job.goal ?? '', job.target);
     };
     resume();
     document.addEventListener('visibilitychange', resume);

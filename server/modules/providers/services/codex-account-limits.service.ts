@@ -60,7 +60,7 @@ const REQUEST_TIMEOUT_MS = 20 * 1000;
 let cached: CodexAccountLimits | null = null;
 let inFlight: Promise<CodexAccountLimits> | null = null;
 
-function codexHome(): string {
+export function codexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
 
@@ -69,7 +69,7 @@ function codexHome(): string {
  * reader never drifts to another Codex version than the one chatting.
  * Falls back to `codex` on PATH when the platform package is not installed.
  */
-function resolveCodexBinary(): string {
+export function resolveCodexBinary(): string {
   try {
     const sdkRequire = createRequire(import.meta.url);
     const codexRequire = createRequire(sdkRequire.resolve('@openai/codex/package.json'));

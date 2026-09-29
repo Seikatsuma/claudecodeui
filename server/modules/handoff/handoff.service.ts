@@ -48,6 +48,7 @@
  */
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { mkdir, open as openFile, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,6 +56,7 @@ import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { codexHome, resolveCodexBinary } from '@/modules/providers/index.js';
 import {
   digestTranscriptFile,
   exportDialogFile,
@@ -348,6 +350,51 @@ async function askModelOnce(prompt: string, accountDir: string): Promise<string>
     throw new Error(errorText || 'модель не ответила');
   }
   return resultText.trim();
+}
+
+/**
+ * Тот же один ответ, но от Codex — для переноса чата Claude в чат Codex
+ * (выбор Codex в меню аккаунтов). Выжимку пишет подписка, в которую чат
+ * переезжает: переносят как раз тогда, когда у Claude кончился лимит.
+ * Только чтение, без записи сессии; текст — последнее сообщение (`-o`).
+ */
+export async function askCodexOnce(prompt: string): Promise<string> {
+  await mkdir(MODEL_CWD, { recursive: true }).catch(() => undefined);
+  const outFile = path.join(MODEL_CWD, `codex-brief-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`);
+  const args = [
+    'exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only',
+    '-c', 'model_reasoning_effort="low"', '-C', MODEL_CWD, '-o', outFile, '-',
+  ];
+  const errorText = await new Promise<string | null>((resolve) => {
+    const child = spawn(resolveCodexBinary(), args, {
+      env: { ...process.env, CODEX_HOME: codexHome() },
+      stdio: ['pipe', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve('Codex не ответил вовремя');
+    }, MODEL_TIMEOUT_MS);
+    timer.unref?.();
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-2000);
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      resolve(error.message);
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? null : (stderr.trim().split('\n').pop() || `Codex завершился с кодом ${String(code)}`));
+    });
+    child.stdin.end(prompt);
+  });
+  const text = await readFile(outFile, 'utf8').catch(() => '');
+  await unlink(outFile).catch(() => undefined);
+  if (errorText || !text.trim()) {
+    throw new Error(errorText || 'Codex не ответил');
+  }
+  return text.trim();
 }
 
 type Ask = (prompt: string, accountDir: string) => Promise<string>;

@@ -25,6 +25,19 @@ const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 export const SELECT_PROVIDER_EVENT = 'ccui:select-provider';
 
 /**
+ * Выбор в меню аккаунтов (а не синхронизация при открытии чата): поле ввода
+ * переносит открытый чат к выбранному помощнику — чат Claude уезжает в новый
+ * чат Codex с выжимкой, из чата Codex выбор Claude открывает новый чат.
+ */
+export const CONTINUE_IN_PROVIDER_EVENT = 'ccui:continue-in-provider';
+
+/** Выбор помощника человеком в меню аккаунтов: запомнить и перенести открытый чат. */
+export function switchChatProvider(provider: 'claude' | 'codex'): void {
+  selectChatProvider(provider);
+  window.dispatchEvent(new CustomEvent(CONTINUE_IN_PROVIDER_EVENT, { detail: provider }));
+}
+
+/**
  * Выбрать помощника (claude / codex) для следующего нового чата — так же, как
  * это делает выбор модели на пустом экране: запись в localStorage плюс событие
  * для уже открытого поля ввода.

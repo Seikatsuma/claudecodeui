@@ -2,7 +2,7 @@ import { ChevronDown } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useCodexAccount } from '../../../../hooks/useCodexAccount';
+import { useCodexAccount, useSelectedChatProvider } from '../../../../hooks/useCodexAccount';
 import { api } from '../../../../utils/api';
 import { cn } from '../../../../lib/utils';
 
@@ -76,6 +76,8 @@ export default function SidebarUsageLimits() {
   const [isOpen, setIsOpen] = useState(true);
   // Подписка Codex (третий аккаунт) — те же два окна, числа прямо от Codex.
   const codex = useCodexAccount();
+  // Показываем окна того аккаунта, с которым идёт работа, — не оба сразу.
+  const showCodex = useSelectedChatProvider() === 'codex' && Boolean(codex?.available);
 
   const load = useCallback(async () => {
     try {
@@ -122,7 +124,7 @@ export default function SidebarUsageLimits() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [load]);
 
-  const codexRows: UsageLimit[] = codex?.available
+  const codexRows: UsageLimit[] = showCodex && codex
     ? codex.limits
       .filter((limit) => !limit.expired && VISIBLE_KINDS.includes(limit.kind))
       .map((limit) => ({
@@ -135,11 +137,9 @@ export default function SidebarUsageLimits() {
         expired: false,
       }))
     : [];
-  if (!hasRows && codexRows.length === 0) {
+  if (showCodex ? codexRows.length === 0 : !hasRows) {
     return null;
   }
-  // Подписи групп нужны, только когда групп две.
-  const showGroupTitles = hasRows && codexRows.length > 0;
 
   const isStale = payload?.fetchedAtMs
     ? Date.now() - payload.fetchedAtMs > STALE_AFTER_MS
@@ -211,10 +211,7 @@ export default function SidebarUsageLimits() {
 
       {isOpen && (
         <div className="mt-2 space-y-2">
-          {showGroupTitles && <p className="text-[10px] font-medium text-muted-foreground">Claude</p>}
-          {renderRows(rows, 'claude')}
-          {showGroupTitles && <p className="pt-1 text-[10px] font-medium text-muted-foreground">Codex</p>}
-          {renderRows(codexRows, 'codex')}
+          {showCodex ? renderRows(codexRows, 'codex') : renderRows(rows, 'claude')}
         </div>
       )}
     </div>

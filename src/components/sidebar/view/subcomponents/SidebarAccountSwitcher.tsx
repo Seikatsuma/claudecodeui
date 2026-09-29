@@ -2,7 +2,7 @@ import { Check, ChevronsUpDown, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { selectChatProvider, useCodexAccount, useSelectedChatProvider } from '../../../../hooks/useCodexAccount';
+import { switchChatProvider, useCodexAccount, useSelectedChatProvider } from '../../../../hooks/useCodexAccount';
 import { useOwnerAccountSettings } from '../../../settings/hooks/useOwnerAccountSettings';
 
 type SidebarAccountSwitcherProps = {
@@ -156,7 +156,8 @@ export default function SidebarAccountSwitcher({
                       role="menuitem"
                       disabled={isActive || pendingSlot !== null}
                       onClick={() => {
-                        selectChatProvider('claude');
+                        const fromCodex = codexSelected;
+                        if (fromCodex) switchChatProvider('claude');
                         if (account.slot === activeSlot) {
                           // Слот уже этот — вернуться с Codex на Claude.
                           setIsOpen(false);
@@ -184,7 +185,7 @@ export default function SidebarAccountSwitcher({
                     role="menuitem"
                     disabled={codexSelected || pendingSlot !== null}
                     onClick={() => {
-                      selectChatProvider('codex');
+                      switchChatProvider('codex');
                       setIsOpen(false);
                     }}
                     className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/60 disabled:cursor-default"

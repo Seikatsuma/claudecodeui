@@ -8,7 +8,9 @@
  */
 import express from 'express';
 
-import { getHandoff, HandoffError, prepareHandoff, startHandoff, type HandoffJob } from '@/modules/handoff/handoff.service.js';
+import { askCodexOnce, getHandoff, HandoffError, prepareHandoff, startHandoff, type HandoffJob } from '@/modules/handoff/handoff.service.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
+import { isCodexAllowedForWebUser } from '@/shared/utils.js';
 
 const router = express.Router();
 
@@ -29,7 +31,13 @@ const QUICK_WAIT_MS = 2500;
 
 router.post('/:sessionId', async (req, res) => {
   try {
-    const job = await startHandoff(String(req.params.sessionId), undefined, req.body?.goal);
+    // Перенос в чат Codex (меню аккаунтов): выжимку пишет Codex — у Claude
+    // в этот момент обычно кончился лимит. Codex — только хозяину.
+    const toCodex = req.body?.target === 'codex';
+    if (toCodex && !isCodexAllowedForWebUser(getRequestRuntimeContext()?.userId)) {
+      return res.status(403).json({ error: 'Codex недоступен для этого аккаунта' });
+    }
+    const job = await startHandoff(String(req.params.sessionId), toCodex ? askCodexOnce : undefined, req.body?.goal);
     if (job.status === 'running' && job.settled) {
       await Promise.race([job.settled, new Promise((resolve) => setTimeout(resolve, QUICK_WAIT_MS))]);
     }
