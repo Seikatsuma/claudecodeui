@@ -229,3 +229,14 @@ test('Codex history preserves wrapped exec tool calls and results', { concurrenc
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('Codex live reasoning is normalized as thinking, not assistant text', () => {
+  // Форма из transformCodexEvent: роль assistant, флаг — внутри message.
+  const [message] = new CodexSessionsProvider().normalizeMessage({
+    type: 'item',
+    itemType: 'reasoning',
+    message: { role: 'assistant', content: '**Checking primes**', isReasoning: true },
+  }, 'session-1');
+  assert.equal(message?.kind, 'thinking');
+  assert.equal(message?.content, '**Checking primes**');
+});
