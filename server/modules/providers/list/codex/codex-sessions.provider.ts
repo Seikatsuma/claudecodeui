@@ -768,46 +768,80 @@ export class CodexSessionsProvider implements IProviderSessions {
             content: raw.message?.content || '',
           })];
         case 'command_execution':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: 'Bash',
-            toolInput: { command: raw.command },
-            toolId: baseId,
-            output: raw.output,
-            exitCode: raw.exitCode,
-            status: raw.status,
-          })];
+          return [
+            createNormalizedMessage({
+              id: baseId,
+              sessionId,
+              timestamp: ts,
+              provider: PROVIDER,
+              kind: 'tool_use',
+              toolName: 'Bash',
+              toolInput: { command: raw.command },
+              toolId: baseId,
+            }),
+            // The chat UI attaches output only from a separate tool_result.
+            // Keeping it as an extra field on tool_use made live Codex commands
+            // look permanently running and hid their output until history reload.
+            createNormalizedMessage({
+              id: `${baseId}_result`,
+              sessionId,
+              timestamp: ts,
+              provider: PROVIDER,
+              kind: 'tool_result',
+              toolId: baseId,
+              content: typeof raw.output === 'string' ? raw.output : '',
+              isError: raw.status === 'failed'
+                || (typeof raw.exitCode === 'number' && raw.exitCode !== 0),
+            }),
+          ];
         case 'file_change':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: 'FileChanges',
-            toolInput: raw.changes,
-            toolId: baseId,
-            status: raw.status,
-          })];
+          return [
+            createNormalizedMessage({
+              id: baseId,
+              sessionId,
+              timestamp: ts,
+              provider: PROVIDER,
+              kind: 'tool_use',
+              toolName: 'FileChanges',
+              toolInput: raw.changes,
+              toolId: baseId,
+            }),
+            createNormalizedMessage({
+              id: `${baseId}_result`,
+              sessionId,
+              timestamp: ts,
+              provider: PROVIDER,
+              kind: 'tool_result',
+              toolId: baseId,
+              content: raw.status === 'failed' ? 'File changes failed' : 'File changes applied',
+              isError: raw.status === 'failed',
+            }),
+          ];
         case 'mcp_tool_call':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: raw.tool || 'MCP',
-            toolInput: raw.arguments,
-            toolId: baseId,
-            server: raw.server,
-            result: raw.result,
-            error: raw.error,
-            status: raw.status,
-          })];
+          return [
+            createNormalizedMessage({
+              id: baseId,
+              sessionId,
+              timestamp: ts,
+              provider: PROVIDER,
+              kind: 'tool_use',
+              toolName: raw.tool || 'MCP',
+              toolInput: raw.arguments,
+              toolId: baseId,
+              server: raw.server,
+            }),
+            createNormalizedMessage({
+              id: `${baseId}_result`,
+              sessionId,
+              timestamp: ts,
+              provider: PROVIDER,
+              kind: 'tool_result',
+              toolId: baseId,
+              content: raw.error?.message
+                || extractCodexToolOutput(raw.result?.content ?? raw.result),
+              isError: raw.status === 'failed' || Boolean(raw.error),
+            }),
+          ];
         case 'web_search':
           return [createNormalizedMessage({
             id: baseId,

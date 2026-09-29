@@ -240,3 +240,37 @@ test('Codex live reasoning is normalized as thinking, not assistant text', () =>
   assert.equal(message?.kind, 'thinking');
   assert.equal(message?.content, '**Checking primes**');
 });
+
+test('Codex live command output is emitted as a tool result', () => {
+  const messages = new CodexSessionsProvider().normalizeMessage({
+    type: 'item',
+    itemType: 'command_execution',
+    command: 'npm test',
+    output: '12 tests passed',
+    exitCode: 0,
+    status: 'completed',
+  }, 'session-1');
+
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0]?.kind, 'tool_use');
+  assert.equal(messages[0]?.toolName, 'Bash');
+  assert.equal(messages[1]?.kind, 'tool_result');
+  assert.equal(messages[1]?.toolId, messages[0]?.toolId);
+  assert.equal(messages[1]?.content, '12 tests passed');
+  assert.equal(messages[1]?.isError, false);
+});
+
+test('Codex live command failure is visible as an error result', () => {
+  const messages = new CodexSessionsProvider().normalizeMessage({
+    type: 'item',
+    itemType: 'command_execution',
+    command: 'npm test',
+    output: 'test failed',
+    exitCode: 1,
+    status: 'failed',
+  }, 'session-1');
+
+  assert.equal(messages[1]?.kind, 'tool_result');
+  assert.equal(messages[1]?.content, 'test failed');
+  assert.equal(messages[1]?.isError, true);
+});
