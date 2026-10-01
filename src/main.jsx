@@ -38,15 +38,32 @@ function whenAppCssReady() {
   const pending = [...document.querySelectorAll('link[data-app-css]')].filter(link => link.media !== 'all')
   if (pending.length === 0) return Promise.resolve()
   return new Promise(resolve => {
-    let left = pending.length
+    let finished = false
+    // Не держимся за одно событие load: если браузер его не прислал (приём
+    // media="print" → onload в Safari замером не проверен), стиль, уже
+    // лежащий в link.sheet, подключаем сами.
+    const poll = setInterval(check, 200)
+    function check() {
+      if (finished) return
+      pending.forEach(link => { if (link.media !== 'all' && link.sheet) link.media = 'all' })
+      if (pending.every(link => link.media === 'all')) {
+        finished = true
+        clearInterval(poll)
+        resolve()
+      }
+    }
     pending.forEach(link => {
-      link.addEventListener('load', () => { if (--left === 0) resolve() }, { once: true })
+      link.addEventListener('load', check, { once: true })
       link.addEventListener('error', () => {
+        if (finished) return
+        finished = true
+        clearInterval(poll)
         const guard = window.__bootGuard
         if (guard && guard.recover) guard.recover('не загрузился файл стилей ' + link.getAttribute('href'))
         else resolve()
       }, { once: true })
     })
+    check()
   })
 }
 
