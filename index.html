@@ -272,18 +272,23 @@
           var w = window.innerWidth, h = window.innerHeight;
           if (!document.body || !w || !h) return true;
           var top = document.elementFromPoint(w / 2, h / 2);
-          if (top && /^(IMG|VIDEO|CANVAS|IFRAME|svg)$/.test(top.tagName)) return true;
+          if (top && /^(IMG|VIDEO|CANVAS|IFRAME|EMBED|OBJECT|svg)$/.test(top.tagName)) return true;
+          if (top && getComputedStyle(top).backgroundImage !== 'none') return true;
           if (document.querySelector('[role="dialog"], dialog[open]')) return true;
           var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
           var range = document.createRange();
-          for (var seen = 0, node = walker.nextNode(); node && seen < 600; node = walker.nextNode()) {
+          // Предел — по тексту НА экране: длинный чат с кодом — тысячи кусков
+          // текста за краем, и счёт по всем решал «пусто» на живой странице.
+          // Общий предел обхода — только против зависания на огромной ленте.
+          for (var seen = 0, walked = 0, node = walker.nextNode(); node && seen < 300 && walked < 30000; node = walker.nextNode()) {
+            walked++;
             if (!node.nodeValue || !node.nodeValue.trim()) continue;
             var parent = node.parentElement;
             if (!parent || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(parent.tagName)) continue;
-            seen++;
             range.selectNodeContents(node);
             var r = range.getBoundingClientRect();
             if (r.width < 1 || r.height < 1 || r.bottom <= 0 || r.right <= 0 || r.top >= h || r.left >= w) continue;
+            seen++;
             var x = Math.min(Math.max(r.left + Math.min(r.width, 8) / 2, 0), w - 1);
             var y = Math.min(Math.max(r.top + r.height / 2, 0), h - 1);
             // Скрытый или прозрачный текст тоже имеет размеры — не считается.
@@ -296,7 +301,8 @@
             // попадание к своему контейнеру — засчитываем, но не страницу целиком.
             if (hit.contains(parent) && hit !== document.body && hit !== document.documentElement && hit.id !== 'root') return true;
           }
-          return false;
+          // Не дошли до конца страницы — не знаем, значит не трогаем.
+          return walked >= 30000;
         }
         function describeScreen() {
           var top = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
@@ -321,7 +327,7 @@
           try { blank = !screenHasContent(); } catch (e) { return; }
           blankChecks = blank ? blankChecks + 1 : 0;
           if (blankChecks === 3) {
-            guard.blankScreen = describeScreen();
+            try { guard.blankScreen = describeScreen(); } catch (e) { guard.blankScreen = { error: String(e).slice(0, 120) }; }
             check('на экране пусто', true);
           }
         }, 4000);
