@@ -4,7 +4,7 @@
 // Имя меняется вместе с любым изменением этого файла: браузер переустанавливает
 // служебный кэш только когда сам файл стал другим побайтово. Установленное на
 // экран «Домой» приложение месяц отдавало старую сборку именно поэтому.
-const CACHE_NAME = 'claude-ui-v6';
+const CACHE_NAME = 'claude-ui-v7';
 const urlsToCache = [
   '/manifest.json'
 ];
@@ -37,7 +37,9 @@ function precacheBuild() {
         found = pattern.exec(html);
       }
       if (assets.length === 0) return undefined;
-      return caches.open(CACHE_NAME).then(cache => cache.addAll(assets));
+      // Без повторов: стиль программы упомянут в странице дважды (preload +
+      // подключение, 01.10.26), а addAll с одинаковыми адресами падает целиком.
+      return caches.open(CACHE_NAME).then(cache => cache.addAll([...new Set(assets)]));
     })
     .catch(() => undefined);
 }

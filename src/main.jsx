@@ -29,10 +29,33 @@ function CrashHandoff({ error }) {
   return null
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <ErrorBoundary FallbackComponent={CrashHandoff}>
-      <App />
-    </ErrorBoundary>
-  </React.StrictMode>,
-)
+// Стили программы подключаются, не держа первый кадр (vite.config.js,
+// non-blocking-app-css, 01.10.26): пока они в дороге, видна заставка.
+// Рисовать программу раньше стилей нельзя — она мигнёт голой разметкой.
+// Стиль не пришёл — решает страховка из index.html (перезапуск, потом
+// экран с кнопками), а не программа без оформления.
+function whenAppCssReady() {
+  const pending = [...document.querySelectorAll('link[data-app-css]')].filter(link => link.media !== 'all')
+  if (pending.length === 0) return Promise.resolve()
+  return new Promise(resolve => {
+    let left = pending.length
+    pending.forEach(link => {
+      link.addEventListener('load', () => { if (--left === 0) resolve() }, { once: true })
+      link.addEventListener('error', () => {
+        const guard = window.__bootGuard
+        if (guard && guard.recover) guard.recover('не загрузился файл стилей ' + link.getAttribute('href'))
+        else resolve()
+      }, { once: true })
+    })
+  })
+}
+
+whenAppCssReady().then(() => {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <ErrorBoundary FallbackComponent={CrashHandoff}>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>,
+  )
+})

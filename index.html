@@ -8,6 +8,116 @@
     <title>Claude UI</title>
 
     <!--
+      Первый кадр не ждёт ничего из сети (01.10.26).
+
+      Егор: «белый экран, чёрный экран, нет даже ни единого комментария, ни
+      слов загрузки». Замер в браузере с размером iPhone: пока файл шрифтов
+      или файл стилей программы застрял в дороге, браузер не рисует НИЧЕГО —
+      ни одного кадра за 6 с, хотя заставка «Открываю…» уже на странице.
+      Таблица стилей в голове страницы держит первый кадр целиком, а шрифты
+      телефон берёт из сети при каждом открытии, стили — после каждой
+      выкатки. Экран при этом залит фоном: чёрным в тёмной теме, светлым в
+      светлой. Страховка с кнопками в это время тоже невидима.
+
+      Поэтому: (1) шрифты и стили программы подключены без удержания кадра
+      (media="print" → onload; стили программы — плагином в vite.config.js,
+      программа ждёт их сама в main.jsx); (2) заставка стоит в самом начале
+      страницы, большой скрипт страховки — после неё: дошла страница не
+      целиком — надпись всё равно уже видна.
+    -->
+    <script>
+      // Фон до программы — под тему, чтобы запуск не вспыхивал белым.
+      try {
+        var theme = localStorage.getItem('theme');
+        var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.style.background = dark ? '#141414' : '#f7f5f1';
+        // Заставке «Открываю…» — те же цвета: тело страницы до запуска
+        // программы красится стилями в светлый, поверх него нужен свой фон.
+        document.documentElement.style.setProperty('--boot-bg', dark ? '#141414' : '#f7f5f1');
+        document.documentElement.style.setProperty('--boot-fg', dark ? '#ececec' : '#1f1f1f');
+        document.documentElement.style.setProperty('--boot-dim', dark ? '#a1a1aa' : '#6b6b6b');
+      } catch (e) {}
+    </script>
+    <style>
+      #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:10px;padding:24px;text-align:center;box-sizing:border-box;pointer-events:none;
+        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        background:var(--boot-bg,#f7f5f1);color:var(--boot-fg,#1f1f1f)}
+      #boot-splash b{font-size:18px;font-weight:600}
+      #boot-splash p,#boot-splash button{margin:0;max-width:20rem;color:var(--boot-dim,#6b6b6b);opacity:0;animation:boot-splash-hint .3s 4s forwards}
+      #boot-splash .slow,#boot-splash button{animation-delay:20s}
+      #boot-splash button{pointer-events:auto;margin-top:6px;padding:10px 18px;border:1px solid var(--boot-dim,#6b6b6b);
+        border-radius:10px;background:transparent;color:var(--boot-fg,#1f1f1f);font:inherit}
+      @keyframes boot-splash-hint{to{opacity:1}}
+      #root:not(:empty) ~ #boot-splash{display:none}
+    </style>
+
+    <!-- Fonts: Encode Sans (UI) + Merriweather (chat), self-hosted.
+         These used to come straight from fonts.googleapis.com as a
+         render-blocking stylesheet, so on any network where Google Fonts is
+         slow or unreachable (various VPNs, several countries this instance is
+         used from) the browser painted nothing until that request timed out.
+         Served from this origin now, so the page never depends on a third
+         party to render. Regenerate with the Google Fonts CSS if the family
+         list changes; see public/fonts/fonts.css. -->
+    <!-- media="print" + onload: шрифты не держат первый кадр (01.10.26, см. выше). -->
+    <link rel="stylesheet" href="/fonts/fonts.css" media="print" onload="this.media='all'" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials"  />
+    
+    <!-- iOS Safari PWA Meta Tags -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!--
+      Обязательная пара к строке ниже. Apple учитывает
+      apple-mobile-web-app-status-bar-style ТОЛЬКО когда рядом стоит
+      apple-mobile-web-app-capable. Без неё iOS не считает страницу
+      веб-приложением в своём, «яблочном» смысле: строка состояния
+      остаётся непрозрачной, и высота содержимого урезается на её 62
+      точки, хотя само окно занимает экран целиком.
+
+      Замер с телефона Егора: экран 874, окно 874, а содержимое 812,
+      начиная с самого верха. Те самые 62 точки и оставались пустой
+      полосой внизу — вне страницы, поэтому никакая правка стилей до
+      неё не дотягивалась. Заодно 62 точки отступа сверху, которые
+      приложение честно добавляло под строку состояния, оказывались
+      лишними: iOS уже вычла их.
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Claude UI" />
+    
+    <!-- iOS Safari Icons -->
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
+    
+    <!-- Theme Color -->
+    <!-- Под тёмную иконку: белая полоса вокруг приложения выбивалась из неё. -->
+    <meta name="theme-color" content="#000000" />
+    <meta name="msapplication-TileColor" content="#ffffff" />
+    
+    <!-- Prevent zoom on iOS -->
+    <meta name="format-detection" content="telephone=no" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Заставка до первого экрана приложения (26.09.26). Раньше до запуска
+         программы экран был пустым, а на iPhone в тёмной теме — чисто чёрным,
+         и Егор не понимал, идёт ли что-то вообще («пусть хоть экран с инфо,
+         что идёт загрузка»). Чистый HTML/CSS, без скриптов: видна, даже если
+         программа не скачалась. Прячется сама, как только в #root появился
+         экран (#root:not(:empty)). Вторая строка — через 4 с, чтобы быстрый
+         запуск не мигал лишним текстом; третья с кнопкой — через 20 с, когда
+         связь явно застряла (01.10.26: «хотя бы со словами, что происходит»).
+         Стоит первой в теле страницы — до страховки, см. заметку в голове. -->
+    <div id="boot-splash" aria-live="polite">
+      <b>Открываю Claude UI…</b>
+      <p>Загружаю приложение. Если идёт обновление или связь слабая, это займёт до минуты.</p>
+      <p class="slow">Сервер отвечает слишком долго — связь до него медленная или обрывается. Страница сама попробует ещё раз.</p>
+      <button type="button" onclick="location.reload()">Обновить сейчас</button>
+    </div>
+
+    <!--
       Страховка запуска: страница никогда не остаётся белой молча.
 
       25.09.26, в который раз: приложение с экрана «Домой» на iPhone открылось
@@ -63,17 +173,6 @@
           catch (e) { return false; }
         })();
 
-        // Фон до программы — под тему, чтобы запуск не вспыхивал белым.
-        try {
-          var theme = localStorage.getItem('theme');
-          var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.style.background = dark ? '#141414' : '#f7f5f1';
-          // Заставке «Открываю…» — те же цвета: тело страницы до запуска
-          // программы красится стилями в светлый, поверх него нужен свой фон.
-          document.documentElement.style.setProperty('--boot-bg', dark ? '#141414' : '#f7f5f1');
-          document.documentElement.style.setProperty('--boot-fg', dark ? '#ececec' : '#1f1f1f');
-          document.documentElement.style.setProperty('--boot-dim', dark ? '#a1a1aa' : '#6b6b6b');
-        } catch (e) {}
 
         function report(kind, extra) {
           try {
@@ -357,79 +456,8 @@
         window.addEventListener('pageshow', function () { leaving = false; pulse(); });
       })();
     </script>
-
-    <!-- Fonts: Encode Sans (UI) + Merriweather (chat), self-hosted.
-         These used to come straight from fonts.googleapis.com as a
-         render-blocking stylesheet, so on any network where Google Fonts is
-         slow or unreachable (various VPNs, several countries this instance is
-         used from) the browser painted nothing until that request timed out.
-         Served from this origin now, so the page never depends on a third
-         party to render. Regenerate with the Google Fonts CSS if the family
-         list changes; see public/fonts/fonts.css. -->
-    <link rel="stylesheet" href="/fonts/fonts.css" />
-
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials"  />
-    
-    <!-- iOS Safari PWA Meta Tags -->
-    <meta name="mobile-web-app-capable" content="yes" />
-    <!--
-      Обязательная пара к строке ниже. Apple учитывает
-      apple-mobile-web-app-status-bar-style ТОЛЬКО когда рядом стоит
-      apple-mobile-web-app-capable. Без неё iOS не считает страницу
-      веб-приложением в своём, «яблочном» смысле: строка состояния
-      остаётся непрозрачной, и высота содержимого урезается на её 62
-      точки, хотя само окно занимает экран целиком.
-
-      Замер с телефона Егора: экран 874, окно 874, а содержимое 812,
-      начиная с самого верха. Те самые 62 точки и оставались пустой
-      полосой внизу — вне страницы, поэтому никакая правка стилей до
-      неё не дотягивалась. Заодно 62 точки отступа сверху, которые
-      приложение честно добавляло под строку состояния, оказывались
-      лишними: iOS уже вычла их.
-    -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Claude UI" />
-    
-    <!-- iOS Safari Icons -->
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
-    
-    <!-- Theme Color -->
-    <!-- Под тёмную иконку: белая полоса вокруг приложения выбивалась из неё. -->
-    <meta name="theme-color" content="#000000" />
-    <meta name="msapplication-TileColor" content="#ffffff" />
-    
-    <!-- Prevent zoom on iOS -->
-    <meta name="format-detection" content="telephone=no" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <!-- Заставка до первого экрана приложения (26.09.26). Раньше до запуска
-         программы экран был пустым, а на iPhone в тёмной теме — чисто чёрным,
-         и Егор не понимал, идёт ли что-то вообще («пусть хоть экран с инфо,
-         что идёт загрузка»). Чистый HTML/CSS, без скриптов: видна, даже если
-         программа не скачалась. Прячется сама, как только в #root появился
-         экран (#root:not(:empty)). Вторая строка — через 4 с, чтобы быстрый
-         запуск не мигал лишним текстом. Страховка запуска (boot-rescue) не
-         затронута: она смотрит только в #root. -->
-    <div id="boot-splash" aria-live="polite">
-      <b>Открываю Claude UI…</b>
-      <p>Загружаю приложение. Если идёт обновление или связь слабая, это займёт до минуты.</p>
-    </div>
-    <style>
-      #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-        gap:10px;padding:24px;text-align:center;box-sizing:border-box;pointer-events:none;
-        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-        background:var(--boot-bg,#f7f5f1);color:var(--boot-fg,#1f1f1f)}
-      #boot-splash b{font-size:18px;font-weight:600}
-      #boot-splash p{margin:0;max-width:20rem;color:var(--boot-dim,#6b6b6b);opacity:0;animation:boot-splash-hint .3s 4s forwards}
-      @keyframes boot-splash-hint{to{opacity:1}}
-      #root:not(:empty) ~ #boot-splash{display:none}
-    </style>
     <script type="module" src="/src/main.jsx"></script>
-    
+
     <!-- Service Worker Registration -->
     <script>
       if ('serviceWorker' in navigator) {

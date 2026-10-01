@@ -46,6 +46,27 @@ export default defineConfig(({ mode }) => {
           return html.replace(/\s*<link rel="manifest"[^>]*\/?>\n?/, '\n')
         },
       },
+      // Стили программы не держат первый кадр (01.10.26). Таблица стилей в
+      // голове страницы запрещает браузеру рисовать что-либо, пока она не
+      // скачалась: на застрявшей связи iPhone показывал чисто чёрный (или
+      // белый) экран без единого слова, хотя заставка «Открываю…» уже была
+      // на странице. Теперь стиль качается сразу и с высоким приоритетом
+      // (preload), но подключается по приходу (media="print" → onload), а
+      // программа ждёт его сама — см. whenAppCssReady в src/main.jsx.
+      {
+        name: 'non-blocking-app-css',
+        apply: 'build',
+        transformIndexHtml: {
+          order: 'post',
+          handler(html) {
+            return html.replace(
+              /<link rel="stylesheet" crossorigin href="(\/assets\/[^"]+\.css)">/g,
+              '<link rel="preload" as="style" crossorigin href="$1">' +
+                '<link rel="stylesheet" crossorigin href="$1" media="print" data-app-css onload="this.media=\'all\'">',
+            )
+          },
+        },
+      },
     ].filter(Boolean),
     resolve: {
       alias: {
