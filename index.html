@@ -23,6 +23,8 @@
           опустел — страница сама перезапускается (не больше двух раз подряд),
           дальше показывает экран с кнопками вместо белого листа;
         · при возврате в приложение с пустым экраном — перезапуск сразу;
+        · программа запущена, а на экране ни одного видимого текста 12 с
+          (01.10.26: белый лист после 21 минуты в фоне) — тот же перезапуск;
         · каждый такой случай и каждый «телефон выгрузил страницу, не
           попрощавшись» уходит в журнал службы строкой [boot-probe].
     -->
@@ -44,6 +46,15 @@
         }
         function load(key) {
           try { return sessionStorage.getItem(key); } catch (e) { return null; }
+        }
+        // Пульс — в localStorage: iPhone, выгружая приложение с экрана «Домой»,
+        // стирает sessionStorage вместе с ним, и «страницу убили» не ловилось
+        // ни разу (25.09–01.10.26: ноль записей при ежедневных выгрузках).
+        function storeLocal(key, value) {
+          try { localStorage.setItem(key, value); } catch (e) {}
+        }
+        function loadLocal(key) {
+          try { return localStorage.getItem(key); } catch (e) { return null; }
         }
         // Без хранилища (Safari с запретом данных сайтов) счётчик перезапусков
         // не переживёт перезагрузку — автоперезапуск там был бы вечным циклом.
@@ -81,6 +92,7 @@
               errors: guard.errors.slice(-6),
               ua: navigator.userAgent.slice(0, 160),
             };
+            if (guard.blankScreen) body.screen = JSON.stringify(guard.blankScreen);
             for (var key in extra || {}) body[key] = extra[key];
             // keepalive доносит запрос и при уходе со страницы, а ключ идёт
             // заголовком — в адресе он попал бы в журнал веб-сервера.
@@ -189,9 +201,9 @@
         }
         guard.recover = recover;
 
-        function check(why) {
+        function check(why, screenBlank) {
           if (guard.done) return;
-          if (rootFilled()) return;
+          if (!screenBlank && rootFilled()) return;
           var last = guard.errors[guard.errors.length - 1];
           recover(why + (last ? ' · ' + last : ''));
         }
@@ -248,10 +260,80 @@
         // только восстановление страницы из памяти браузера (persisted).
         window.addEventListener('pageshow', function (event) { if (event.persisted) onReturn(); });
 
+        // Белый экран у запущенной программы (01.10.26). Приложение вернулось
+        // из фона через 21 минуту, связь поднялась, программа числилась
+        // нарисованной — а на экране было пусто, и страховка молчала: #root не
+        // пуст. Теперь, пока страница видна, раз в 4 с ищем на экране хоть
+        // один видимый текст, не закрытый ничем сверху. Пусто три проверки
+        // подряд — в журнал службы, что именно сверху, и перезапуск (тот же
+        // предел: два раза, дальше кнопки). Картинка или окно во весь экран —
+        // не пустота.
+        function screenHasContent() {
+          var w = window.innerWidth, h = window.innerHeight;
+          if (!document.body || !w || !h) return true;
+          var top = document.elementFromPoint(w / 2, h / 2);
+          if (top && /^(IMG|VIDEO|CANVAS|IFRAME|svg)$/.test(top.tagName)) return true;
+          if (document.querySelector('[role="dialog"], dialog[open]')) return true;
+          var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          var range = document.createRange();
+          for (var seen = 0, node = walker.nextNode(); node && seen < 600; node = walker.nextNode()) {
+            if (!node.nodeValue || !node.nodeValue.trim()) continue;
+            var parent = node.parentElement;
+            if (!parent || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(parent.tagName)) continue;
+            seen++;
+            range.selectNodeContents(node);
+            var r = range.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1 || r.bottom <= 0 || r.right <= 0 || r.top >= h || r.left >= w) continue;
+            var x = Math.min(Math.max(r.left + Math.min(r.width, 8) / 2, 0), w - 1);
+            var y = Math.min(Math.max(r.top + r.height / 2, 0), h - 1);
+            // Скрытый или прозрачный текст тоже имеет размеры — не считается.
+            if (parent.checkVisibility && !parent.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+            if (getComputedStyle(parent).visibility !== 'visible') continue;
+            var hit = document.elementFromPoint(x, y);
+            if (!hit) continue;
+            if (hit === parent || parent.contains(hit)) return true;
+            // Подпись без отклика на касание (pointer-events: none) «пропускает»
+            // попадание к своему контейнеру — засчитываем, но не страницу целиком.
+            if (hit.contains(parent) && hit !== document.body && hit !== document.documentElement && hit.id !== 'root') return true;
+          }
+          return false;
+        }
+        function describeScreen() {
+          var top = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+          var root = document.getElementById('root');
+          return {
+            topAtCenter: top ? (top.tagName + (top.id ? '#' + top.id : '') + '.' + String(top.className && top.className.baseVal !== undefined ? top.className.baseVal : top.className || '').slice(0, 80)) : '',
+            rootText: root ? (root.innerText || '').trim().length : -1,
+            rootHeight: root ? Math.round(root.getBoundingClientRect().height) : -1,
+            viewport: window.innerWidth + 'x' + window.innerHeight,
+            hiddenForSec: guard.hiddenAt ? Math.round((guard.shownAt - guard.hiddenAt) / 1000) : 0,
+          };
+        }
+        var blankChecks = 0;
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'hidden') guard.hiddenAt = Date.now();
+          else guard.shownAt = Date.now();
+          blankChecks = 0;
+        });
+        setInterval(function () {
+          if (guard.done || !guard.mountedOnce || document.visibilityState !== 'visible') return;
+          var blank = false;
+          try { blank = !screenHasContent(); } catch (e) { return; }
+          blankChecks = blank ? blankChecks + 1 : 0;
+          if (blankChecks === 3) {
+            guard.blankScreen = describeScreen();
+            check('на экране пусто', true);
+          }
+        }, 4000);
+
         // Выгрузил ли телефон прошлую страницу, не попрощавшись. Пульс пишется
         // раз в 5 с, прощание — в pagehide. Пульс без прощания = страницу убили.
-        var beat = load(BEAT_KEY);
-        if (beat && beat.indexOf('bye') === -1) {
+        var beat = loadLocal(BEAT_KEY);
+        // localStorage общий для вкладок: на компьютере пульс без прощания может
+        // принадлежать соседней живой вкладке (фоновая пульсирует раз в минуту).
+        // Приложение с экрана «Домой» — всегда одна страница.
+        var beatSilentMs = beat ? Date.now() - Number(beat.split(':')[0]) : 0;
+        if (beat && beat.indexOf('bye') === -1 && (navigator.standalone || beatSilentMs > 90000)) {
           var lastBeat = Number(beat.split(':')[0]);
           guard.previousKilled = true;
           setTimeout(function () {
@@ -261,11 +343,11 @@
         // После прощания пульс молчит: браузер шлёт «страница скрыта» уже после
         // pagehide, и без этого обычная перезагрузка выглядела бы как убийство.
         var leaving = false;
-        function pulse() { if (!leaving) store(BEAT_KEY, Date.now() + ':' + document.visibilityState); }
+        function pulse() { if (!leaving) storeLocal(BEAT_KEY, Date.now() + ':' + document.visibilityState); }
         pulse();
         setInterval(pulse, 5000);
         document.addEventListener('visibilitychange', pulse);
-        window.addEventListener('pagehide', function () { leaving = true; store(BEAT_KEY, Date.now() + ':bye'); });
+        window.addEventListener('pagehide', function () { leaving = true; storeLocal(BEAT_KEY, Date.now() + ':bye'); });
         window.addEventListener('pageshow', function () { leaving = false; pulse(); });
       })();
     </script>
