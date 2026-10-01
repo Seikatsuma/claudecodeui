@@ -25,7 +25,7 @@ import {
     stopSessionActivitySync,
 } from '@/modules/providers/index.js';
 import { userDb, initializeDatabase, sessionsDb  } from '@/modules/database/index.js';
-import { createWebSocketServer, dispatchChatQueues } from '@/modules/websocket/index.js';
+import { chatRunRegistry, createWebSocketServer, dispatchChatQueues } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -190,6 +190,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Public health check endpoint (no authentication required)
 app.get('/health', (req, res) => {
+    const activeRuns = chatRunRegistry.listRunningRuns();
+    const restartBlockingRuns = activeRuns.filter((run) => run.provider !== 'claude');
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
@@ -198,7 +200,10 @@ app.get('/health', (req, res) => {
         accountLabel: ACCOUNT_LABEL,
         secondServerLabel: SECOND_SERVER_LABEL,
         switchAccountUrl: SWITCH_ACCOUNT_URL,
-        accountEmail: CLAUDE_ACCOUNT_EMAIL
+        accountEmail: CLAUDE_ACCOUNT_EMAIL,
+        activeRuns: activeRuns.length,
+        restartBlockingRuns: restartBlockingRuns.length,
+        draining: chatRunRegistry.isShutdownDraining(),
     });
 });
 
@@ -614,27 +619,74 @@ async function startServer() {
 
         await closeSessionsWatcher();
         stopSessionActivitySync();
-        // Clean up plugin processes on shutdown
-        const shutdownRuntimeServices = async () => {
-            // Первым делом: агенты не должны умереть вместе с сервером.
-            markShuttingDown();
-            try {
-                await browserUseService.stopAllSessions();
-            } catch (err) {
-                console.error('[Browser] Error stopping sessions during shutdown:', getErrorMessage(err));
+        let shutdownPromise: Promise<void> | null = null;
+        const shutdownRuntimeServices = (): Promise<void> => {
+            if (shutdownPromise) {
+                return shutdownPromise;
             }
-            try {
-                await stopAllPlugins();
-            } catch (err) {
-                console.error('[Plugins] Error stopping plugins during shutdown:', getErrorMessage(err));
-            }
-            try {
-                await removeLocalServerMarker();
-            } catch (err) {
-                console.error('[Local Server] Error removing server marker during shutdown:', getErrorMessage(err));
-            }
-            process.exit(0);
+
+            shutdownPromise = (async () => {
+                // Сразу закрываем вход новым запускам: сообщения, пришедшие во
+                // время ожидания, остаются в серверной очереди и уйдут после
+                // подъёма новой версии. Claude умеет пережить перезапуск через
+                // survivor-runs, а Codex при разрыве канала пишет turn_aborted —
+                // поэтому его (и другие не-Claude runtime) сначала дожидаемся.
+                chatRunRegistry.beginShutdownDrain();
+                markShuttingDown();
+
+                const waitingSince = Date.now();
+                let lastProgressLog = 0;
+                while (true) {
+                    const blockingRuns = chatRunRegistry
+                        .listRunningRuns()
+                        .filter((run) => run.provider !== 'claude');
+                    if (blockingRuns.length === 0) {
+                        break;
+                    }
+
+                    const now = Date.now();
+                    if (lastProgressLog === 0 || now - lastProgressLog >= 30_000) {
+                        const labels = blockingRuns
+                            .map((run) => `${run.provider}:${run.sessionId}`)
+                            .join(', ');
+                        console.log(
+                            `[shutdown-drain] жду ${blockingRuns.length} активн. ход(а/ов) перед перезапуском: ${labels}`,
+                        );
+                        lastProgressLog = now;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                }
+                if (lastProgressLog !== 0) {
+                    console.log(`[shutdown-drain] активные ходы закончились за ${Math.round((Date.now() - waitingSince) / 1000)} с — перезапускаюсь`);
+                }
+
+                try {
+                    await browserUseService.stopAllSessions();
+                } catch (err) {
+                    console.error('[Browser] Error stopping sessions during shutdown:', getErrorMessage(err));
+                }
+                try {
+                    await stopAllPlugins();
+                } catch (err) {
+                    console.error('[Plugins] Error stopping plugins during shutdown:', getErrorMessage(err));
+                }
+                try {
+                    await removeLocalServerMarker();
+                } catch (err) {
+                    console.error('[Local Server] Error removing server marker during shutdown:', getErrorMessage(err));
+                }
+                process.exit(0);
+            })();
+
+            return shutdownPromise;
         };
+        // Штатная выкладка заранее закрывает вход новым запускам этим
+        // сигналом и ждёт restartBlockingRuns=0 ещё ДО systemctl restart.
+        // Поэтому даже системный 90-секундный TimeoutStopSec не участвует.
+        process.on('SIGUSR2', () => {
+            chatRunRegistry.beginShutdownDrain();
+            console.log('[shutdown-drain] новые ходы закрыты, сообщения остаются в очереди до перезапуска');
+        });
         process.on('SIGTERM', () => void shutdownRuntimeServices());
         process.on('SIGINT', () => void shutdownRuntimeServices());
     } catch (error) {

@@ -119,6 +119,11 @@ Environment=PLATFORM_OWNER_WEB_USER_IDS=1
 Restart=on-failure
 RestartSec=10
 
+# SIGTERM переводит сервер в drain: новые сообщения остаются в очереди, а
+# активный Codex заканчивает ход до остановки Node. Обычных 90 секунд мало для
+# длинной задачи; шесть часов — страховка от обрыва и всё же конечный предел.
+TimeoutStopSec=6h
+
 # --- Resource limits ---
 # Same per-instance budget as Account 1/2 (~12% of host RAM, 70% of one CPU).
 # This is a WHOLE-INSTANCE ceiling, not a per-user one - systemd has no

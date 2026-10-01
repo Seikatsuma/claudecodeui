@@ -1,8 +1,7 @@
 import path from 'node:path';
 
-import { projectsDb, sessionsDb } from '@/modules/database/index.js';
-import { chatGroupsDb } from '@/modules/database/repositories/chat-groups.js';
-import { isSurvivorRunning, listSurvivors } from '@/modules/providers/list/claude/survivor-runs.js';
+import { chatGroupsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { isSurvivorRunning, listSurvivors } from '@/modules/providers/index.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
@@ -63,6 +62,14 @@ const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
  * path all consult it instead of asking each provider runtime individually.
  */
 const runs = new Map<string, ChatRun>();
+
+/**
+ * A deliberate server restart first closes this gate and only then waits for
+ * non-survivable provider runs (notably Codex) to finish. Messages received
+ * during that window fall through to the durable chat queue instead of
+ * starting work that the imminent restart would abort.
+ */
+let acceptingNewRuns = true;
 
 async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<void> {
   let row = sessionsDb.getSessionById(appSessionId);
@@ -264,6 +271,9 @@ export const chatRunRegistry = {
     connection: RealtimeClientConnection;
     userId: string | number | null;
   }): ChatRun | null {
+    if (!acceptingNewRuns) {
+      return null;
+    }
     const existing = runs.get(input.appSessionId);
     if (existing && existing.status === 'running') {
       return null;
@@ -325,6 +335,22 @@ export const chatRunRegistry = {
       }));
     const liveIds = new Set(live.map((run) => run.sessionId));
     return [...live, ...listSurvivors().filter((run) => !liveIds.has(run.sessionId))] as typeof live;
+  },
+
+  /**
+   * Stops new provider runs before a graceful server restart. The websocket
+   * handler interprets a rejected start as "queue this message", so nothing
+   * typed while the deployment is draining is lost.
+   *
+   * Consumed by the server entrypoint's SIGTERM/SIGINT shutdown path.
+   */
+  beginShutdownDrain(): void {
+    acceptingNewRuns = false;
+  },
+
+  /** Used by health reporting and shutdown diagnostics. */
+  isShutdownDraining(): boolean {
+    return !acceptingNewRuns;
   },
 
   /**
@@ -415,5 +441,6 @@ export const chatRunRegistry = {
    */
   clearAll(): void {
     runs.clear();
+    acceptingNewRuns = true;
   },
 };
