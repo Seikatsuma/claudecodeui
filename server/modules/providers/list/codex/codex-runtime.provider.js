@@ -21,36 +21,17 @@ import {
   normalizeImageDescriptors
 } from '@/shared/image-attachments.js';
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
-import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
+import {
+  createCompleteMessage,
+  createNormalizedMessage,
+  readCodexContextTokenUsage,
+} from '@/shared/utils.js';
 
 const activeCodexSessions = new Map();
 
-function readUsageNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function extractCodexTokenBudget(event) {
   const info = event?.info || event?.payload?.info || event?.usage?.info;
-  const usage = info?.total_token_usage || event?.usage?.total_token_usage || event?.usage;
-  if (!usage || typeof usage !== 'object') {
-    return null;
-  }
-
-  const inputTokens = readUsageNumber(usage.input_tokens);
-  const outputTokens = readUsageNumber(usage.output_tokens);
-  const used = readUsageNumber(usage.total_tokens) || inputTokens + outputTokens;
-
-  return {
-    used,
-    total: readUsageNumber(info?.model_context_window || event?.usage?.model_context_window) || 200000,
-    inputTokens,
-    outputTokens,
-    breakdown: {
-      input: inputTokens,
-      output: outputTokens,
-    },
-  };
+  return readCodexContextTokenUsage(info);
 }
 
 /**

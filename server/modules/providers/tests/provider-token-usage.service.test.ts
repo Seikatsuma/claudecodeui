@@ -7,7 +7,7 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 
 import { createProviderTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, readCodexContextTokenUsage } from '@/shared/utils.js';
 
 function createSessionRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -85,7 +85,7 @@ test('token usage lookup requires only the app-facing session id for Claude', as
   }
 });
 
-test('Codex token usage uses the latest token_count snapshot', async () => {
+test('Codex token usage uses the current context instead of cumulative session spend', async () => {
   const tempDirectory = await mkdtemp(path.join(tmpdir(), 'provider-token-usage-codex-'));
   const sessionFilePath = path.join(tempDirectory, 'rollout-provider-session.jsonl');
 
@@ -97,6 +97,7 @@ test('Codex token usage uses the latest token_count snapshot', async () => {
           type: 'token_count',
           info: {
             total_token_usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14 },
+            last_token_usage: { input_tokens: 8, output_tokens: 2, total_tokens: 10 },
             model_context_window: 100_000,
           },
         },
@@ -106,7 +107,8 @@ test('Codex token usage uses the latest token_count snapshot', async () => {
         payload: {
           type: 'token_count',
           info: {
-            total_token_usage: { input_tokens: 40, output_tokens: 9, total_tokens: 49 },
+            total_token_usage: { input_tokens: 2_000_000, output_tokens: 90_000, total_tokens: 2_090_000 },
+            last_token_usage: { input_tokens: 40, output_tokens: 9, total_tokens: 49 },
             model_context_window: 250_000,
           },
         },
@@ -130,6 +132,19 @@ test('Codex token usage uses the latest token_count snapshot', async () => {
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
   }
+});
+
+test('Codex token usage keeps older transcripts working when no current-context field exists', () => {
+  assert.deepEqual(readCodexContextTokenUsage({
+    total_token_usage: { input_tokens: 30, output_tokens: 5, total_tokens: 35 },
+    model_context_window: 200_000,
+  }), {
+    used: 35,
+    total: 200_000,
+    inputTokens: 30,
+    outputTokens: 5,
+    breakdown: { input: 30, output: 5 },
+  });
 });
 
 test('OpenCode token usage resolves its provider-native id from the session row', async () => {
