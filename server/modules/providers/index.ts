@@ -2,8 +2,15 @@ export { sessionSynchronizerService } from './services/session-synchronizer.serv
 export { providerSkillsService } from './services/skills.service.js';
 export { providerMcpService } from './services/mcp.service.js';
 export { providerRuntimeService } from './services/provider-runtime.service.js';
-// Survivor status: used by WebSocket to prevent a second run while a Claude process from the previous server still owns the chat.
-export { isSurvivorRunning, listSurvivors } from './list/claude/survivor-runs.js';
+// Survivor status: prevents a second run while a detached Claude/Codex process
+// from the previous web-server generation still owns the chat.
+export {
+  getSurvivorPhase,
+  getSurvivorProvider,
+  isSurvivorRunning,
+  listSurvivors,
+  stopSurvivor,
+} from './list/claude/survivor-runs.js';
 export { getLiveLimits, recordRateLimitEvent } from './services/usage-limits.store.js';
 
 // providerModelsService: used by Commands to list models and resolve the active session model.

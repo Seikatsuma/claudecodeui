@@ -32,7 +32,7 @@ import path from 'node:path';
 import { verifyAgentRoom, wrapInAgentRoom } from './agent-rooms.js';
 
 let shuttingDown = false;
-/** appSessionId → { pid, providerSessionId, configDir, startedAt, transcriptPath, transcriptMtime } */
+/** appSessionId → { pid, provider, providerSessionId, configDir, eventPath, startedAt, transcriptPath, transcriptMtime } */
 const survivors = new Map();
 let pollTimer = null;
 
@@ -53,6 +53,32 @@ function writeRecord(pid, record) {
   }
 }
 
+/**
+ * Registers a provider process which owns its own lifetime rather than the
+ * web server's lifetime. Claude uses `spawnSurvivableClaude`; Codex uses a
+ * detached worker and calls this immediately after spawning it.
+ */
+export function registerSurvivableProcess(pid, context = {}) {
+  if (!pid || !context.appSessionId) return null;
+  const record = {
+    pid,
+    provider: context.provider || 'claude',
+    appSessionId: context.appSessionId,
+    providerSessionId: context.providerSessionId || null,
+    configDir: context.configDir || null,
+    eventPath: context.eventPath || null,
+    startedAt: context.startedAt || Date.now(),
+  };
+  writeRecord(pid, record);
+  return recordPath(pid);
+}
+
+/** Normal completion while the owning server is still alive. */
+export function forgetSurvivableProcess(pid) {
+  if (!pid) return;
+  removeRecord(pid);
+}
+
 function removeRecord(pid) {
   try {
     fs.unlinkSync(recordPath(pid));
@@ -62,7 +88,11 @@ function removeRecord(pid) {
 }
 
 /** Жив ли процесс и это ли всё ещё агент Claude (PID мог достаться другой программе). */
-function isAgentAlive(pid) {
+function isAgentAlive(recordOrPid) {
+  const record = typeof recordOrPid === 'object'
+    ? recordOrPid
+    : { pid: recordOrPid, provider: 'claude' };
+  const pid = Number(record?.pid);
   try {
     process.kill(pid, 0);
   } catch {
@@ -70,6 +100,10 @@ function isAgentAlive(pid) {
   }
   try {
     const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    if (record.provider === 'codex') {
+      return cmdline.includes('codex-worker.provider')
+        && cmdline.includes('--cloudcli-codex-worker');
+    }
     return cmdline.includes('claude') && cmdline.includes('stream-json');
   } catch {
     return false;
@@ -103,12 +137,11 @@ export function spawnSurvivableClaude(spawnOptions, context = {}) {
   verifyAgentRoom(child.pid, room);
 
   if (child.pid && context.appSessionId) {
-    writeRecord(child.pid, {
-      pid: child.pid,
+    registerSurvivableProcess(child.pid, {
+      provider: 'claude',
       appSessionId: context.appSessionId,
       providerSessionId: context.providerSessionId || null,
       configDir: context.configDir || null,
-      startedAt: Date.now(),
     });
     child.once('exit', () => {
       // Выход во время остановки сервера — не наш случай: сервер умирает, а
@@ -164,6 +197,7 @@ export function noteSurvivorProviderSession(appSessionId, providerSessionId) {
 }
 
 function findTranscript(record) {
+  if (record.provider === 'codex') return record.eventPath || null;
   if (!record.providerSessionId || !record.configDir) return null;
   const root = path.join(record.configDir, 'projects');
   let dirs = [];
@@ -175,6 +209,41 @@ function findTranscript(record) {
   for (const dir of dirs) {
     const candidate = path.join(root, dir, `${record.providerSessionId}.jsonl`);
     if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function findCodexTranscript(record) {
+  if (!record.providerSessionId) return null;
+  const root = path.join(record.configDir || path.join(os.homedir(), '.codex'), 'sessions');
+  let names = [];
+  try {
+    names = fs.readdirSync(root, { recursive: true });
+  } catch {
+    return null;
+  }
+  const suffix = `${record.providerSessionId}.jsonl`;
+  const relative = names.find((name) => String(name).endsWith(suffix));
+  return relative ? path.join(root, String(relative)) : null;
+}
+
+function readCodexProviderSession(eventPath) {
+  if (!eventPath) return null;
+  try {
+    const text = fs.readFileSync(eventPath, 'utf8');
+    for (const line of text.split('\n')) {
+      if (!line) continue;
+      try {
+        const event = JSON.parse(line);
+        if (event?.type === 'thread.started') {
+          return event.thread_id || event.id || null;
+        }
+      } catch {
+        // A final line can still be in flight; keep scanning complete lines.
+      }
+    }
+  } catch {
+    // The worker creates the file before the first event; it may still be empty.
   }
   return null;
 }
@@ -294,8 +363,78 @@ export function readTranscriptPhase(transcriptPath) {
   return { phase: last, detail: null };
 }
 
+/** Current Codex phase from the worker's durable raw SDK event stream. */
+export function readCodexEventPhase(eventPath) {
+  if (!eventPath) return null;
+  let text;
+  try {
+    const fd = fs.openSync(eventPath, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, PHASE_TAIL_BYTES);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      text = buffer.toString('utf8');
+      if (length < size) text = text.slice(text.indexOf('\n') + 1);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+
+  let phase = null;
+  for (const line of text.split('\n')) {
+    if (!line) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event?.type === 'turn.completed' || event?.type === 'turn.failed' || event?.type === 'worker.completed') {
+      phase = null;
+      continue;
+    }
+    if (event?.type === 'turn.started') {
+      phase = { phase: 'thinking', detail: null };
+      continue;
+    }
+    if (!event?.type?.startsWith('item.')) continue;
+    const item = event.item;
+    switch (item?.type) {
+      case 'reasoning':
+        phase = { phase: 'thinking', detail: null };
+        break;
+      case 'agent_message':
+        phase = { phase: 'writing', detail: null };
+        break;
+      case 'command_execution':
+        phase = { phase: 'tool', detail: 'Bash' };
+        break;
+      case 'file_change':
+        phase = { phase: 'tool', detail: 'Edit' };
+        break;
+      case 'mcp_tool_call':
+        phase = { phase: 'tool', detail: item.tool || item.server || 'MCP' };
+        break;
+      case 'web_search':
+        phase = { phase: 'tool', detail: 'WebSearch' };
+        break;
+      case 'todo_list':
+        phase = { phase: 'thinking', detail: null };
+        break;
+      default:
+        break;
+    }
+  }
+  return phase;
+}
+
 function refreshPhase(survivor) {
-  const next = readTranscriptPhase(survivor.transcriptPath);
+  const next = survivor.provider === 'codex'
+    ? readCodexEventPhase(survivor.eventPath)
+    : readTranscriptPhase(survivor.transcriptPath);
   const changed = (next?.phase ?? null) !== (survivor.phase?.phase ?? null)
     || (next?.detail ?? null) !== (survivor.phase?.detail ?? null);
   survivor.phase = next;
@@ -308,9 +447,9 @@ function refreshPhase(survivor) {
  * `onPhase(appSessionId, phase)` — сменился этап работы (см. readTranscriptPhase),
  * `onGone(appSessionId)` — агент закончил.
  *
- * @param {{ onTranscriptChange?: (appSessionId: string) => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null) => void, onGone?: (appSessionId: string) => void, pollMs?: number }} [options]
+ * @param {{ onTranscriptChange?: (appSessionId: string, provider: 'claude' | 'codex') => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null, provider: 'claude' | 'codex') => void, onGone?: (appSessionId: string, provider: 'claude' | 'codex') => void, onProviderSession?: (appSessionId: string, providerSessionId: string, provider: 'claude' | 'codex', transcriptPath: string | null) => void, pollMs?: number }} [options]
  */
-export function adoptSurvivors({ onTranscriptChange = (_id) => {}, onPhase = (_id, _phase) => {}, onGone = (_id) => {}, pollMs = 3000 } = {}) {
+export function adoptSurvivors({ onTranscriptChange = (_id, _provider) => {}, onPhase = (_id, _phase, _provider) => {}, onGone = (_id, _provider) => {}, onProviderSession = (_id, _providerSessionId, _provider) => {}, pollMs = 3000 } = {}) {
   shuttingDown = false;
   let files = [];
   try {
@@ -327,8 +466,22 @@ export function adoptSurvivors({ onTranscriptChange = (_id) => {}, onPhase = (_i
     } catch {
       continue;
     }
-    if (!record?.pid || !record.appSessionId || !isAgentAlive(record.pid)) {
+    record.provider ||= 'claude';
+    if (!record?.pid || !record.appSessionId) {
       removeRecord(record?.pid ?? name.replace(/\.json$/, ''));
+      continue;
+    }
+    if (record.provider === 'codex' && !record.providerSessionId) {
+      record.providerSessionId = readCodexProviderSession(record.eventPath);
+      if (record.providerSessionId) {
+        writeRecord(record.pid, record);
+      }
+    }
+    if (record.provider === 'codex' && record.providerSessionId) {
+      onProviderSession(record.appSessionId, record.providerSessionId, record.provider, findCodexTranscript(record));
+    }
+    if (!isAgentAlive(record)) {
+      removeRecord(record.pid);
       continue;
     }
     const transcriptPath = findTranscript(record);
@@ -340,27 +493,34 @@ export function adoptSurvivors({ onTranscriptChange = (_id) => {}, onPhase = (_i
     };
     refreshPhase(survivor);
     survivors.set(record.appSessionId, survivor);
-    console.log(`[survivor-runs] чат ${record.appSessionId} пережил перезапуск (PID ${record.pid}), продолжаю показывать его работу`);
+    console.log(`[survivor-runs] чат ${record.appSessionId} (${record.provider}) пережил перезапуск (PID ${record.pid}), продолжаю показывать его работу`);
   }
 
   if (pollTimer) clearInterval(pollTimer);
   if (pollMs > 0) {
-    pollTimer = setInterval(() => pollSurvivors({ onTranscriptChange, onPhase, onGone }), pollMs);
+    pollTimer = setInterval(() => pollSurvivors({ onTranscriptChange, onPhase, onGone, onProviderSession }), pollMs);
     pollTimer.unref?.();
   }
   return listSurvivors();
 }
 
 /**
- * @param {{ onTranscriptChange?: (appSessionId: string) => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null) => void, onGone?: (appSessionId: string) => void }} [options]
+ * @param {{ onTranscriptChange?: (appSessionId: string, provider: 'claude' | 'codex') => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null, provider: 'claude' | 'codex') => void, onGone?: (appSessionId: string, provider: 'claude' | 'codex') => void, onProviderSession?: (appSessionId: string, providerSessionId: string, provider: 'claude' | 'codex', transcriptPath: string | null) => void }} [options]
  */
-export function pollSurvivors({ onTranscriptChange = (_id) => {}, onPhase = (_id, _phase) => {}, onGone = (_id) => {} } = {}) {
+export function pollSurvivors({ onTranscriptChange = (_id, _provider) => {}, onPhase = (_id, _phase, _provider) => {}, onGone = (_id, _provider) => {}, onProviderSession = (_id, _providerSessionId, _provider) => {} } = {}) {
   for (const [appSessionId, survivor] of survivors) {
-    if (!isAgentAlive(survivor.pid)) {
+    if (!isAgentAlive(survivor)) {
       survivors.delete(appSessionId);
       removeRecord(survivor.pid);
-      onGone(appSessionId);
+      onGone(appSessionId, survivor.provider || 'claude');
       continue;
+    }
+    if (survivor.provider === 'codex' && !survivor.providerSessionId) {
+      survivor.providerSessionId = readCodexProviderSession(survivor.eventPath);
+      if (survivor.providerSessionId) {
+        writeRecord(survivor.pid, survivor);
+        onProviderSession(appSessionId, survivor.providerSessionId, survivor.provider, findCodexTranscript(survivor));
+      }
     }
     if (!survivor.transcriptPath) {
       survivor.transcriptPath = findTranscript(survivor);
@@ -368,9 +528,9 @@ export function pollSurvivors({ onTranscriptChange = (_id) => {}, onPhase = (_id
     const mtime = survivor.transcriptPath ? mtimeOf(survivor.transcriptPath) : 0;
     if (mtime && mtime !== survivor.transcriptMtime) {
       survivor.transcriptMtime = mtime;
-      onTranscriptChange(appSessionId);
+      onTranscriptChange(appSessionId, survivor.provider || 'claude');
       if (refreshPhase(survivor)) {
-        onPhase(appSessionId, survivor.phase);
+        onPhase(appSessionId, survivor.phase, survivor.provider || 'claude');
       }
     }
   }
@@ -385,10 +545,14 @@ export function getSurvivorPhase(appSessionId) {
   return survivors.get(appSessionId)?.phase ?? null;
 }
 
+export function getSurvivorProvider(appSessionId) {
+  return survivors.get(appSessionId)?.provider || null;
+}
+
 export function listSurvivors() {
   return Array.from(survivors.values()).map((survivor) => ({
     sessionId: survivor.appSessionId,
-    provider: 'claude',
+    provider: survivor.provider || 'claude',
     startedAt: survivor.startedAt,
     lastSeq: 0,
   }));

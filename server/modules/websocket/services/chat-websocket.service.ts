@@ -3,7 +3,13 @@ import path from 'node:path';
 import type { WebSocket } from 'ws';
 
 import { chatMessageQueueDb, sessionsDb, type StoredQueuedChatMessage } from '@/modules/database/index.js';
-import { providerModelsService } from '@/modules/providers/index.js';
+import {
+  getSurvivorPhase,
+  getSurvivorProvider,
+  isSurvivorRunning,
+  providerModelsService,
+  stopSurvivor,
+} from '@/modules/providers/index.js';
 import { chatRunRegistry, onChatRunCompleted } from '@/modules/websocket/services/chat-run-registry.service.js';
 import {
   broadcastChatQueue,
@@ -21,7 +27,6 @@ import {
   readClientMessageId,
   rememberAcceptedSend,
 } from '@/modules/websocket/services/chat-send-ledger.service.js';
-import { getSurvivorPhase, isSurvivorRunning, stopSurvivor } from '@/modules/providers/list/claude/survivor-runs.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import {
   isImageAttachmentDescriptor,
@@ -672,9 +677,9 @@ export function initChatQueueDispatch(dependencies: ChatWebSocketDependencies): 
   onChatRunCompleted(() => {
     dispatchChatQueues();
   });
-  // Перезапуск сайта (выкатка, перезагрузка) не должен задерживать очередь:
-  // ход, за которым она стояла, к этому моменту уже оборван.
-  dispatchChatQueues();
+  // Первый обход делает server/index.ts после adoptSurvivors(). Иначе
+  // очередь могла запустить второй ход за миг до того, как новый
+  // сайт увидит живой Claude/Codex worker прошлого поколения.
   startChatQueueHeartbeat();
 }
 
@@ -698,6 +703,7 @@ async function handleChatAbort(
   // Агент пережил перезапуск сайта: канала к нему у сервера нет, остановить
   // можно только сигналом процессу.
   if ((!run || run.status !== 'running') && isSurvivorRunning(sessionId)) {
+    const survivorProvider = getSurvivorProvider(sessionId) || 'claude';
     stopSurvivor(sessionId);
     // «Работа завершена» с отметкой отмены: «чат свободен» вкладка может
     // отбросить как устаревший (см. onGone в server/index.ts).
@@ -705,7 +711,7 @@ async function handleChatAbort(
       kind: 'complete',
       sessionId,
       actualSessionId: sessionId,
-      provider: 'claude',
+      provider: survivorProvider,
       exitCode: 0,
       aborted: true,
       timestamp: new Date().toISOString(),

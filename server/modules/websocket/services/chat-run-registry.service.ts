@@ -64,10 +64,9 @@ const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
 const runs = new Map<string, ChatRun>();
 
 /**
- * A deliberate server restart first closes this gate and only then waits for
- * non-survivable provider runs (notably Codex) to finish. Messages received
- * during that window fall through to the durable chat queue instead of
- * starting work that the imminent restart would abort.
+ * A deliberate server restart first closes this gate. Claude and Codex own
+ * survivable processes and continue across the restart; any provider without
+ * that capability is allowed to finish before the web process exits.
  */
 let acceptingNewRuns = true;
 

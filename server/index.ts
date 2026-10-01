@@ -191,7 +191,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Public health check endpoint (no authentication required)
 app.get('/health', (req, res) => {
     const activeRuns = chatRunRegistry.listRunningRuns();
-    const restartBlockingRuns = activeRuns.filter((run) => run.provider !== 'claude');
+    const restartBlockingRuns = activeRuns.filter(
+        (run) => run.provider !== 'claude' && run.provider !== 'codex',
+    );
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
@@ -557,12 +559,12 @@ async function startServer() {
                 },
                 // Этап по хвосту переписки — иначе плашка до конца работы
                 // писала «Ожидает модель», и чат выглядел зависшим.
-                onPhase: (appSessionId, phase) => {
+                onPhase: (appSessionId, phase, provider) => {
                     if (!phase) return;
                     const event = JSON.stringify({
                         kind: 'run_phase',
                         sessionId: appSessionId,
-                        provider: 'claude',
+                        provider,
                         text: phase.phase,
                         detail: phase.detail,
                         timestamp: new Date().toISOString(),
@@ -571,7 +573,7 @@ async function startServer() {
                         if (client.readyState === WS_OPEN_STATE) client.send(event);
                     });
                 },
-                onGone: (appSessionId) => {
+                onGone: (appSessionId, provider) => {
                     // Порядок важен: страница не перечитывает переписку, пока
                     // считает чат работающим. Сначала «чат свободен», потом
                     // «перечитай» — иначе последний ответ агента не появлялся
@@ -587,7 +589,7 @@ async function startServer() {
                         kind: 'complete',
                         sessionId: appSessionId,
                         actualSessionId: appSessionId,
-                        provider: 'claude',
+                        provider,
                         exitCode: 0,
                         success: true,
                         timestamp: new Date().toISOString(),
@@ -599,7 +601,21 @@ async function startServer() {
                     // очередь этого чата может идти дальше.
                     dispatchChatQueues();
                 },
+                // Codex can discover its native thread id after the old web
+                // process has already exited. Persist the mapping when the
+                // new server adopts the worker so history/resume still use
+                // the same conversation.
+                onProviderSession: (appSessionId, providerSessionId, _provider, transcriptPath) => {
+                    sessionsDb.assignProviderSessionId(appSessionId, providerSessionId);
+                    if (transcriptPath) {
+                        sessionsDb.setJsonlPathIfMissing(appSessionId, transcriptPath);
+                    }
+                    void broadcastSessionUpserted(appSessionId).catch(() => {});
+                },
             });
+            // Survivor map is now authoritative: queued messages cannot race
+            // a still-running process from the previous server generation.
+            dispatchChatQueues();
 
             // Выжимки переписки для поиска — заранее и не сразу после старта:
             // первый поиск после выкатки не ждёт разбора всей переписки.
@@ -628,9 +644,8 @@ async function startServer() {
             shutdownPromise = (async () => {
                 // Сразу закрываем вход новым запускам: сообщения, пришедшие во
                 // время ожидания, остаются в серверной очереди и уйдут после
-                // подъёма новой версии. Claude умеет пережить перезапуск через
-                // survivor-runs, а Codex при разрыве канала пишет turn_aborted —
-                // поэтому его (и другие не-Claude runtime) сначала дожидаемся.
+                // подъёма новой версии. Claude и Codex живут отдельно от сайта и
+                // усыновляются новым сервером; ждём только остальные, неживучие runtime.
                 chatRunRegistry.beginShutdownDrain();
                 markShuttingDown();
 
@@ -639,7 +654,7 @@ async function startServer() {
                 while (true) {
                     const blockingRuns = chatRunRegistry
                         .listRunningRuns()
-                        .filter((run) => run.provider !== 'claude');
+                        .filter((run) => run.provider !== 'claude' && run.provider !== 'codex');
                     if (blockingRuns.length === 0) {
                         break;
                     }
