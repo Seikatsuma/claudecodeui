@@ -8,6 +8,7 @@ import {
   getStoredAuthToken,
   storeAuthToken,
 } from '../../../utils/api';
+import { getDoorBase } from '../../../utils/doors';
 import {
   MAX_FILE_UPLOAD_COUNT,
   MAX_FILE_UPLOAD_SIZE_BYTES,
@@ -117,7 +118,7 @@ const uploadFormDataWithProgress = (
   new Promise<UploadResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
 
-    xhr.open('POST', `/api/file-tree/projects/${encodeURIComponent(projectId)}/files/upload`);
+    xhr.open('POST', `${getDoorBase()}/api/file-tree/projects/${encodeURIComponent(projectId)}/files/upload`);
 
     const token = getStoredAuthToken();
     if (!IS_PLATFORM && token) {

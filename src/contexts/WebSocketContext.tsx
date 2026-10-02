@@ -248,6 +248,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       case 'recreate':
         if (socket && socket.readyState === WebSocket.CONNECTING) {
           flipDoor('рукопожатие чата зависло');
+          failedAttemptsRef.current = 0; // на новом входе счёт неудач начинается заново
         }
         forceReconnect(
           socket && socket.readyState === WebSocket.CONNECTING

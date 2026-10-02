@@ -1,6 +1,6 @@
 import { IS_PLATFORM } from "../shared/utils";
 
-import { doorFetch } from "./doors";
+import { doorFetch, getDoorBase } from "./doors";
 
 export const AUTH_TOKEN_REFRESHED_EVENT = 'auth-token-refreshed';
 export const AUTH_SESSION_EXPIRED_EVENT = 'auth-session-expired';
@@ -316,7 +316,7 @@ export const api = {
     if (scope.projectId) params.set('projectId', scope.projectId);
     if (scope.serverScope) params.set('serverScope', scope.serverScope);
     if (token) params.set('token', token);
-    return `/api/providers/search/sessions?${params.toString()}`;
+    return `${getDoorBase()}/api/providers/search/sessions?${params.toString()}`;
   },
   createProject: (projectData) =>
     authenticatedFetch('/api/projects/create-project', {

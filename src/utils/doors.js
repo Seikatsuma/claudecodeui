@@ -12,8 +12,9 @@
 // Теперь страница сама уходит на второй адрес, когда первый молчит, и
 // запоминает, какой сработал (на 15 минут, в этой вкладке).
 //
-// Запросы на чтение при проверке входа (`gate`) повторяются с короткой
-// паузой, по очереди на оба адреса. Остальные запросы лишь идут по
+// Запросы на чтение при проверке входа (`gate`) повторяются (пауза 0,5 с
+// между попытками), по очереди на оба адреса; зависшее тело ответа считается
+// таким же сбоем, как зависшие заголовки. Остальные запросы лишь идут по
 // запомненному адресу: резать их по времени нельзя — тяжёлый запрос законно
 // отвечает долго, а повтор удвоил бы работу сервера.
 //
@@ -29,6 +30,7 @@ const STORAGE_KEY = 'ccui-door';
 const STICKY_MS = 15 * 60 * 1000;
 export const GATE_ATTEMPT_TIMEOUT_MS = 7000;
 export const GATE_MAX_ATTEMPTS = 4;
+export const GATE_RETRY_PAUSE_MS = 500;
 
 const reserveOrigin = () => RESERVE_BY_HOST[window.location.host] || null;
 
@@ -105,17 +107,28 @@ export const doorFetch = async (path, options = {}, { gate = false } = {}) => {
 
   let lastError = null;
   for (let attempt = 0; attempt < GATE_MAX_ATTEMPTS; attempt += 1) {
+    const startedOnReserve = useReserve;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), GATE_ATTEMPT_TIMEOUT_MS);
     try {
       const response = await fetch(getDoorBase() + path, { ...options, signal: controller.signal });
+      // Тело ждём в тех же 7 секундах: заморозка может поймать соединение и
+      // после заголовков. Читаем копию — оригинал остаётся целым для вызывающего.
+      await response.clone().arrayBuffer();
       clearTimeout(timer);
       markDoorWorked();
       return response;
     } catch (error) {
       clearTimeout(timer);
       lastError = error;
-      flipDoor(`проверка входа не прошла (${attempt + 1} из ${GATE_MAX_ATTEMPTS})`);
+      // Меняем вход, только если его ещё не сменил параллельный запрос или
+      // чат: иначе два зависших запроса вернули бы вход на мёртвый адрес.
+      if (useReserve === startedOnReserve) {
+        flipDoor(`проверка входа не прошла (${attempt + 1} из ${GATE_MAX_ATTEMPTS})`);
+      }
+      if (attempt < GATE_MAX_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, GATE_RETRY_PAUSE_MS));
+      }
     }
   }
   throw lastError;
