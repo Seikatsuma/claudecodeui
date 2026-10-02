@@ -280,6 +280,7 @@ export async function queryCodex(command, options = {}, ws, context) {
     workerHandle = await launchCodexWorker({
       appSessionId: sessionId,
       providerSessionId,
+      sessionSummary,
       workingDirectory,
       sandboxMode,
       approvalPolicy,

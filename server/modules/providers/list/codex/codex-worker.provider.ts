@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { appendFile, mkdir, open, writeFile } from 'node:fs/promises';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,6 +23,7 @@ import {
 export type CodexWorkerJob = {
   appSessionId: string;
   providerSessionId: string | null;
+  sessionSummary?: string;
   workingDirectory: string;
   model?: string;
   effort?: ModelReasoningEffort;
@@ -49,6 +51,10 @@ const POLL_MS = 100;
 const CODEX_NOTIFY_MARKER = 'CLOUDCLI_CODEX_NOTIFY';
 const CODEX_NOTIFY_SESSION_ID = 'CLOUDCLI_CODEX_NOTIFY_SESSION_ID';
 const CODEX_NOTIFY_DATABASE_PATH = 'CLOUDCLI_CODEX_NOTIFY_DATABASE_PATH';
+const CODEX_NOTIFY_CLAIM_PATH = 'CLOUDCLI_CODEX_NOTIFY_CLAIM_PATH';
+const CODEX_WORKER_NOTIFY_MARKER = 'cloudcli-worker';
+const CODEX_RUN_COMPLETE_NOTIFY_MARKER = 'cloudcli-run-complete';
+const execFileAsync = promisify(execFile);
 
 function liveRunsDir(): string {
   return process.env.CLOUDCLI_LIVE_RUNS_DIR
@@ -68,6 +74,7 @@ function safeSessionPart(value: string): string {
 export function buildCodexCliEnvironment(
   appSessionId: string,
   source: NodeJS.ProcessEnv = process.env,
+  notificationClaimPath?: string,
 ): Record<string, string> {
   const environment = Object.fromEntries(
     Object.entries(source).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
@@ -76,17 +83,63 @@ export function buildCodexCliEnvironment(
   delete environment[CODEX_NOTIFY_MARKER];
   delete environment[CODEX_NOTIFY_SESSION_ID];
   delete environment[CODEX_NOTIFY_DATABASE_PATH];
+  delete environment[CODEX_NOTIFY_CLAIM_PATH];
 
   if (typeof appSessionId !== 'string' || appSessionId.trim().length === 0) {
     return environment;
   }
 
   const homeDirectory = environment.HOME || os.homedir();
-  environment[CODEX_NOTIFY_MARKER] = 'cloudcli-chat';
+  // The stock Codex `agent-turn-complete` callback may fire several times
+  // inside one SDK run. It sees this worker marker and fails closed; only the
+  // explicit completion call below receives the run-complete marker.
+  environment[CODEX_NOTIFY_MARKER] = CODEX_WORKER_NOTIFY_MARKER;
   environment[CODEX_NOTIFY_SESSION_ID] = appSessionId.trim();
   environment[CODEX_NOTIFY_DATABASE_PATH] = environment.DATABASE_PATH
     || path.join(homeDirectory, '.cloudcli', 'auth.db');
+  if (notificationClaimPath) {
+    environment[CODEX_NOTIFY_CLAIM_PATH] = notificationClaimPath;
+  }
   return environment;
+}
+
+type CodexCompletionNotification = {
+  appSessionId: string;
+  providerSessionId: string | null;
+  sessionSummary?: string;
+  finalAnswer: string;
+  error?: string;
+  notificationClaimPath: string;
+};
+
+async function notifyCodexRunComplete(notification: CodexCompletionNotification): Promise<void> {
+  const scriptPath = path.join(os.homedir(), 'scripts', 'codex-notify.sh');
+  if (!fs.existsSync(scriptPath)) {
+    return;
+  }
+
+  const baseEnvironment = buildCodexCliEnvironment(
+    notification.appSessionId,
+    process.env,
+    notification.notificationClaimPath,
+  );
+  const payload = JSON.stringify({
+    type: 'cloudcli-run-complete',
+    'app-session-id': notification.appSessionId,
+    'thread-id': notification.providerSessionId,
+    'session-title': notification.sessionSummary || '',
+    'last-assistant-message': notification.finalAnswer,
+    error: notification.error || '',
+  });
+
+  await execFileAsync(scriptPath, [payload], {
+    env: {
+      ...baseEnvironment,
+      [CODEX_NOTIFY_MARKER]: CODEX_RUN_COMPLETE_NOTIFY_MARKER,
+    },
+    timeout: 30_000,
+    maxBuffer: 256 * 1024,
+  });
 }
 
 function workerLaunchArgs(): { command: string; args: string[] } {
@@ -262,6 +315,9 @@ async function runWorker(): Promise<void> {
   const job = await readWorkerJob();
   const abortController = new AbortController();
   let aborted = false;
+  let finalAnswer = '';
+  let providerSessionId = job.providerSessionId;
+  const notificationClaimPath = `${job.eventPath}.result-notified`;
   const abort = () => {
     aborted = true;
     abortController.abort();
@@ -272,7 +328,7 @@ async function runWorker(): Promise<void> {
   try {
     const codex = new Codex({
       config: { model_reasoning_summary: 'detailed' },
-      env: buildCodexCliEnvironment(job.appSessionId),
+      env: buildCodexCliEnvironment(job.appSessionId, process.env, notificationClaimPath),
     });
     const threadOptions = {
       workingDirectory: job.workingDirectory,
@@ -287,15 +343,38 @@ async function runWorker(): Promise<void> {
       : codex.startThread(threadOptions);
     const streamedTurn = await thread.runStreamed(job.turnInput, { signal: abortController.signal });
     for await (const event of streamedTurn.events) {
+      if (event.type === 'thread.started') {
+        providerSessionId = event.thread_id || providerSessionId;
+      }
+      if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+        finalAnswer = event.item.text || finalAnswer;
+      }
       await appendEvent(job.eventPath, event);
     }
     await appendEvent(job.eventPath, { type: 'worker.completed', exitCode: 0, aborted });
+    await notifyCodexRunComplete({
+      appSessionId: job.appSessionId,
+      providerSessionId,
+      sessionSummary: job.sessionSummary,
+      finalAnswer,
+      notificationClaimPath,
+    }).catch(() => undefined);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!aborted) {
       await appendEvent(job.eventPath, { type: 'worker.error', message });
     }
     await appendEvent(job.eventPath, { type: 'worker.completed', exitCode: aborted ? 0 : 1, aborted });
+    if (!aborted) {
+      await notifyCodexRunComplete({
+        appSessionId: job.appSessionId,
+        providerSessionId,
+        sessionSummary: job.sessionSummary,
+        finalAnswer,
+        error: message,
+        notificationClaimPath,
+      }).catch(() => undefined);
+    }
     process.exitCode = aborted ? 0 : 1;
   }
 }
