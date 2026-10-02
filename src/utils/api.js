@@ -1,5 +1,7 @@
 import { IS_PLATFORM } from "../shared/utils";
 
+import { doorFetch } from "./doors";
+
 export const AUTH_TOKEN_REFRESHED_EVENT = 'auth-token-refreshed';
 export const AUTH_SESSION_EXPIRED_EVENT = 'auth-session-expired';
 
@@ -111,12 +113,12 @@ const isShareableRead = (options) => {
  * @param {RequestInit} [options]
  * @returns {Promise<Response>}
  */
-export const authenticatedFetch = (url, options = {}) => {
+export const authenticatedFetch = (url, options = {}, doorOptions = {}) => {
   if (isShareableRead(options)) {
     const key = `${getStoredAuthToken() || ''} ${url}`;
     let shared = inFlightReads.get(key);
     if (!shared) {
-      shared = sendAuthenticatedFetch(url, options).finally(() => {
+      shared = sendAuthenticatedFetch(url, options, doorOptions).finally(() => {
         inFlightReads.delete(key);
       });
       inFlightReads.set(key, shared);
@@ -124,7 +126,7 @@ export const authenticatedFetch = (url, options = {}) => {
     // Исходный ответ не читается никем, каждый получает свою копию.
     return shared.then((response) => response.clone());
   }
-  return sendAuthenticatedFetch(url, options);
+  return sendAuthenticatedFetch(url, options, doorOptions);
 };
 
 /**
@@ -132,7 +134,7 @@ export const authenticatedFetch = (url, options = {}) => {
  * @param {RequestInit} [options]
  * @returns {Promise<Response>}
  */
-const sendAuthenticatedFetch = (url, options = {}) => {
+const sendAuthenticatedFetch = (url, options = {}, doorOptions = {}) => {
   const token = getStoredAuthToken();
 
   const defaultHeaders = {};
@@ -146,13 +148,13 @@ const sendAuthenticatedFetch = (url, options = {}) => {
     defaultHeaders['Authorization'] = `Bearer ${token}`;
   }
 
-  return fetch(url, {
+  return doorFetch(url, {
     ...options,
     headers: {
       ...defaultHeaders,
       ...options.headers,
     },
-  }).then((response) => {
+  }, doorOptions).then((response) => {
     const refreshedToken = response.headers.get('X-Refreshed-Token');
     if (refreshedToken) {
       storeAuthToken(refreshedToken);
@@ -173,13 +175,13 @@ const sendAuthenticatedFetch = (url, options = {}) => {
 export const api = {
   // Auth endpoints (no token required)
   auth: {
-    status: () => fetch('/api/auth/status'),
-    login: (username, password) => fetch('/api/auth/login', {
+    status: () => doorFetch('/api/auth/status', {}, { gate: true }),
+    login: (username, password) => doorFetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
-    register: (username, password) => fetch('/api/auth/register', {
+    register: (username, password) => doorFetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -187,20 +189,20 @@ export const api = {
     // OPEN_REGISTRATION-only: passwordless account creation, gated by a
     // single-use invite token (see /invite/<token>). 403s with
     // OPEN_REGISTRATION_DISABLED on every other instance.
-    registerOpen: (username, inviteToken) => fetch('/api/auth/register-open', {
+    registerOpen: (username, inviteToken) => doorFetch('/api/auth/register-open', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, inviteToken }),
     }),
     // Instant login via a persistent login-link token (the `/enter/<token>` URL).
-    enter: (token) => fetch('/api/auth/enter', {
+    enter: (token) => doorFetch('/api/auth/enter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     }),
     // Public: checks whether an invite token (the `/invite/<token>` URL) is
     // still valid before showing the registration form.
-    inviteStatus: (token) => fetch(`/api/auth/invite-status/${encodeURIComponent(token)}`),
+    inviteStatus: (token) => doorFetch(`/api/auth/invite-status/${encodeURIComponent(token)}`),
     createInvite: (label) => authenticatedFetch('/api/auth/invites', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -210,7 +212,7 @@ export const api = {
     getLoginLink: () => authenticatedFetch('/api/auth/login-link'),
     regenerateLoginLink: () => authenticatedFetch('/api/auth/regenerate-login-link', { method: 'POST' }),
     refresh: () => authenticatedFetch('/api/auth/refresh', { method: 'POST' }),
-    user: () => authenticatedFetch('/api/auth/user'),
+    user: () => authenticatedFetch('/api/auth/user', {}, { gate: true }),
     logout: () => authenticatedFetch('/api/auth/logout', { method: 'POST' }),
   },
 
@@ -488,7 +490,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ gitName, gitEmail }),
       }),
-    onboardingStatus: () => authenticatedFetch('/api/user/onboarding-status'),
+    onboardingStatus: () => authenticatedFetch('/api/user/onboarding-status', {}, { gate: true }),
     completeOnboarding: () =>
       authenticatedFetch('/api/user/complete-onboarding', {
         method: 'POST',

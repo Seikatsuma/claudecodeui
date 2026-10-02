@@ -1,12 +1,13 @@
 import { IS_PLATFORM } from '../../../shared/utils';
 import { getStoredAuthToken } from '../../../utils/api';
 import type { ShellIncomingMessage, ShellOutgoingMessage } from '../types/types';
+import { getDoorHost } from '../../../utils/doors';
 
 export function getShellWebSocketUrl(): string | null {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
   if (IS_PLATFORM) {
-    return `${protocol}//${window.location.host}/shell`;
+    return `${protocol}//${getDoorHost()}/shell`;
   }
 
   const token = getStoredAuthToken();
@@ -15,7 +16,7 @@ export function getShellWebSocketUrl(): string | null {
     return null;
   }
 
-  return `${protocol}//${window.location.host}/shell?token=${encodeURIComponent(token)}`;
+  return `${protocol}//${getDoorHost()}/shell?token=${encodeURIComponent(token)}`;
 }
 
 export function parseShellMessage(payload: string): ShellIncomingMessage | null {

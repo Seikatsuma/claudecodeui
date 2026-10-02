@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../components/auth/context/AuthContext';
 import { IS_PLATFORM } from '../shared/utils';
 import { expireAuthSession, isAuthTokenExpired } from '../utils/api';
+import { flipDoor, getDoorHost, markDoorWorked } from '../utils/doors';
 
 import { ChatOutbox, isChatSend, SLOT_RETRY_MS, SLOT_WAIT_CODE, type OutboxEntry } from './chatOutbox';
 import { decideConnectionAction } from './connectionWatchdog';
@@ -59,8 +60,12 @@ const WebSocketContext = createContext<WebSocketContextType | null>(null);
 const ACK_TIMEOUT_MS = 10_000;
 /** Как часто проверять очередь, пока в ней что-то есть. */
 const OUTBOX_CHECK_MS = 3_000;
-/** Соединение, не открывшееся за это время, пересоздаётся. */
-const CONNECT_STALL_MS = 15_000;
+/**
+ * Соединение, не открывшееся за это время, пересоздаётся — уже через другой
+ * вход (utils/doors.js). Было 15 с; 8 с хватает и для плохой мобильной связи,
+ * а смена входа безвредна: оба ведут на один сервер.
+ */
+const CONNECT_STALL_MS = 8_000;
 /**
  * Как часто сторож связи проверяет, что соединение на месте. Работает всегда,
  * а не только когда есть что отправлять: связь нужна и молчащей странице —
@@ -84,13 +89,13 @@ const buildWebSocketUrl = (token: string | null) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   // `caps` — страница понимает расписки: только тогда сервер шлёт ей
   // `server_capabilities` (старая страница вывела бы его в ленту строкой).
-  if (IS_PLATFORM) return `${protocol}//${window.location.host}/ws?caps=${SOCKET_CAPS}`; // Platform mode: Use same domain as the page (goes through proxy)
+  if (IS_PLATFORM) return `${protocol}//${getDoorHost()}/ws?caps=${SOCKET_CAPS}`; // Platform mode: Use same domain as the page (goes through proxy)
   if (!token) return null;
   if (isAuthTokenExpired(token)) {
     expireAuthSession();
     return null;
   }
-  return `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}&caps=${SOCKET_CAPS}`; // OSS mode: Use same host:port that served the page
+  return `${protocol}//${getDoorHost()}/ws?token=${encodeURIComponent(token)}&caps=${SOCKET_CAPS}`; // OSS mode: Use same host:port that served the page
 };
 
 const createOutbox = (): ChatOutbox => {
@@ -106,6 +111,7 @@ const createOutbox = (): ChatOutbox => {
 const useWebSocketProviderState = (): WebSocketContextType => {
   const wsRef = useRef<WebSocket | null>(null);
   const unmountedRef = useRef(false); // Track if component is unmounted
+  const failedAttemptsRef = useRef(0); // подряд не открывшихся соединений (для смены входа)
   const hasConnectedRef = useRef(false); // Track if we've ever connected (to detect reconnects)
   /**
    * Listener registry for the subscribe API. A ref (not state) because the
@@ -240,6 +246,9 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         connectRef.current();
         return false;
       case 'recreate':
+        if (socket && socket.readyState === WebSocket.CONNECTING) {
+          flipDoor('рукопожатие чата зависло');
+        }
         forceReconnect(
           socket && socket.readyState === WebSocket.CONNECTING
             ? 'соединение не устанавливается'
@@ -365,7 +374,11 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       wsRef.current = websocket;
       connectStartedAtRef.current = Date.now();
 
+      let openedThisAttempt = false;
       websocket.onopen = () => {
+        openedThisAttempt = true;
+        failedAttemptsRef.current = 0;
+        markDoorWorked();
         setIsConnected(true);
         if (hasConnectedRef.current) {
           // This is a reconnect — signal so components can catch up on missed messages
@@ -454,6 +467,15 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         }
         setIsConnected(false);
         wsRef.current = null;
+
+        // Не открылось два раза подряд — пробуем другой вход.
+        if (!openedThisAttempt) {
+          failedAttemptsRef.current += 1;
+          if (failedAttemptsRef.current >= 2) {
+            failedAttemptsRef.current = 0;
+            flipDoor('чат дважды не открылся');
+          }
+        }
 
         // Attempt to reconnect after 3 seconds
         reconnectTimeoutRef.current = setTimeout(() => {

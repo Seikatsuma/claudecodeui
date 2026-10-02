@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+
+import { getDoorState, subscribeDoor } from '../../../utils/doors';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../shared/constants';
 
 const loadingDotAnimationDelays = ['0s', '0.15s', '0.3s'];
@@ -12,6 +14,11 @@ const loadingDotAnimationDelays = ['0s', '0.15s', '0.3s'];
 const SHOW_WAIT_AFTER_SEC = 5;
 const SHOW_HELP_AFTER_SEC = 15;
 
+// Страница сама меняет вход (cc.sobsila.ru ↔ sobsila.ru:8444, utils/doors.js),
+// когда первый молчит. Экран ожидания говорит об этом: иначе счётчик выглядит
+// как «ничего не происходит», хотя идёт уже вторая попытка.
+const doorFlips = () => getDoorState().flips;
+
 export default function AuthLoadingScreen() {
   const [startedAt] = useState(() => Date.now());
   const [secondsWaiting, setSecondsWaiting] = useState(0);
@@ -23,6 +30,7 @@ export default function AuthLoadingScreen() {
     return () => window.clearInterval(timer);
   }, [startedAt]);
 
+  const flips = useSyncExternalStore(subscribeDoor, doorFlips);
   const showWait = secondsWaiting >= SHOW_WAIT_AFTER_SEC;
   const showHelp = secondsWaiting >= SHOW_HELP_AFTER_SEC;
 
@@ -58,6 +66,11 @@ export default function AuthLoadingScreen() {
         {showWait ? (
           <p className="mt-6 text-base text-foreground">
             Нет ответа от сервера — {secondsWaiting} с
+            {flips > 0 && (
+              <span className="mt-1 block text-sm text-muted-foreground">
+                Пробую другой путь: попытка {flips + 1}
+              </span>
+            )}
           </p>
         ) : (
           <p className="sr-only">Проверяю вход…</p>
