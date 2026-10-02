@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { IS_PLATFORM } from '../../../shared/utils';
+import { AUTH_ERROR_MESSAGES } from '../constants';
 import { useAuth } from '../context/AuthContext';
 import Onboarding from '../../onboarding/view/Onboarding';
 
@@ -27,6 +28,7 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     pendingLoginLink,
     inviteToken,
     inviteStatus,
+    error,
   } = useAuth();
 
   if (isLoading) {
@@ -71,7 +73,7 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
         return <InvalidInviteScreen />;
       }
 
-      return <NoInvitationScreen />;
+      return <NoInvitationScreen loginLinkRejected={error === AUTH_ERROR_MESSAGES.loginLinkInvalid} />;
     }
 
     // Skip the Git Configuration / Connect Agents onboarding flow entirely
