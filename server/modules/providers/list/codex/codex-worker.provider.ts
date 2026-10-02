@@ -352,13 +352,15 @@ async function runWorker(): Promise<void> {
       await appendEvent(job.eventPath, event);
     }
     await appendEvent(job.eventPath, { type: 'worker.completed', exitCode: 0, aborted });
-    await notifyCodexRunComplete({
-      appSessionId: job.appSessionId,
-      providerSessionId,
-      sessionSummary: job.sessionSummary,
-      finalAnswer,
-      notificationClaimPath,
-    }).catch(() => undefined);
+    if (!aborted) {
+      await notifyCodexRunComplete({
+        appSessionId: job.appSessionId,
+        providerSessionId,
+        sessionSummary: job.sessionSummary,
+        finalAnswer,
+        notificationClaimPath,
+      }).catch(() => undefined);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!aborted) {
