@@ -135,7 +135,7 @@ test('окно «Token Usage» берёт цифры с сервера в мом
   assert.deepEqual(asked, ['session-1']);
   assert.deepEqual(cost.data, {
     tokenUsage: { used: 9_040_000, total: 1_000_000, contextUsed: 152_041, contextPercent: 15.2 },
-    tokenBreakdown: { input: 9_000_000, output: 40_000 },
+    tokenBreakdown: { input: 9_000_000, output: 40_000, cacheRead: 0, steps: 0 },
     provider: 'claude',
     model: 'claude-opus-5-5 · 1M context',
   });

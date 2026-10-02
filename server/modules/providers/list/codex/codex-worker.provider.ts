@@ -46,6 +46,9 @@ export type CodexWorkerControlEvent = {
 
 const WORKER_MARKER = '--cloudcli-codex-worker';
 const POLL_MS = 100;
+const CODEX_NOTIFY_MARKER = 'CLOUDCLI_CODEX_NOTIFY';
+const CODEX_NOTIFY_SESSION_ID = 'CLOUDCLI_CODEX_NOTIFY_SESSION_ID';
+const CODEX_NOTIFY_DATABASE_PATH = 'CLOUDCLI_CODEX_NOTIFY_DATABASE_PATH';
 
 function liveRunsDir(): string {
   return process.env.CLOUDCLI_LIVE_RUNS_DIR
@@ -54,6 +57,36 @@ function liveRunsDir(): string {
 
 function safeSessionPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'session';
+}
+
+/**
+ * Marks only Codex turns launched by this UI. The global Codex notify hook
+ * fails closed unless these values point back to a real Codex session in this
+ * exact UI database, so unrelated terminal/account activity cannot notify the
+ * owner.
+ */
+export function buildCodexCliEnvironment(
+  appSessionId: string,
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const environment = Object.fromEntries(
+    Object.entries(source).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+
+  delete environment[CODEX_NOTIFY_MARKER];
+  delete environment[CODEX_NOTIFY_SESSION_ID];
+  delete environment[CODEX_NOTIFY_DATABASE_PATH];
+
+  if (typeof appSessionId !== 'string' || appSessionId.trim().length === 0) {
+    return environment;
+  }
+
+  const homeDirectory = environment.HOME || os.homedir();
+  environment[CODEX_NOTIFY_MARKER] = 'cloudcli-chat';
+  environment[CODEX_NOTIFY_SESSION_ID] = appSessionId.trim();
+  environment[CODEX_NOTIFY_DATABASE_PATH] = environment.DATABASE_PATH
+    || path.join(homeDirectory, '.cloudcli', 'auth.db');
+  return environment;
 }
 
 function workerLaunchArgs(): { command: string; args: string[] } {
@@ -237,7 +270,10 @@ async function runWorker(): Promise<void> {
   process.once('SIGINT', abort);
 
   try {
-    const codex = new Codex({ config: { model_reasoning_summary: 'detailed' } });
+    const codex = new Codex({
+      config: { model_reasoning_summary: 'detailed' },
+      env: buildCodexCliEnvironment(job.appSessionId),
+    });
     const threadOptions = {
       workingDirectory: job.workingDirectory,
       skipGitRepoCheck: true,
