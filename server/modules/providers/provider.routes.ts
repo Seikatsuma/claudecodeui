@@ -24,6 +24,7 @@ import {
   AppError,
   asyncHandler,
   createApiSuccessResponse,
+  isDevinCliInstalled,
   isPlatformOwnerWebUser,
   normalizeServerScope,
   OPEN_REGISTRATION,
@@ -351,9 +352,17 @@ const isDevinAccessAllowed = (): boolean => {
   return Number.isFinite(numericUserId) && isPlatformOwnerWebUser(numericUserId);
 };
 
-router.use('/devin', (_req: Request, _res: Response, next: express.NextFunction) => {
+router.use('/devin', (req: Request, _res: Response, next: express.NextFunction) => {
   try {
     assertDevinProviderAccess();
+    // No Devin on this host (a selfhost copy) — no model catalog, so the
+    // picker hides the Devin tab exactly as it does for guests.
+    if (req.path === '/models' && !isDevinCliInstalled()) {
+      throw new AppError('Devin CLI is not installed on this server.', {
+        code: 'PROVIDER_NOT_INSTALLED',
+        statusCode: 404,
+      });
+    }
     next();
   } catch (error) {
     next(error);

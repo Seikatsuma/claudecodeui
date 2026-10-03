@@ -1123,6 +1123,22 @@ export function resolveDevinCliCommand(): string {
 }
 
 /**
+ * Whether a Devin CLI binary exists on this host. The site is published to
+ * other people's servers (selfhost update from GitHub main), where Devin is
+ * usually not installed — there the Devin tab must stay hidden instead of
+ * offering a provider that can only fail.
+ */
+export function isDevinCliInstalled(): boolean {
+  const resolved = resolveDevinCliCommand();
+  if (resolved !== 'devin') {
+    return fs.existsSync(resolved);
+  }
+  return (process.env.PATH || '')
+    .split(path.delimiter)
+    .some((dir) => dir && fs.existsSync(path.join(dir, 'devin')));
+}
+
+/**
  * Spawns a helper that makes child `devin` processes resolvable even under a
  * minimal PATH: the child's PATH gains the well-known user bin dirs so tools
  * Devin itself shells out to (and Devin's own subprocess lookups) still work.
