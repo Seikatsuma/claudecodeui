@@ -1074,6 +1074,68 @@ export function unwrapJsonStringLiteral(value: string): string {
 }
 
 // ---------------------------
+//----------------- DEVIN PROVIDER UTILITIES ------------
+/**
+ * Resolves the Devin CLI data directory (`$XDG_DATA_HOME/devin` defaulting to
+ * `~/.local/share/devin`). Devin keeps a single shared `sessions.db` plus
+ * `transcripts/` under `cli/` inside it — provider readers use this root and
+ * must never hand it out as a deletable per-session transcript path.
+ */
+export function getDevinDataDir(): string {
+  const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
+  return path.join(xdgDataHome || path.join(os.homedir(), '.local', 'share'), 'devin');
+}
+
+/**
+ * Resolves the Devin SQLite session database path (`<data>/cli/sessions.db`).
+ * Like OpenCode's `opencode.db`, it is shared across every Devin session on
+ * this account — read-only access only.
+ */
+export function getDevinDatabasePath(): string {
+  return path.join(getDevinDataDir(), 'cli', 'sessions.db');
+}
+
+/**
+ * Resolves the `devin` executable for spawning.
+ *
+ * The service environment carries a deliberately narrow PATH (no
+ * `~/.local/bin`), which already bit us once for `claude` — so well-known
+ * install locations are probed first, and the bare `devin` name is only the
+ * fallback. `DEVIN_CLI_PATH` overrides everything for tests/custom installs.
+ */
+export function resolveDevinCliCommand(): string {
+  const configured = process.env.DEVIN_CLI_PATH?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  for (const candidate of [
+    path.join(os.homedir(), '.local', 'bin', 'devin'),
+    path.join(os.homedir(), 'bin', 'devin'),
+    '/usr/local/bin/devin',
+  ]) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return 'devin';
+}
+
+/**
+ * Spawns a helper that makes child `devin` processes resolvable even under a
+ * minimal PATH: the child's PATH gains the well-known user bin dirs so tools
+ * Devin itself shells out to (and Devin's own subprocess lookups) still work.
+ */
+export function buildDevinChildEnv(): Record<string, string | undefined> {
+  const home = os.homedir();
+  const extraPath = [path.join(home, '.local', 'bin'), path.join(home, 'bin')];
+  const currentPath = process.env.PATH || '';
+  const augmentedPath = [...extraPath, currentPath].join(path.delimiter);
+  return { ...process.env, PATH: augmentedPath };
+}
+
+// ---------------------------
 //----------------- SAFE DIRECTORY NAME UTILITIES ------------
 /**
  * Validates that a user or provider supplied identifier can safely be treated

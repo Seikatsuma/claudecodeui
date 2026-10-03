@@ -14,12 +14,13 @@ import cors from 'cors';
 import { installProcessGuards } from '@/shared/process-guards.js';
 import { adoptSurvivors, markShuttingDown } from '@/modules/providers/list/claude/survivor-runs.js';
 import { warmSearchIndexes } from '@/modules/providers/services/session-conversations-search.service.js';
-import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
+import { broadcastRealtimeEvent } from '@/modules/websocket/services/websocket-state.service.js';
 import { AppError, findApplicationRoot, getClaudeJsonPath, getModuleDirectory, IS_PLATFORM, OPEN_REGISTRATION, terminalTextStyles } from '@/shared/utils.js';
 import {
     closeSessionsWatcher,
     initializeSessionsWatcher,
     broadcastSessionUpserted,
+    providerRegistry,
     providerRuntimeService,
     startSessionActivitySync,
     stopSessionActivitySync,
@@ -569,9 +570,7 @@ async function startServer() {
                         detail: phase.detail,
                         timestamp: new Date().toISOString(),
                     });
-                    connectedClients.forEach((client) => {
-                        if (client.readyState === WS_OPEN_STATE) client.send(event);
-                    });
+                    broadcastRealtimeEvent(event, provider || 'claude');
                 },
                 onGone: (appSessionId, provider) => {
                     // Порядок важен: страница не перечитывает переписку, пока
@@ -594,9 +593,7 @@ async function startServer() {
                         success: true,
                         timestamp: new Date().toISOString(),
                     });
-                    connectedClients.forEach((client) => {
-                        if (client.readyState === WS_OPEN_STATE) client.send(idle);
-                    });
+                    broadcastRealtimeEvent(idle, provider || 'claude');
                     // Агент, переживший перезапуск сайта, закончил — значит и
                     // очередь этого чата может идти дальше.
                     dispatchChatQueues();
@@ -611,6 +608,22 @@ async function startServer() {
                         sessionsDb.setJsonlPathIfMissing(appSessionId, transcriptPath);
                     }
                     void broadcastSessionUpserted(appSessionId).catch(() => {});
+                },
+                // У пережившего рестарт Devin-хода есть живой супервизор:
+                // переподключаемся к его сокету, чтобы незакрытые запросы
+                // разрешений снова дошли до человека.
+                onAdopted: (record) => {
+                    const survivor = record as import('@/shared/types.js').ProviderSurvivorRecord | undefined;
+                    if (survivor?.provider !== 'devin') {
+                        return;
+                    }
+                    try {
+                        providerRegistry.resolveProvider('devin').runtime.reattachSurvivor?.(survivor, (message) => {
+                            broadcastRealtimeEvent(JSON.stringify(message), 'devin');
+                        });
+                    } catch (error) {
+                        console.warn('[survivor-runs] devin reattach failed:', error instanceof Error ? error.message : String(error));
+                    }
                 },
             });
             // Survivor map is now authoritative: queued messages cannot race

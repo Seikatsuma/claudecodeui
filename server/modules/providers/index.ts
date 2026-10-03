@@ -1,3 +1,7 @@
+// providerRegistry: used by server/index.ts to reach provider runtimes for
+// survivor reattach (Devin supervisor links after a service restart).
+export { providerRegistry } from './provider.registry.js';
+
 export { sessionSynchronizerService } from './services/session-synchronizer.service.js';
 export { providerSkillsService } from './services/skills.service.js';
 export { providerMcpService } from './services/mcp.service.js';

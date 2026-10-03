@@ -825,7 +825,9 @@ export function useChatComposerState({
             ? 'cursor-tools-settings'
             : provider === 'codex'
               ? 'codex-settings'
-              : provider === 'opencode'
+              : provider === 'devin'
+                ? 'devin-settings'
+                : provider === 'opencode'
                   ? 'opencode-settings'
                 : 'claude-settings';
         const savedSettings = safeLocalStorage.getItem(settingsKey);

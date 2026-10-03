@@ -16,6 +16,7 @@ import type {
   ProviderRuntimeContext,
   ProviderRuntimePermissionGateway,
   ProviderRuntimeWriter,
+  ProviderSurvivorRecord,
   UpsertProviderMcpServerInput,
 } from '@/shared/types.js';
 
@@ -46,6 +47,13 @@ export interface IProviderRuntime {
    */
   adopt?(sessionId: string, payload: ProviderAdoptPayload): Promise<ProviderAdoptedTurn | null>;
   permissions?: ProviderRuntimePermissionGateway;
+  /**
+   * Переподключение к ходу, пережившему перезапуск сервера (запись live-runs).
+   * У Devin — чтение незакрытых запросов агента с сокета супервизора и
+   * возврат их в permission gateway. `emit` — рассылка живых событий
+   * (permission_request) подписанным вкладкам.
+   */
+  reattachSurvivor?(record: ProviderSurvivorRecord, emit?: (message: unknown) => void): void;
 }
 
 export type ProviderSteerPayload = {

@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 
+import { sessionsDb } from '@/modules/database/index.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
@@ -9,6 +10,7 @@ import { providerSkillsService } from '@/modules/providers/services/skills.servi
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 import { sessionRewindService } from '@/modules/providers/services/session-rewind.service.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type {
   CustomProviderModelInput,
   LLMProvider,
@@ -18,7 +20,14 @@ import type {
   ProviderSkillCreateInput,
   UpsertProviderMcpServerInput,
 } from '@/shared/types.js';
-import { AppError, asyncHandler, createApiSuccessResponse, normalizeServerScope } from '@/shared/utils.js';
+import {
+  AppError,
+  asyncHandler,
+  createApiSuccessResponse,
+  isPlatformOwnerWebUser,
+  normalizeServerScope,
+  OPEN_REGISTRATION,
+} from '@/shared/utils.js';
 
 const router = express.Router();
 
@@ -287,6 +296,7 @@ const parseProvider = (value: unknown): LLMProvider => {
     normalized === 'claude'
     || normalized === 'codex'
     || normalized === 'cursor'
+    || normalized === 'devin'
     || normalized === 'opencode'
   ) {
     return normalized;
@@ -297,6 +307,58 @@ const parseProvider = (value: unknown): LLMProvider => {
     statusCode: 400,
   });
 };
+
+/**
+ * Devin's credentials live once per host (`~/.local/share/devin/credentials.toml`);
+ * on a multi-tenant instance every /devin/* endpoint is owner-only. Centralised
+ * here so a future devin route cannot accidentally skip the check.
+ */
+const assertDevinProviderAccess = (): void => {
+  if (!OPEN_REGISTRATION) {
+    return;
+  }
+  const userId = getRequestRuntimeContext()?.userId;
+  const numericUserId = userId === undefined || userId === null ? NaN : Number(userId);
+  if (!Number.isFinite(numericUserId) || !isPlatformOwnerWebUser(numericUserId)) {
+    throw new AppError('The Devin provider is only available to the platform owner.', {
+      code: 'PROVIDER_NOT_ALLOWED',
+      statusCode: 403,
+    });
+  }
+};
+
+/**
+ * Same boundary applied to the generic /sessions/:sessionId routes: a guest
+ * who learns a Devin session id must not rename/delete/move it via the
+ * unauthenticated-by-provider paths.
+ */
+const assertDevinSessionRowAllowed = (sessionId: string): void => {
+  if (!OPEN_REGISTRATION) {
+    return;
+  }
+  const row = sessionsDb.getSessionById(sessionId);
+  if (row?.provider === 'devin') {
+    assertDevinProviderAccess();
+  }
+};
+
+const isDevinAccessAllowed = (): boolean => {
+  if (!OPEN_REGISTRATION) {
+    return true;
+  }
+  const userId = getRequestRuntimeContext()?.userId;
+  const numericUserId = userId === undefined || userId === null ? NaN : Number(userId);
+  return Number.isFinite(numericUserId) && isPlatformOwnerWebUser(numericUserId);
+};
+
+router.use('/devin', (_req: Request, _res: Response, next: express.NextFunction) => {
+  try {
+    assertDevinProviderAccess();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 const parseSessionRenameSummary = (payload: unknown): string => {
   if (!payload || typeof payload !== 'object') {
@@ -708,6 +770,10 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const provider = parseProvider(body.provider);
+    if (provider === 'devin') {
+      // Body-carried provider does not pass through the /devin router prefix.
+      assertDevinProviderAccess();
+    }
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : '';
     const initialMessage = typeof body.initialMessage === 'string' ? body.initialMessage : '';
     const result = sessionsService.createAppSession(provider, projectPath, initialMessage);
@@ -718,7 +784,12 @@ router.post(
 router.get(
   '/sessions/running',
   asyncHandler(async (_req: Request, res: Response) => {
-    const sessions = sessionsService.listRunningSessions();
+    let sessions = sessionsService.listRunningSessions();
+    // Devin ids are owner-only even in the activity feed — a guest must not
+    // learn a live Devin sessionId and attach to its stream over websocket.
+    if (!isDevinAccessAllowed()) {
+      sessions = sessions.filter((session) => session.provider !== 'devin');
+    }
     res.json(createApiSuccessResponse({ sessions }));
   }),
 );
@@ -768,6 +839,7 @@ router.post(
   '/sessions/:sessionId/server-scope',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
+    assertDevinSessionRowAllowed(sessionId);
     // null — «как у папки»; строка — явный блок верхней панели.
     const raw = (req.body ?? {}).serverScope;
     const serverScope = raw === null ? null : normalizeServerScope(raw);
@@ -850,6 +922,7 @@ router.delete(
   '/sessions/:sessionId',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
+    assertDevinSessionRowAllowed(sessionId);
     const force = parseOptionalBooleanQuery(req.query.force, 'force') ?? false;
     const deletedFromDisk = parseOptionalBooleanQuery(req.query.deletedFromDisk, 'deletedFromDisk') ?? force;
     const result = await sessionsService.deleteOrArchiveSessionById(sessionId, {
@@ -864,6 +937,7 @@ router.post(
   '/sessions/:sessionId/restore',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
+    assertDevinSessionRowAllowed(sessionId);
     const result = sessionsService.restoreSessionById(sessionId);
     res.json(createApiSuccessResponse(result));
   }),
@@ -873,6 +947,7 @@ router.put(
   '/sessions/:sessionId',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
+    assertDevinSessionRowAllowed(sessionId);
     const summary = parseSessionRenameSummary(req.body);
     const result = sessionsService.renameSessionById(sessionId, summary);
     res.json(createApiSuccessResponse(result));

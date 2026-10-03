@@ -1,4 +1,4 @@
-export type LLMProvider = 'claude' | 'cursor' | 'codex' | 'opencode';
+export type LLMProvider = 'claude' | 'cursor' | 'codex' | 'devin' | 'opencode';
 
 /**
  * Блок верхней панели слева: 'main' — дела этого сервера, 'second' — дела

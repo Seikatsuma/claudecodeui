@@ -47,11 +47,18 @@ export default function AgentsSettingsTab({
       authStatus: providerAuthStatus.opencode,
       onLogin: () => onProviderLogin('opencode'),
     },
+    // Devin is owner-only and not listed in `visibleAgents`; the Record type
+    // still needs the key.
+    devin: {
+      authStatus: providerAuthStatus.devin,
+      onLogin: () => onProviderLogin('devin'),
+    },
   }), [
     onProviderLogin,
     providerAuthStatus.claude,
     providerAuthStatus.codex,
     providerAuthStatus.cursor,
+    providerAuthStatus.devin,
     providerAuthStatus.opencode,
   ]);
 

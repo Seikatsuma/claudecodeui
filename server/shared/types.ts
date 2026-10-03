@@ -66,7 +66,7 @@ export type AuthenticatedWebSocketRequest = IncomingMessage & {
  * Use this as the source of truth whenever a function or payload needs to identify
  * a specific LLM integration.
  */
-export type LLMProvider = 'claude' | 'codex' | 'cursor' | 'opencode';
+export type LLMProvider = 'claude' | 'codex' | 'cursor' | 'devin' | 'opencode';
 
 /**
  * One selectable model row in a provider model catalog.
@@ -320,6 +320,24 @@ export type ProviderPermissionDecision = {
 export type ProviderRuntimePermissionGateway = {
   resolve(requestId: string, decision: ProviderPermissionDecision): void;
   listPending(sessionId: string): unknown[];
+};
+
+/**
+ * Запись live-runs об агенте, пережившем перезапуск сервера
+ * (survivor-runs.js). Поля socketPath/runId/supervisorPid есть у запусков
+ * под супервизором (Devin) — по ним новый сервер переподключается к живому
+ * ходу; у прочих провайдеров их нет.
+ */
+export type ProviderSurvivorRecord = {
+  pid: number;
+  provider?: string | null;
+  appSessionId: string;
+  providerSessionId?: string | null;
+  configDir?: string | null;
+  socketPath?: string | null;
+  runId?: string | null;
+  supervisorPid?: number | null;
+  startedAt?: number;
 };
 
 /**

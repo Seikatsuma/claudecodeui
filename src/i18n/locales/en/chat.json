@@ -19,7 +19,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "devin": "Devin"
   },
   "tools": {
     "settings": "Tool Settings",
@@ -183,7 +184,8 @@
       "cursor": "Ready to use Cursor with {{model}}. Start typing your message below.",
       "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
       "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
-      "default": "Select a provider above to begin"
+      "default": "Select a provider above to begin",
+      "devin": "Ready to use Devin with {{model}}. Start typing your message below."
     },
     "pressToSearch": "Press <kbd>{{shortcut}}</kbd> to search sessions, files, and commits"
   },

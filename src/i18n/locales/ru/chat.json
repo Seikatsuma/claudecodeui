@@ -19,7 +19,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "devin": "Devin"
   },
   "tools": {
     "settings": "Настройки инструмента",
@@ -171,7 +172,8 @@
       "cursor": "Готов использовать Cursor с {{model}}. Начните вводить сообщение ниже.",
       "codex": "Готов использовать Codex с {{model}}. Начните вводить сообщение ниже.",
       "default": "Выберите провайдера выше для начала",
-      "opencode": "OpenCode готов, модель {{model}}. Пишите сообщение ниже."
+      "opencode": "OpenCode готов, модель {{model}}. Пишите сообщение ниже.",
+      "devin": "Devin готов, модель {{model}}. Пишите сообщение ниже."
     },
     "pressToSearch": "Нажмите <kbd>{{shortcut}}</kbd>, чтобы искать сессии, файлы и коммиты"
   },

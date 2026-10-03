@@ -19,9 +19,9 @@
  * доступа к провайдеру); сюда он подставляется через `setQueuedChatMessageRunner`,
  * иначе два модуля ссылались бы друг на друга по кругу.
  */
-import { chatMessageQueueDb, type StoredQueuedChatMessage } from '@/modules/database/index.js';
+import { chatMessageQueueDb, sessionsDb, type StoredQueuedChatMessage } from '@/modules/database/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
-import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
+import { broadcastRealtimeEvent } from '@/modules/websocket/services/websocket-state.service.js';
 import { normalizeAttachmentDescriptors } from '@/shared/image-attachments.js';
 
 /**
@@ -95,11 +95,7 @@ export function broadcastChatQueue(sessionId: string): void {
     queue: listChatQueue(sessionId),
     timestamp: new Date().toISOString(),
   });
-  connectedClients.forEach((client) => {
-    if (client.readyState === WS_OPEN_STATE) {
-      client.send(payload);
-    }
-  });
+  broadcastRealtimeEvent(payload, sessionsDb.getSessionById(sessionId)?.provider);
 }
 
 /** Ставит сообщение в конец очереди и рассылает новый вид очереди. */

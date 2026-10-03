@@ -27,7 +27,12 @@ import {
   readClientMessageId,
   rememberAcceptedSend,
 } from '@/modules/websocket/services/chat-send-ledger.service.js';
-import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
+import {
+  broadcastRealtimeEvent,
+  clientUserIds,
+  connectedClients,
+  WS_OPEN_STATE,
+} from '@/modules/websocket/services/websocket-state.service.js';
 import {
   isImageAttachmentDescriptor,
   normalizeAttachmentDescriptors,
@@ -240,6 +245,17 @@ async function handleChatSend(
 
   const openRegistrationContext = resolveWebUserRuntimeContext(userId);
   const numericUserId = userId !== null ? Number(userId) : NaN;
+  // Devin credentials are machine-global — guests on OPEN_REGISTRATION never run it.
+  if (OPEN_REGISTRATION && provider === 'devin' && !isPlatformOwnerWebUser(numericUserId)) {
+    sendProtocolError(
+      ws,
+      'PROVIDER_NOT_ALLOWED',
+      'The Devin provider is only available to the platform owner.',
+      sessionId,
+      clientMessageId,
+    );
+    return;
+  }
   // Owner bypass: when the owner's ~/.claude-webuser-<id> is symlinked to
   // their real ~/.claude, the SDK authenticates via the existing OAuth session
   // in that directory — no explicit API key is needed or stored.
@@ -531,19 +547,36 @@ async function runProviderTurn(input: {
  * остальные — плашку «работает» в списке. Как только вкладка подпишется на
  * чат (`chat.subscribe`), поток переключится на неё обычным порядком.
  */
-const broadcastConnection: RealtimeClientConnection = {
+const broadcastConnection = (provider?: string | null): RealtimeClientConnection => ({
   readyState: WS_OPEN_STATE,
   send(data: string): void {
-    connectedClients.forEach((client) => {
-      if (client.readyState === WS_OPEN_STATE) {
-        client.send(data);
-      }
-    });
+    broadcastRealtimeEvent(data, provider);
   },
-};
+});
 
 function broadcastJson(payload: unknown): void {
-  broadcastConnection.send(JSON.stringify(payload));
+  const record = payload as AnyRecord;
+  broadcastRealtimeEvent(JSON.stringify(payload), typeof record.provider === 'string' ? record.provider : null);
+}
+
+/**
+ * Devin sessions may only exist for the platform owner — a guest's socket must
+ * not observe, subscribe to, abort, or queue-edit one. The check keys off the
+ * stored session row: no row → nothing to gate (handlers fail their own way).
+ */
+function isDevinSessionForbiddenForUser(
+  sessionId: string | null | undefined,
+  userId: string | number | null,
+): boolean {
+  if (!OPEN_REGISTRATION || !sessionId) {
+    return false;
+  }
+  const session = sessionsDb.getSessionById(sessionId);
+  if (session?.provider !== 'devin') {
+    return false;
+  }
+  const numericUserId = userId === null || userId === undefined ? NaN : Number(userId);
+  return !Number.isFinite(numericUserId) || !isPlatformOwnerWebUser(numericUserId);
 }
 
 /**
@@ -575,6 +608,11 @@ async function runQueuedChatMessage(
   const userId = message.userId;
   const runtimeContext = resolveWebUserRuntimeContext(userId);
   const numericUserId = userId !== null ? Number(userId) : NaN;
+  // Devin — только владелец площадки; очередь не должна быть обходом гейта.
+  if (OPEN_REGISTRATION && provider === 'devin' && !isPlatformOwnerWebUser(numericUserId)) {
+    console.warn(`[Очередь чата] devin для не-владельца ${String(userId)} — сообщение ${message.id} отброшено`);
+    return true;
+  }
   if (
     OPEN_REGISTRATION
     && provider === 'claude'
@@ -600,7 +638,7 @@ async function runQueuedChatMessage(
     appSessionId: sessionId,
     provider,
     providerSessionId: session.provider_session_id,
-    connection: broadcastConnection,
+    connection: broadcastConnection(provider),
     userId,
   });
   if (!run) {
@@ -690,12 +728,18 @@ export function initChatQueueDispatch(dependencies: ChatWebSocketDependencies): 
  */
 async function handleChatAbort(
   ws: WebSocket,
+  userId: string | number | null,
   data: AnyRecord,
   dependencies: ChatWebSocketDependencies
 ): Promise<void> {
   const sessionId = readRequiredSessionId(data);
   if (!sessionId) {
     sendProtocolError(ws, 'SESSION_ID_REQUIRED', 'chat.abort requires a sessionId.');
+    return;
+  }
+
+  if (isDevinSessionForbiddenForUser(sessionId, userId)) {
+    sendProtocolError(ws, 'PROVIDER_NOT_ALLOWED', 'The Devin provider is only available to the platform owner.', sessionId);
     return;
   }
 
@@ -741,6 +785,7 @@ async function handleChatAbort(
  */
 function handleChatSubscribe(
   ws: WebSocket,
+  userId: string | number | null,
   data: AnyRecord,
   dependencies: ChatWebSocketDependencies
 ): void {
@@ -755,6 +800,11 @@ function handleChatSubscribe(
       ? ((target as AnyRecord).sessionId as string).trim()
       : '';
     if (!sessionId) {
+      continue;
+    }
+
+    if (isDevinSessionForbiddenForUser(sessionId, userId)) {
+      sendProtocolError(ws, 'PROVIDER_NOT_ALLOWED', 'The Devin provider is only available to the platform owner.', sessionId);
       continue;
     }
 
@@ -894,10 +944,15 @@ async function handleChatQueueSendNow(
  * очистить. Очередь общая и лежит на сервере, поэтому изменение тут же
  * рассылается всем вкладкам (chat-queue.service).
  */
-function handleChatQueueEdit(ws: WebSocket, messageType: string, data: AnyRecord): void {
+function handleChatQueueEdit(ws: WebSocket, userId: string | number | null, messageType: string, data: AnyRecord): void {
   const sessionId = readRequiredSessionId(data);
   if (!sessionId) {
     sendProtocolError(ws, 'SESSION_ID_REQUIRED', `${messageType} requires a sessionId.`);
+    return;
+  }
+
+  if (isDevinSessionForbiddenForUser(sessionId, userId)) {
+    sendProtocolError(ws, 'PROVIDER_NOT_ALLOWED', 'The Devin provider is only available to the platform owner.', sessionId);
     return;
   }
 
@@ -987,6 +1042,7 @@ export function handleChatConnection(
   }
 
   const userId = readRequestUserId(request);
+  clientUserIds.set(ws, userId);
 
   ws.on('message', async (rawMessage) => {
     let clientMessageId: string | null = null;
@@ -1005,10 +1061,10 @@ export function handleChatConnection(
           await handleChatSend(ws, userId, data, dependencies);
           return;
         case 'chat.abort':
-          await handleChatAbort(ws, data, dependencies);
+          await handleChatAbort(ws, userId, data, dependencies);
           return;
         case 'chat.subscribe':
-          handleChatSubscribe(ws, data, dependencies);
+          handleChatSubscribe(ws, userId, data, dependencies);
           return;
         case 'chat.permission-response':
           handlePermissionResponse(data, dependencies);
@@ -1016,7 +1072,7 @@ export function handleChatConnection(
         case 'chat.queue.remove':
         case 'chat.queue.reorder':
         case 'chat.queue.clear':
-          handleChatQueueEdit(ws, messageType, data);
+          handleChatQueueEdit(ws, userId, messageType, data);
           return;
         case 'chat.queue.sendNow':
           await handleChatQueueSendNow(ws, data, dependencies);

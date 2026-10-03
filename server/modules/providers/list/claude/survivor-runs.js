@@ -29,6 +29,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import Database from 'better-sqlite3';
+
 import { verifyAgentRoom, wrapInAgentRoom } from './agent-rooms.js';
 
 let shuttingDown = false;
@@ -104,6 +106,9 @@ function isAgentAlive(recordOrPid) {
       return cmdline.includes('codex-worker.provider')
         && cmdline.includes('--cloudcli-codex-worker');
     }
+    if (record?.provider === 'devin') {
+      return cmdline.includes('devin') && cmdline.includes('acp');
+    }
     return cmdline.includes('claude') && cmdline.includes('stream-json');
   } catch {
     return false;
@@ -170,6 +175,45 @@ export function spawnSurvivableClaude(spawnOptions, context = {}) {
     on: child.on.bind(child),
     once: child.once.bind(child),
     off: child.off.bind(child),
+  };
+}
+
+/**
+ * Регистрация агента другого провайдера (Devin ACP) как «переживёшь перезапуск».
+ *
+ * От `spawnSurvivableClaude` отличается тем, что процесс уже рождён вызывающим
+ * (своя разводка stdio для JSON-RPC) и «убить» при остановке никто и не думает
+ * делать — достаточно оставить запись, чтобы следующий сервер усыновил процесс.
+ * Возвращает функцию снятия записи для нормального завершения хода.
+ */
+export function registerProviderRun(child, { provider, appSessionId, providerSessionId, extra }) {
+  if (!child?.pid || !appSessionId) {
+    return () => {};
+  }
+
+  writeRecord(child.pid, {
+    pid: child.pid,
+    provider: provider || null,
+    appSessionId,
+    providerSessionId: providerSessionId || null,
+    startedAt: Date.now(),
+    // Для Devin — путь к сокету супервизора и его pid: по ним новый сервер
+    // переподключается к живому ходу (devin-runtime reattachSurvivor).
+    ...(extra && typeof extra === 'object' ? extra : {}),
+  });
+
+  const onExit = () => {
+    // Выход во время остановки сервера — не наш случай: сервер умирает, а
+    // агент нет. Запись нужна новому серверу.
+    if (!shuttingDown) {
+      removeRecord(child.pid);
+    }
+  };
+  child.once('exit', onExit);
+
+  return () => {
+    child.off('exit', onExit);
+    removeRecord(child.pid);
   };
 }
 
@@ -253,6 +297,37 @@ function mtimeOf(file) {
     return fs.statSync(file).mtimeMs;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Метка прогресса пережившего агента.
+ *
+ * У Claude это mtime файла переписки. У Devin переписка — строки в общей
+ * `sessions.db`: читаем `last_activity_at` его сессии. mtime самой базы как
+ * запасной вариант — WAL откладывает чекпоинт, но файл хоть иногда шевелится.
+ */
+function survivorProgressStamp(survivor) {
+  if (survivor.provider !== 'devin') {
+    return survivor.transcriptPath ? mtimeOf(survivor.transcriptPath) : 0;
+  }
+
+  try {
+    // Лист-модуль без импортов приложения: sqlite поднимаем напрямую, путь —
+    // тот же, что читает Devin CLI ($XDG_DATA_HOME/devin/cli/sessions.db).
+    const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+    const db = new Database(path.join(dataHome, 'devin', 'cli', 'sessions.db'), { readonly: true, fileMustExist: true });
+    try {
+      const row = db
+        .prepare('SELECT last_activity_at FROM sessions WHERE id = ?')
+        .get(survivor.providerSessionId || '');
+      return typeof row?.last_activity_at === 'number' ? row.last_activity_at : 0;
+    } finally {
+      db.close();
+    }
+  } catch {
+    const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+    return mtimeOf(path.join(dataHome, 'devin', 'cli', 'sessions.db'));
   }
 }
 
@@ -447,9 +522,12 @@ function refreshPhase(survivor) {
  * `onPhase(appSessionId, phase)` — сменился этап работы (см. readTranscriptPhase),
  * `onGone(appSessionId)` — агент закончил.
  *
- * @param {{ onTranscriptChange?: (appSessionId: string, provider: 'claude' | 'codex') => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null, provider: 'claude' | 'codex') => void, onGone?: (appSessionId: string, provider: 'claude' | 'codex') => void, onProviderSession?: (appSessionId: string, providerSessionId: string, provider: 'claude' | 'codex', transcriptPath: string | null) => void, pollMs?: number }} [options]
+ * `onAdopted(record)` — подробная запись пережившего запуска (pid, socketPath
+ * и т.п.): Devin по ней переподключается к супервизору живого хода.
+ *
+ * @param {{ onTranscriptChange?: (appSessionId: string, provider: string) => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null, provider: string) => void, onGone?: (appSessionId: string, provider: string) => void, onProviderSession?: (appSessionId: string, providerSessionId: string, provider: 'claude' | 'codex', transcriptPath: string | null) => void, onAdopted?: (record: object) => void, pollMs?: number }} [options]
  */
-export function adoptSurvivors({ onTranscriptChange = (_id, _provider) => {}, onPhase = (_id, _phase, _provider) => {}, onGone = (_id, _provider) => {}, onProviderSession = (_id, _providerSessionId, _provider) => {}, pollMs = 3000 } = {}) {
+export function adoptSurvivors({ onTranscriptChange = (_id, _provider) => {}, onPhase = (_id, _phase, _provider) => {}, onGone = (_id, _provider) => {}, onProviderSession = (_id, _providerSessionId, _provider) => {}, onAdopted = (_record) => {}, pollMs = 3000 } = {}) {
   shuttingDown = false;
   let files = [];
   try {
@@ -484,16 +562,25 @@ export function adoptSurvivors({ onTranscriptChange = (_id, _provider) => {}, on
       removeRecord(record.pid);
       continue;
     }
-    const transcriptPath = findTranscript(record);
+    const transcriptPath = record.provider === 'devin' ? null : findTranscript(record);
     const survivor = {
       ...record,
+      provider: record.provider || 'claude',
       transcriptPath,
       transcriptMtime: transcriptPath ? mtimeOf(transcriptPath) : 0,
+      progressStamp: survivorProgressStamp({ ...record, transcriptPath }),
       phase: null,
     };
-    refreshPhase(survivor);
+    if (survivor.provider !== 'devin') {
+      refreshPhase(survivor);
+    }
     survivors.set(record.appSessionId, survivor);
     console.log(`[survivor-runs] чат ${record.appSessionId} (${record.provider}) пережил перезапуск (PID ${record.pid}), продолжаю показывать его работу`);
+    try {
+      onAdopted(record);
+    } catch (error) {
+      console.warn('[survivor-runs] onAdopted failed:', error?.message || error);
+    }
   }
 
   if (pollTimer) clearInterval(pollTimer);
@@ -505,7 +592,7 @@ export function adoptSurvivors({ onTranscriptChange = (_id, _provider) => {}, on
 }
 
 /**
- * @param {{ onTranscriptChange?: (appSessionId: string, provider: 'claude' | 'codex') => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null, provider: 'claude' | 'codex') => void, onGone?: (appSessionId: string, provider: 'claude' | 'codex') => void, onProviderSession?: (appSessionId: string, providerSessionId: string, provider: 'claude' | 'codex', transcriptPath: string | null) => void }} [options]
+ * @param {{ onTranscriptChange?: (appSessionId: string, provider: string) => void, onPhase?: (appSessionId: string, phase: { phase: string, detail: string | null } | null, provider: string) => void, onGone?: (appSessionId: string, provider: string) => void, onProviderSession?: (appSessionId: string, providerSessionId: string, provider: 'claude' | 'codex', transcriptPath: string | null) => void }} [options]
  */
 export function pollSurvivors({ onTranscriptChange = (_id, _provider) => {}, onPhase = (_id, _phase, _provider) => {}, onGone = (_id, _provider) => {}, onProviderSession = (_id, _providerSessionId, _provider) => {} } = {}) {
   for (const [appSessionId, survivor] of survivors) {
@@ -522,14 +609,15 @@ export function pollSurvivors({ onTranscriptChange = (_id, _provider) => {}, onP
         onProviderSession(appSessionId, survivor.providerSessionId, survivor.provider, findCodexTranscript(survivor));
       }
     }
-    if (!survivor.transcriptPath) {
+    if (survivor.provider !== 'devin' && !survivor.transcriptPath) {
       survivor.transcriptPath = findTranscript(survivor);
     }
-    const mtime = survivor.transcriptPath ? mtimeOf(survivor.transcriptPath) : 0;
-    if (mtime && mtime !== survivor.transcriptMtime) {
-      survivor.transcriptMtime = mtime;
+    // У Claude/Codex метка — mtime файла переписки, у Devin — last_activity_at в sessions.db.
+    const stamp = survivorProgressStamp(survivor);
+    if (stamp && stamp !== survivor.progressStamp) {
+      survivor.progressStamp = stamp;
       onTranscriptChange(appSessionId, survivor.provider || 'claude');
-      if (refreshPhase(survivor)) {
+      if (survivor.provider !== 'devin' && refreshPhase(survivor)) {
         onPhase(appSessionId, survivor.phase, survivor.provider || 'claude');
       }
     }
@@ -554,6 +642,11 @@ export function listSurvivors() {
     sessionId: survivor.appSessionId,
     provider: survivor.provider || 'claude',
     startedAt: survivor.startedAt,
+    // Для Devin-переживших — реквизиты переподключения к супервизору.
+    pid: survivor.pid || null,
+    socketPath: survivor.socketPath || null,
+    runId: survivor.runId || null,
+    supervisorPid: survivor.supervisorPid || null,
     lastSeq: 0,
   }));
 }
