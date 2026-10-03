@@ -1,7 +1,20 @@
+// providerRegistry: used by server/index.ts to reach provider runtimes for
+// survivor reattach (Devin supervisor links after a service restart).
+export { providerRegistry } from './provider.registry.js';
+
 export { sessionSynchronizerService } from './services/session-synchronizer.service.js';
 export { providerSkillsService } from './services/skills.service.js';
 export { providerMcpService } from './services/mcp.service.js';
 export { providerRuntimeService } from './services/provider-runtime.service.js';
+// Survivor status: prevents a second run while a detached Claude/Codex process
+// from the previous web-server generation still owns the chat.
+export {
+  getSurvivorPhase,
+  getSurvivorProvider,
+  isSurvivorRunning,
+  listSurvivors,
+  stopSurvivor,
+} from './list/claude/survivor-runs.js';
 export { getLiveLimits, recordRateLimitEvent } from './services/usage-limits.store.js';
 
 // providerModelsService: used by Commands to list models and resolve the active session model.

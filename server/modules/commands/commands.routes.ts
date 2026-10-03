@@ -42,13 +42,14 @@ const claudeConfigDir = () =>
 const process = dependencies.runtime;
 const router = express.Router();
 
-const MODEL_PROVIDERS = ["claude", "cursor", "codex", "opencode"];
+const MODEL_PROVIDERS = ["claude", "cursor", "codex", "opencode", "devin"];
 
 const MODEL_PROVIDER_LABELS = {
   claude: "Claude",
   cursor: "Cursor",
   codex: "Codex",
   opencode: "OpenCode",
+  devin: "Devin",
 };
 
 const readModelProvider = (value) => {

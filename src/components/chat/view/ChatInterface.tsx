@@ -102,6 +102,8 @@ function ChatInterface({
     currentProviderModelOptions,
     opencodeModel,
     setOpenCodeModel,
+    devinModel,
+    setDevinModel,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -534,6 +536,8 @@ function ChatInterface({
         ? t('messageTypes.codex')
         : provider === 'opencode'
             ? t('messageTypes.opencode', { defaultValue: 'OpenCode' })
+          : provider === 'devin'
+            ? t('messageTypes.devin', { defaultValue: 'Devin' })
           : t('messageTypes.claude');
 
   if (!selectedProject) {
@@ -579,6 +583,8 @@ function ChatInterface({
           setCodexModel={setCodexModel}
           opencodeModel={opencodeModel}
           setOpenCodeModel={setOpenCodeModel}
+          devinModel={devinModel}
+          setDevinModel={setDevinModel}
           providerModelCatalog={providerModelCatalog}
           providerModelActions={providerModelActions}
           providerModelsLoading={providerModelsLoading}

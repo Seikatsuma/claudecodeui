@@ -8,6 +8,127 @@
     <title>Claude UI</title>
 
     <!--
+      Первый кадр не ждёт ничего из сети (01.10.26).
+
+      Егор: «белый экран, чёрный экран, нет даже ни единого комментария, ни
+      слов загрузки». Замер в браузере с размером iPhone: пока файл шрифтов
+      или файл стилей программы застрял в дороге, браузер не рисует НИЧЕГО —
+      ни одного кадра за 6 с, хотя заставка «Открываю…» уже на странице.
+      Таблица стилей в голове страницы держит первый кадр целиком, а шрифты
+      телефон берёт из сети при каждом открытии, стили — после каждой
+      выкатки. Экран при этом залит фоном: чёрным в тёмной теме, светлым в
+      светлой. Страховка с кнопками в это время тоже невидима.
+
+      Поэтому: (1) шрифты и стили программы подключены без удержания кадра
+      (media="print" → onload; стили программы — плагином в vite.config.js,
+      программа ждёт их сама в main.jsx); (2) заставка стоит в самом начале
+      страницы, большой скрипт страховки — после неё: дошла страница не
+      целиком — надпись всё равно уже видна.
+    -->
+    <script>
+      // Фон до программы — под тему, чтобы запуск не вспыхивал белым.
+      try {
+        var theme = localStorage.getItem('theme');
+        var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.style.background = dark ? '#141414' : '#f7f5f1';
+        // Заставке «Открываю…» — те же цвета: тело страницы до запуска
+        // программы красится стилями в светлый, поверх него нужен свой фон.
+        document.documentElement.style.setProperty('--boot-bg', dark ? '#141414' : '#f7f5f1');
+        document.documentElement.style.setProperty('--boot-fg', dark ? '#ececec' : '#1f1f1f');
+        document.documentElement.style.setProperty('--boot-dim', dark ? '#a1a1aa' : '#6b6b6b');
+      } catch (e) {}
+      // Сбой загрузки файла программы до того, как ниже встанет страховка
+      // (01.10.26: она теперь после заставки). Страховка забирает их себе.
+      window.__bootEarly = { errors: [], fatalLoad: false };
+      window.addEventListener('error', function (event) {
+        var target = event.target;
+        if (window.__bootGuard || !target || target === window) return;
+        if (target.tagName !== 'SCRIPT' && target.tagName !== 'LINK') return;
+        var file = (target.src || target.href || '').replace(location.origin, '');
+        window.__bootEarly.errors.push('не загрузился файл ' + file);
+        if (file.indexOf('/assets/') === 0) window.__bootEarly.fatalLoad = true;
+      }, true);
+    </script>
+    <style>
+      #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:10px;padding:24px;text-align:center;box-sizing:border-box;pointer-events:none;
+        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        background:var(--boot-bg,#f7f5f1);color:var(--boot-fg,#1f1f1f)}
+      #boot-splash b{font-size:18px;font-weight:600}
+      #boot-splash p,#boot-splash button{margin:0;max-width:20rem;color:var(--boot-dim,#6b6b6b);opacity:0;animation:boot-splash-hint .3s 4s forwards}
+      #boot-splash .slow,#boot-splash button{animation-delay:20s}
+      #boot-splash button{visibility:hidden;pointer-events:auto;margin-top:6px;padding:10px 18px;border:1px solid var(--boot-dim,#6b6b6b);
+        border-radius:10px;background:transparent;color:var(--boot-fg,#1f1f1f);font:inherit}
+      @keyframes boot-splash-hint{to{opacity:1;visibility:visible}}
+      #root:not(:empty) ~ #boot-splash{display:none}
+    </style>
+
+    <!-- Fonts: Encode Sans (UI) + Merriweather (chat), self-hosted.
+         These used to come straight from fonts.googleapis.com as a
+         render-blocking stylesheet, so on any network where Google Fonts is
+         slow or unreachable (various VPNs, several countries this instance is
+         used from) the browser painted nothing until that request timed out.
+         Served from this origin now, so the page never depends on a third
+         party to render. Regenerate with the Google Fonts CSS if the family
+         list changes; see public/fonts/fonts.css. -->
+    <!-- media="print" + onload: шрифты не держат первый кадр (01.10.26, см. выше). -->
+    <link rel="stylesheet" href="/fonts/fonts.css" media="print" onload="this.media='all'" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials"  />
+    
+    <!-- iOS Safari PWA Meta Tags -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!--
+      Обязательная пара к строке ниже. Apple учитывает
+      apple-mobile-web-app-status-bar-style ТОЛЬКО когда рядом стоит
+      apple-mobile-web-app-capable. Без неё iOS не считает страницу
+      веб-приложением в своём, «яблочном» смысле: строка состояния
+      остаётся непрозрачной, и высота содержимого урезается на её 62
+      точки, хотя само окно занимает экран целиком.
+
+      Замер с телефона Егора: экран 874, окно 874, а содержимое 812,
+      начиная с самого верха. Те самые 62 точки и оставались пустой
+      полосой внизу — вне страницы, поэтому никакая правка стилей до
+      неё не дотягивалась. Заодно 62 точки отступа сверху, которые
+      приложение честно добавляло под строку состояния, оказывались
+      лишними: iOS уже вычла их.
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Claude UI" />
+    
+    <!-- iOS Safari Icons -->
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
+    
+    <!-- Theme Color -->
+    <!-- Под тёмную иконку: белая полоса вокруг приложения выбивалась из неё. -->
+    <meta name="theme-color" content="#000000" />
+    <meta name="msapplication-TileColor" content="#ffffff" />
+    
+    <!-- Prevent zoom on iOS -->
+    <meta name="format-detection" content="telephone=no" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Заставка до первого экрана приложения (26.09.26). Раньше до запуска
+         программы экран был пустым, а на iPhone в тёмной теме — чисто чёрным,
+         и Егор не понимал, идёт ли что-то вообще («пусть хоть экран с инфо,
+         что идёт загрузка»). Чистый HTML/CSS, без скриптов: видна, даже если
+         программа не скачалась. Прячется сама, как только в #root появился
+         экран (#root:not(:empty)). Вторая строка — через 4 с, чтобы быстрый
+         запуск не мигал лишним текстом; третья с кнопкой — через 20 с, когда
+         связь явно застряла (01.10.26: «хотя бы со словами, что происходит»).
+         Стоит первой в теле страницы — до страховки, см. заметку в голове. -->
+    <div id="boot-splash" aria-live="polite">
+      <b>Открываю Claude UI…</b>
+      <p>Загружаю приложение. Если идёт обновление или связь слабая, это займёт до минуты.</p>
+      <p class="slow">Сервер отвечает слишком долго — связь до него медленная или обрывается. Если за минуту не откроется, страница сама попробует ещё раз.</p>
+      <button type="button" onclick="location.reload()">Обновить сейчас</button>
+    </div>
+
+    <!--
       Страховка запуска: страница никогда не остаётся белой молча.
 
       25.09.26, в который раз: приложение с экрана «Домой» на iPhone открылось
@@ -23,6 +144,8 @@
           опустел — страница сама перезапускается (не больше двух раз подряд),
           дальше показывает экран с кнопками вместо белого листа;
         · при возврате в приложение с пустым экраном — перезапуск сразу;
+        · программа запущена, а на экране ни одного видимого текста 12 с
+          (01.10.26: белый лист после 21 минуты в фоне) — тот же перезапуск;
         · каждый такой случай и каждый «телефон выгрузил страницу, не
           попрощавшись» уходит в журнал службы строкой [boot-probe].
     -->
@@ -37,13 +160,23 @@
         var START_TIMEOUT_MS = 15000;
         var LOADING_GRACE_MS = 60000;
         var MAX_AUTO_RELOADS = 2;
-        var guard = (window.__bootGuard = { started: Date.now(), errors: [], mountedOnce: false, done: false });
+        var early = window.__bootEarly || { errors: [], fatalLoad: false };
+        var guard = (window.__bootGuard = { started: Date.now(), errors: early.errors.slice(), mountedOnce: false, done: false, fatalLoad: early.fatalLoad });
 
         function store(key, value) {
           try { if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } catch (e) {}
         }
         function load(key) {
           try { return sessionStorage.getItem(key); } catch (e) { return null; }
+        }
+        // Пульс — в localStorage: iPhone, выгружая приложение с экрана «Домой»,
+        // стирает sessionStorage вместе с ним, и «страницу убили» не ловилось
+        // ни разу (25.09–01.10.26: ноль записей при ежедневных выгрузках).
+        function storeLocal(key, value) {
+          try { localStorage.setItem(key, value); } catch (e) {}
+        }
+        function loadLocal(key) {
+          try { return localStorage.getItem(key); } catch (e) { return null; }
         }
         // Без хранилища (Safari с запретом данных сайтов) счётчик перезапусков
         // не переживёт перезагрузку — автоперезапуск там был бы вечным циклом.
@@ -52,17 +185,6 @@
           catch (e) { return false; }
         })();
 
-        // Фон до программы — под тему, чтобы запуск не вспыхивал белым.
-        try {
-          var theme = localStorage.getItem('theme');
-          var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.style.background = dark ? '#141414' : '#f7f5f1';
-          // Заставке «Открываю…» — те же цвета: тело страницы до запуска
-          // программы красится стилями в светлый, поверх него нужен свой фон.
-          document.documentElement.style.setProperty('--boot-bg', dark ? '#141414' : '#f7f5f1');
-          document.documentElement.style.setProperty('--boot-fg', dark ? '#ececec' : '#1f1f1f');
-          document.documentElement.style.setProperty('--boot-dim', dark ? '#a1a1aa' : '#6b6b6b');
-        } catch (e) {}
 
         function report(kind, extra) {
           try {
@@ -81,6 +203,7 @@
               errors: guard.errors.slice(-6),
               ua: navigator.userAgent.slice(0, 160),
             };
+            if (guard.blankScreen) body.screen = JSON.stringify(guard.blankScreen);
             for (var key in extra || {}) body[key] = extra[key];
             // keepalive доносит запрос и при уходе со страницы, а ключ идёт
             // заголовком — в адресе он попал бы в журнал веб-сервера.
@@ -189,9 +312,9 @@
         }
         guard.recover = recover;
 
-        function check(why) {
+        function check(why, screenBlank) {
           if (guard.done) return;
-          if (rootFilled()) return;
+          if (!screenBlank && rootFilled()) return;
           var last = guard.errors[guard.errors.length - 1];
           recover(why + (last ? ' · ' + last : ''));
         }
@@ -248,10 +371,86 @@
         // только восстановление страницы из памяти браузера (persisted).
         window.addEventListener('pageshow', function (event) { if (event.persisted) onReturn(); });
 
+        // Белый экран у запущенной программы (01.10.26). Приложение вернулось
+        // из фона через 21 минуту, связь поднялась, программа числилась
+        // нарисованной — а на экране было пусто, и страховка молчала: #root не
+        // пуст. Теперь, пока страница видна, раз в 4 с ищем на экране хоть
+        // один видимый текст, не закрытый ничем сверху. Пусто три проверки
+        // подряд — в журнал службы, что именно сверху, и перезапуск (тот же
+        // предел: два раза, дальше кнопки). Картинка или окно во весь экран —
+        // не пустота.
+        function screenHasContent() {
+          var w = window.innerWidth, h = window.innerHeight;
+          if (!document.body || !w || !h) return true;
+          var top = document.elementFromPoint(w / 2, h / 2);
+          if (top && /^(IMG|VIDEO|CANVAS|IFRAME|EMBED|OBJECT|svg)$/.test(top.tagName)) return true;
+          if (top && getComputedStyle(top).backgroundImage !== 'none') return true;
+          if (document.querySelector('[role="dialog"], dialog[open]')) return true;
+          var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          var range = document.createRange();
+          // Предел — по тексту НА экране: длинный чат с кодом — тысячи кусков
+          // текста за краем, и счёт по всем решал «пусто» на живой странице.
+          // Общий предел обхода — только против зависания на огромной ленте.
+          for (var seen = 0, walked = 0, node = walker.nextNode(); node && seen < 300 && walked < 30000; node = walker.nextNode()) {
+            walked++;
+            if (!node.nodeValue || !node.nodeValue.trim()) continue;
+            var parent = node.parentElement;
+            if (!parent || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(parent.tagName)) continue;
+            range.selectNodeContents(node);
+            var r = range.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1 || r.bottom <= 0 || r.right <= 0 || r.top >= h || r.left >= w) continue;
+            seen++;
+            var x = Math.min(Math.max(r.left + Math.min(r.width, 8) / 2, 0), w - 1);
+            var y = Math.min(Math.max(r.top + r.height / 2, 0), h - 1);
+            // Скрытый или прозрачный текст тоже имеет размеры — не считается.
+            if (parent.checkVisibility && !parent.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+            if (getComputedStyle(parent).visibility !== 'visible') continue;
+            var hit = document.elementFromPoint(x, y);
+            if (!hit) continue;
+            if (hit === parent || parent.contains(hit)) return true;
+            // Подпись без отклика на касание (pointer-events: none) «пропускает»
+            // попадание к своему контейнеру — засчитываем, но не страницу целиком.
+            if (hit.contains(parent) && hit !== document.body && hit !== document.documentElement && hit.id !== 'root') return true;
+          }
+          // Не дошли до конца страницы — не знаем, значит не трогаем.
+          return walked >= 30000;
+        }
+        function describeScreen() {
+          var top = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+          var root = document.getElementById('root');
+          return {
+            topAtCenter: top ? (top.tagName + (top.id ? '#' + top.id : '') + '.' + String(top.className && top.className.baseVal !== undefined ? top.className.baseVal : top.className || '').slice(0, 80)) : '',
+            rootText: root ? (root.innerText || '').trim().length : -1,
+            rootHeight: root ? Math.round(root.getBoundingClientRect().height) : -1,
+            viewport: window.innerWidth + 'x' + window.innerHeight,
+            hiddenForSec: guard.hiddenAt ? Math.round((guard.shownAt - guard.hiddenAt) / 1000) : 0,
+          };
+        }
+        var blankChecks = 0;
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'hidden') guard.hiddenAt = Date.now();
+          else guard.shownAt = Date.now();
+          blankChecks = 0;
+        });
+        setInterval(function () {
+          if (guard.done || !guard.mountedOnce || document.visibilityState !== 'visible') return;
+          var blank = false;
+          try { blank = !screenHasContent(); } catch (e) { return; }
+          blankChecks = blank ? blankChecks + 1 : 0;
+          if (blankChecks === 3) {
+            try { guard.blankScreen = describeScreen(); } catch (e) { guard.blankScreen = { error: String(e).slice(0, 120) }; }
+            check('на экране пусто', true);
+          }
+        }, 4000);
+
         // Выгрузил ли телефон прошлую страницу, не попрощавшись. Пульс пишется
         // раз в 5 с, прощание — в pagehide. Пульс без прощания = страницу убили.
-        var beat = load(BEAT_KEY);
-        if (beat && beat.indexOf('bye') === -1) {
+        var beat = loadLocal(BEAT_KEY);
+        // localStorage общий для вкладок: на компьютере пульс без прощания может
+        // принадлежать соседней живой вкладке (фоновая пульсирует раз в минуту).
+        // Приложение с экрана «Домой» — всегда одна страница.
+        var beatSilentMs = beat ? Date.now() - Number(beat.split(':')[0]) : 0;
+        if (beat && beat.indexOf('bye') === -1 && (navigator.standalone || beatSilentMs > 90000)) {
           var lastBeat = Number(beat.split(':')[0]);
           guard.previousKilled = true;
           setTimeout(function () {
@@ -261,87 +460,16 @@
         // После прощания пульс молчит: браузер шлёт «страница скрыта» уже после
         // pagehide, и без этого обычная перезагрузка выглядела бы как убийство.
         var leaving = false;
-        function pulse() { if (!leaving) store(BEAT_KEY, Date.now() + ':' + document.visibilityState); }
+        function pulse() { if (!leaving) storeLocal(BEAT_KEY, Date.now() + ':' + document.visibilityState); }
         pulse();
         setInterval(pulse, 5000);
         document.addEventListener('visibilitychange', pulse);
-        window.addEventListener('pagehide', function () { leaving = true; store(BEAT_KEY, Date.now() + ':bye'); });
+        window.addEventListener('pagehide', function () { leaving = true; storeLocal(BEAT_KEY, Date.now() + ':bye'); });
         window.addEventListener('pageshow', function () { leaving = false; pulse(); });
       })();
     </script>
-
-    <!-- Fonts: Encode Sans (UI) + Merriweather (chat), self-hosted.
-         These used to come straight from fonts.googleapis.com as a
-         render-blocking stylesheet, so on any network where Google Fonts is
-         slow or unreachable (various VPNs, several countries this instance is
-         used from) the browser painted nothing until that request timed out.
-         Served from this origin now, so the page never depends on a third
-         party to render. Regenerate with the Google Fonts CSS if the family
-         list changes; see public/fonts/fonts.css. -->
-    <link rel="stylesheet" href="/fonts/fonts.css" />
-
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials"  />
-    
-    <!-- iOS Safari PWA Meta Tags -->
-    <meta name="mobile-web-app-capable" content="yes" />
-    <!--
-      Обязательная пара к строке ниже. Apple учитывает
-      apple-mobile-web-app-status-bar-style ТОЛЬКО когда рядом стоит
-      apple-mobile-web-app-capable. Без неё iOS не считает страницу
-      веб-приложением в своём, «яблочном» смысле: строка состояния
-      остаётся непрозрачной, и высота содержимого урезается на её 62
-      точки, хотя само окно занимает экран целиком.
-
-      Замер с телефона Егора: экран 874, окно 874, а содержимое 812,
-      начиная с самого верха. Те самые 62 точки и оставались пустой
-      полосой внизу — вне страницы, поэтому никакая правка стилей до
-      неё не дотягивалась. Заодно 62 точки отступа сверху, которые
-      приложение честно добавляло под строку состояния, оказывались
-      лишними: iOS уже вычла их.
-    -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Claude UI" />
-    
-    <!-- iOS Safari Icons -->
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
-    
-    <!-- Theme Color -->
-    <!-- Под тёмную иконку: белая полоса вокруг приложения выбивалась из неё. -->
-    <meta name="theme-color" content="#000000" />
-    <meta name="msapplication-TileColor" content="#ffffff" />
-    
-    <!-- Prevent zoom on iOS -->
-    <meta name="format-detection" content="telephone=no" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <!-- Заставка до первого экрана приложения (26.09.26). Раньше до запуска
-         программы экран был пустым, а на iPhone в тёмной теме — чисто чёрным,
-         и Егор не понимал, идёт ли что-то вообще («пусть хоть экран с инфо,
-         что идёт загрузка»). Чистый HTML/CSS, без скриптов: видна, даже если
-         программа не скачалась. Прячется сама, как только в #root появился
-         экран (#root:not(:empty)). Вторая строка — через 4 с, чтобы быстрый
-         запуск не мигал лишним текстом. Страховка запуска (boot-rescue) не
-         затронута: она смотрит только в #root. -->
-    <div id="boot-splash" aria-live="polite">
-      <b>Открываю Claude UI…</b>
-      <p>Загружаю приложение. Если идёт обновление или связь слабая, это займёт до минуты.</p>
-    </div>
-    <style>
-      #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-        gap:10px;padding:24px;text-align:center;box-sizing:border-box;pointer-events:none;
-        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-        background:var(--boot-bg,#f7f5f1);color:var(--boot-fg,#1f1f1f)}
-      #boot-splash b{font-size:18px;font-weight:600}
-      #boot-splash p{margin:0;max-width:20rem;color:var(--boot-dim,#6b6b6b);opacity:0;animation:boot-splash-hint .3s 4s forwards}
-      @keyframes boot-splash-hint{to{opacity:1}}
-      #root:not(:empty) ~ #boot-splash{display:none}
-    </style>
     <script type="module" src="/src/main.jsx"></script>
-    
+
     <!-- Service Worker Registration -->
     <script>
       if ('serviceWorker' in navigator) {

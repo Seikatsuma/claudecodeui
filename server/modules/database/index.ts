@@ -2,6 +2,8 @@ export { initializeDatabase } from '@/modules/database/init-db.js';
 export { closeConnection, getConnection, getDatabasePath } from '@/modules/database/connection.js';
 export { apiKeysDb } from '@/modules/database/repositories/api-keys.js';
 export { appConfigDb } from '@/modules/database/repositories/app-config.js';
+// chatGroupsDb: used by Chat Groups and WebSocket to assign a completed chat before broadcasting its canonical sidebar row.
+export { chatGroupsDb } from '@/modules/database/repositories/chat-groups.js';
 // chatMessageQueueDb: used by WebSocket to keep the chat message queue server-side (survives restarts, dispatched without an open tab).
 export { chatMessageQueueDb, type StoredQueuedChatMessage } from '@/modules/database/repositories/chat-message-queue.js';
 export { credentialsDb } from '@/modules/database/repositories/credentials.js';

@@ -6,7 +6,7 @@ import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
-import { OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
+import { isPlatformOwnerWebUser, OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
 import {
   readRequestUserId,
   resolveWebUserRuntimeContext,
@@ -264,6 +264,14 @@ function buildShellCommand(
     return initialCommand || 'opencode';
   }
 
+  // Devin runs are owner-only (checked on init); the resume id is Devin's own.
+  if (provider === 'devin') {
+    if (resumeSessionId) {
+      return `devin -r "${resumeSessionId}" || devin`;
+    }
+    return initialCommand || 'devin';
+  }
+
   const command = initialCommand || 'claude';
   if (resumeSessionId) {
     if (os.platform() === 'win32') {
@@ -384,6 +392,21 @@ export function handleShellConnection(
           readBoolean(data.isPlainShell) ||
           (!!initialCommand && !hasSession) ||
           provider === 'plain-shell';
+
+        // Devin's CLI + session store are machine-global; attaching a guest's
+        // terminal to a Devin session would hand them the owner's agent.
+        if (provider === 'devin' && OPEN_REGISTRATION) {
+          const numericUserId = Number(readRequestUserId(request));
+          if (!Number.isFinite(numericUserId) || !isPlatformOwnerWebUser(numericUserId)) {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                message: 'Devin is only available to the platform owner.',
+              }));
+            }
+            return;
+          }
+        }
 
         urlDetectionBuffer = '';
         announcedAuthUrls.clear();

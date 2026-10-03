@@ -14,18 +14,19 @@ import cors from 'cors';
 import { installProcessGuards } from '@/shared/process-guards.js';
 import { adoptSurvivors, markShuttingDown } from '@/modules/providers/list/claude/survivor-runs.js';
 import { warmSearchIndexes } from '@/modules/providers/services/session-conversations-search.service.js';
-import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
+import { broadcastRealtimeEvent } from '@/modules/websocket/services/websocket-state.service.js';
 import { AppError, findApplicationRoot, getClaudeJsonPath, getModuleDirectory, IS_PLATFORM, OPEN_REGISTRATION, terminalTextStyles } from '@/shared/utils.js';
 import {
     closeSessionsWatcher,
     initializeSessionsWatcher,
     broadcastSessionUpserted,
+    providerRegistry,
     providerRuntimeService,
     startSessionActivitySync,
     stopSessionActivitySync,
 } from '@/modules/providers/index.js';
 import { userDb, initializeDatabase, sessionsDb  } from '@/modules/database/index.js';
-import { createWebSocketServer, dispatchChatQueues } from '@/modules/websocket/index.js';
+import { chatRunRegistry, createWebSocketServer, dispatchChatQueues } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -190,6 +191,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Public health check endpoint (no authentication required)
 app.get('/health', (req, res) => {
+    const activeRuns = chatRunRegistry.listRunningRuns();
+    const restartBlockingRuns = activeRuns.filter(
+        (run) => run.provider !== 'claude' && run.provider !== 'codex',
+    );
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
@@ -198,7 +203,10 @@ app.get('/health', (req, res) => {
         accountLabel: ACCOUNT_LABEL,
         secondServerLabel: SECOND_SERVER_LABEL,
         switchAccountUrl: SWITCH_ACCOUNT_URL,
-        accountEmail: CLAUDE_ACCOUNT_EMAIL
+        accountEmail: CLAUDE_ACCOUNT_EMAIL,
+        activeRuns: activeRuns.length,
+        restartBlockingRuns: restartBlockingRuns.length,
+        draining: chatRunRegistry.isShutdownDraining(),
     });
 });
 
@@ -552,21 +560,19 @@ async function startServer() {
                 },
                 // Этап по хвосту переписки — иначе плашка до конца работы
                 // писала «Ожидает модель», и чат выглядел зависшим.
-                onPhase: (appSessionId, phase) => {
+                onPhase: (appSessionId, phase, provider) => {
                     if (!phase) return;
                     const event = JSON.stringify({
                         kind: 'run_phase',
                         sessionId: appSessionId,
-                        provider: 'claude',
+                        provider,
                         text: phase.phase,
                         detail: phase.detail,
                         timestamp: new Date().toISOString(),
                     });
-                    connectedClients.forEach((client) => {
-                        if (client.readyState === WS_OPEN_STATE) client.send(event);
-                    });
+                    broadcastRealtimeEvent(event, provider || 'claude');
                 },
-                onGone: (appSessionId) => {
+                onGone: (appSessionId, provider) => {
                     // Порядок важен: страница не перечитывает переписку, пока
                     // считает чат работающим. Сначала «чат свободен», потом
                     // «перечитай» — иначе последний ответ агента не появлялся
@@ -582,19 +588,47 @@ async function startServer() {
                         kind: 'complete',
                         sessionId: appSessionId,
                         actualSessionId: appSessionId,
-                        provider: 'claude',
+                        provider,
                         exitCode: 0,
                         success: true,
                         timestamp: new Date().toISOString(),
                     });
-                    connectedClients.forEach((client) => {
-                        if (client.readyState === WS_OPEN_STATE) client.send(idle);
-                    });
+                    broadcastRealtimeEvent(idle, provider || 'claude');
                     // Агент, переживший перезапуск сайта, закончил — значит и
                     // очередь этого чата может идти дальше.
                     dispatchChatQueues();
                 },
+                // Codex can discover its native thread id after the old web
+                // process has already exited. Persist the mapping when the
+                // new server adopts the worker so history/resume still use
+                // the same conversation.
+                onProviderSession: (appSessionId, providerSessionId, _provider, transcriptPath) => {
+                    sessionsDb.assignProviderSessionId(appSessionId, providerSessionId);
+                    if (transcriptPath) {
+                        sessionsDb.setJsonlPathIfMissing(appSessionId, transcriptPath);
+                    }
+                    void broadcastSessionUpserted(appSessionId).catch(() => {});
+                },
+                // У пережившего рестарт Devin-хода есть живой супервизор:
+                // переподключаемся к его сокету, чтобы незакрытые запросы
+                // разрешений снова дошли до человека.
+                onAdopted: (record) => {
+                    const survivor = record as import('@/shared/types.js').ProviderSurvivorRecord | undefined;
+                    if (survivor?.provider !== 'devin') {
+                        return;
+                    }
+                    try {
+                        providerRegistry.resolveProvider('devin').runtime.reattachSurvivor?.(survivor, (message) => {
+                            broadcastRealtimeEvent(JSON.stringify(message), 'devin');
+                        });
+                    } catch (error) {
+                        console.warn('[survivor-runs] devin reattach failed:', error instanceof Error ? error.message : String(error));
+                    }
+                },
             });
+            // Survivor map is now authoritative: queued messages cannot race
+            // a still-running process from the previous server generation.
+            dispatchChatQueues();
 
             // Выжимки переписки для поиска — заранее и не сразу после старта:
             // первый поиск после выкатки не ждёт разбора всей переписки.
@@ -614,27 +648,73 @@ async function startServer() {
 
         await closeSessionsWatcher();
         stopSessionActivitySync();
-        // Clean up plugin processes on shutdown
-        const shutdownRuntimeServices = async () => {
-            // Первым делом: агенты не должны умереть вместе с сервером.
-            markShuttingDown();
-            try {
-                await browserUseService.stopAllSessions();
-            } catch (err) {
-                console.error('[Browser] Error stopping sessions during shutdown:', getErrorMessage(err));
+        let shutdownPromise: Promise<void> | null = null;
+        const shutdownRuntimeServices = (): Promise<void> => {
+            if (shutdownPromise) {
+                return shutdownPromise;
             }
-            try {
-                await stopAllPlugins();
-            } catch (err) {
-                console.error('[Plugins] Error stopping plugins during shutdown:', getErrorMessage(err));
-            }
-            try {
-                await removeLocalServerMarker();
-            } catch (err) {
-                console.error('[Local Server] Error removing server marker during shutdown:', getErrorMessage(err));
-            }
-            process.exit(0);
+
+            shutdownPromise = (async () => {
+                // Сразу закрываем вход новым запускам: сообщения, пришедшие во
+                // время ожидания, остаются в серверной очереди и уйдут после
+                // подъёма новой версии. Claude и Codex живут отдельно от сайта и
+                // усыновляются новым сервером; ждём только остальные, неживучие runtime.
+                chatRunRegistry.beginShutdownDrain();
+                markShuttingDown();
+
+                const waitingSince = Date.now();
+                let lastProgressLog = 0;
+                while (true) {
+                    const blockingRuns = chatRunRegistry
+                        .listRunningRuns()
+                        .filter((run) => run.provider !== 'claude' && run.provider !== 'codex');
+                    if (blockingRuns.length === 0) {
+                        break;
+                    }
+
+                    const now = Date.now();
+                    if (lastProgressLog === 0 || now - lastProgressLog >= 30_000) {
+                        const labels = blockingRuns
+                            .map((run) => `${run.provider}:${run.sessionId}`)
+                            .join(', ');
+                        console.log(
+                            `[shutdown-drain] жду ${blockingRuns.length} активн. ход(а/ов) перед перезапуском: ${labels}`,
+                        );
+                        lastProgressLog = now;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                }
+                if (lastProgressLog !== 0) {
+                    console.log(`[shutdown-drain] активные ходы закончились за ${Math.round((Date.now() - waitingSince) / 1000)} с — перезапускаюсь`);
+                }
+
+                try {
+                    await browserUseService.stopAllSessions();
+                } catch (err) {
+                    console.error('[Browser] Error stopping sessions during shutdown:', getErrorMessage(err));
+                }
+                try {
+                    await stopAllPlugins();
+                } catch (err) {
+                    console.error('[Plugins] Error stopping plugins during shutdown:', getErrorMessage(err));
+                }
+                try {
+                    await removeLocalServerMarker();
+                } catch (err) {
+                    console.error('[Local Server] Error removing server marker during shutdown:', getErrorMessage(err));
+                }
+                process.exit(0);
+            })();
+
+            return shutdownPromise;
         };
+        // Штатная выкладка заранее закрывает вход новым запускам этим
+        // сигналом и ждёт restartBlockingRuns=0 ещё ДО systemctl restart.
+        // Поэтому даже системный 90-секундный TimeoutStopSec не участвует.
+        process.on('SIGUSR2', () => {
+            chatRunRegistry.beginShutdownDrain();
+            console.log('[shutdown-drain] новые ходы закрыты, сообщения остаются в очереди до перезапуска');
+        });
         process.on('SIGTERM', () => void shutdownRuntimeServices());
         process.on('SIGINT', () => void shutdownRuntimeServices());
     } catch (error) {

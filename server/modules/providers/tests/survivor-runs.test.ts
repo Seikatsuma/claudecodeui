@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { appendFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,11 +8,13 @@ import test from 'node:test';
 import {
   adoptSurvivors,
   getSurvivorPhase,
+  getSurvivorProvider,
   isSurvivorRunning,
   markShuttingDown,
   noteSurvivorProviderSession,
   pollSurvivors,
   readTranscriptPhase,
+  readCodexEventPhase,
   resetSurvivorsForTests,
   spawnSurvivableClaude,
   stopSurvivor,
@@ -104,6 +107,107 @@ test('когда переживший агент закончил, сервер 
     pollSurvivors({ onGone: (id: string) => gone.push(id) });
     assert.deepEqual(gone, ['chat-3']);
     assert.equal(isSurvivorRunning('chat-3'), false);
+  });
+});
+
+test('Codex worker живёт после выхода запустившего процесса и усыновляется новым сайтом', async () => {
+  await withLiveDir(async (dir) => {
+    const eventPath = path.join(dir, 'codex-events.jsonl');
+    const providerSessionId = 'codex-provider-1';
+    await writeFile(eventPath,
+      line({ type: 'thread.started', thread_id: providerSessionId })
+      + line({ type: 'item.started', item: { type: 'reasoning', text: 'thinking' } }));
+
+    const codexHome = path.join(dir, 'codex-home');
+    const transcript = path.join(codexHome, 'sessions', '2026', '10', `rollout-${providerSessionId}.jsonl`);
+    await mkdir(path.dirname(transcript), { recursive: true });
+    await writeFile(transcript, '{}\n');
+
+    // The launcher exits immediately. Only its detached grandchild remains,
+    // exactly like a Codex worker after the website process is replaced.
+    const launcher = `
+      const { spawn } = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', 'codex-worker.provider.js', '--cloudcli-codex-worker'], { detached: true, stdio: 'ignore' });
+      child.unref();
+      process.stdout.write(String(child.pid));
+    `;
+    const pid = Number(execFileSync(process.execPath, ['-e', launcher], { encoding: 'utf8' }));
+    assert.equal(alive(pid), true, 'осиротевший worker жив');
+
+    await writeFile(path.join(dir, `${pid}.json`), JSON.stringify({
+      pid,
+      provider: 'codex',
+      appSessionId: 'codex-chat-1',
+      providerSessionId: null,
+      configDir: codexHome,
+      eventPath,
+      startedAt: Date.now(),
+    }));
+
+    const mappings: unknown[] = [];
+    const adopted = adoptSurvivors({
+      pollMs: 0,
+      onProviderSession: (appSessionId: string, nativeId: string, provider: 'claude' | 'codex', jsonlPath: string | null) => {
+        mappings.push({ appSessionId, nativeId, provider, jsonlPath });
+      },
+    });
+    assert.deepEqual(adopted.map((run) => run.provider), ['codex']);
+    assert.equal(getSurvivorProvider('codex-chat-1'), 'codex');
+    assert.deepEqual(getSurvivorPhase('codex-chat-1'), { phase: 'thinking', detail: null });
+    assert.deepEqual(mappings, [{
+      appSessionId: 'codex-chat-1',
+      nativeId: providerSessionId,
+      provider: 'codex',
+      jsonlPath: transcript,
+    }]);
+
+    assert.equal(stopSurvivor('codex-chat-1'), true);
+    assert.equal(await waitFor(() => !alive(pid)), true);
+  });
+});
+
+test('этап Codex читается из журнала worker', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'codex-phase-'));
+  try {
+    const file = path.join(dir, 'events.jsonl');
+    await writeFile(file, line({ type: 'turn.started' }));
+    assert.deepEqual(readCodexEventPhase(file), { phase: 'thinking', detail: null });
+    await appendFile(file, line({ type: 'item.started', item: { type: 'command_execution', command: 'pwd' } }));
+    assert.deepEqual(readCodexEventPhase(file), { phase: 'tool', detail: 'Bash' });
+    await appendFile(file, line({ type: 'item.completed', item: { type: 'agent_message', text: 'готово' } }));
+    assert.deepEqual(readCodexEventPhase(file), { phase: 'writing', detail: null });
+    await appendFile(file, line({ type: 'turn.completed', usage: {} }));
+    assert.equal(readCodexEventPhase(file), null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('завершившийся во время простоя сайта Codex восстанавливает mapping до уборки мёртвой записи', async () => {
+  await withLiveDir(async (dir) => {
+    const eventPath = path.join(dir, 'finished-codex.jsonl');
+    await writeFile(eventPath,
+      line({ type: 'thread.started', thread_id: 'finished-native-id' })
+      + line({ type: 'turn.completed', usage: {} })
+      + line({ type: 'worker.completed', exitCode: 0 }));
+    const deadPid = 999_999_999;
+    await writeFile(path.join(dir, `${deadPid}.json`), JSON.stringify({
+      pid: deadPid,
+      provider: 'codex',
+      appSessionId: 'finished-app-id',
+      providerSessionId: null,
+      eventPath,
+      startedAt: Date.now(),
+    }));
+
+    const mappings: string[] = [];
+    const adopted = adoptSurvivors({
+      pollMs: 0,
+      onProviderSession: (appSessionId: string, nativeId: string) => mappings.push(`${appSessionId}:${nativeId}`),
+    });
+    assert.deepEqual(adopted, []);
+    assert.deepEqual(mappings, ['finished-app-id:finished-native-id']);
+    assert.deepEqual(await readdir(dir), ['finished-codex.jsonl']);
   });
 });
 

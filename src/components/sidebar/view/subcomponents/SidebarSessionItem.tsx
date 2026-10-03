@@ -41,6 +41,7 @@ const PROVIDER_LABELS: Record<LLMProvider, string> = {
   claude: 'Claude',
   codex: 'Codex',
   cursor: 'Cursor',
+  devin: 'Devin',
   opencode: 'OpenCode',
 };
 

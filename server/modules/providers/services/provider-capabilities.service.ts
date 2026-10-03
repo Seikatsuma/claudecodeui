@@ -69,6 +69,25 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsTokenUsage: true,
     supportsEffort: true,
   },
+  devin: {
+    provider: 'devin',
+    // Mapped by the runtime onto Devin ACP session modes via session/set_mode:
+    // accept-edits (acceptEdits), bypass (bypassPermissions), plan; 'default'
+    // leaves Devin's own configured mode in charge. 'auto' maps to 'smart'.
+    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    defaultPermissionMode: 'default',
+    supportsImages: true,
+    supportsFiles: true,
+    supportsAbort: true,
+    // ACP session/request_permission goes to the UI via the permission
+    // gateway (bypass mode still auto-allows inside the runtime).
+    supportsPermissionRequests: true,
+    // usage_update flows live into tokenBudget, but Devin's sessions.db does
+    // not persist per-turn usage — no REST endpoint data.
+    supportsTokenUsage: false,
+    // Effort is baked into each Devin model uid (...-high/-medium/-max).
+    supportsEffort: false,
+  },
   opencode: {
     provider: 'opencode',
     // Mapped by the runtime onto OpenCode's controls: `--agent plan` (plan),
@@ -133,6 +152,18 @@ export const providerCapabilitiesService = {
   },
 
   listAllProviderCapabilities(): ProviderCapabilities[] {
-    return Object.values(PROVIDER_CAPABILITIES).map(withResolvedDefault);
+    // Devin's credentials are machine-global, so the provider only exists for
+    // the platform owner; on multi-tenant instances guests must not even see
+    // it in the picker's capability map.
+    let ownerOnlyOk = true;
+    if (OPEN_REGISTRATION) {
+      const userId = getRequestRuntimeContext()?.userId;
+      const numericUserId = userId === undefined || userId === null ? NaN : Number(userId);
+      ownerOnlyOk = Number.isFinite(numericUserId) && isPlatformOwnerWebUser(numericUserId);
+    }
+
+    return Object.values(PROVIDER_CAPABILITIES)
+      .filter((entry) => entry.provider !== 'devin' || ownerOnlyOk)
+      .map(withResolvedDefault);
   },
 };

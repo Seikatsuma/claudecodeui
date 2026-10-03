@@ -24,6 +24,7 @@ const PROVIDERS: Array<{ id: LLMProvider; label: string }> = [
   { id: 'codex', label: 'Codex' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'opencode', label: 'OpenCode' },
+  { id: 'devin', label: 'Devin' },
 ];
 
 type ModelLibraryPanelProps = {
@@ -49,9 +50,18 @@ export default function ModelLibraryPanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Providers whose catalog never loaded (e.g. owner-only Devin on a
+  // multi-tenant instance) are not selectable tabs.
+  const visibleProviders = useMemo(
+    () => PROVIDERS.filter((entry) => providerModelCatalog[entry.id] !== undefined),
+    [providerModelCatalog],
+  );
+
   useEffect(() => {
-    setSelectedProvider(initialProvider);
-  }, [initialProvider]);
+    setSelectedProvider(
+      providerModelCatalog[initialProvider] ? initialProvider : (visibleProviders[0]?.id ?? initialProvider),
+    );
+  }, [initialProvider, providerModelCatalog, visibleProviders]);
 
   const options = useMemo(
     () => providerModelCatalog[selectedProvider]?.OPTIONS ?? [],
@@ -173,8 +183,8 @@ export default function ModelLibraryPanel({
         )}
       </div>
 
-      <div className="scrollbar-thin flex shrink-0 gap-1 overflow-x-auto rounded-xl border border-border/70 bg-muted/25 p-1">
-        {PROVIDERS.map((provider) => {
+      <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-border/70 bg-muted/25 p-1">
+        {visibleProviders.map((provider) => {
           const selected = provider.id === selectedProvider;
           return (
             <button

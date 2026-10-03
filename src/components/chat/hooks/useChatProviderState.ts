@@ -22,10 +22,11 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   claude: 'default',
   cursor: 'gpt-5.3-codex',
   codex: 'gpt-5.6-sol',
+  devin: 'swe-2-high',
   opencode: 'anthropic/claude-sonnet-4-5',
 };
 
-const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode'];
+const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode', 'devin'];
 
 const readStoredProvider = (): LLMProvider => {
   const storedProvider = localStorage.getItem('selected-provider');
@@ -44,6 +45,7 @@ const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   claude: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
   cursor: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'acceptEdits', 'bypassPermissions'],
+  devin: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   opencode: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
 };
 
@@ -154,6 +156,9 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const [opencodeModel, setOpenCodeModel] = useState<string>(() => {
     return localStorage.getItem('opencode-model') || FALLBACK_DEFAULT_MODEL.opencode;
   });
+  const [devinModel, setDevinModel] = useState<string>(() => {
+    return localStorage.getItem('devin-model') || FALLBACK_DEFAULT_MODEL.devin;
+  });
 
   /**
    * Backend-owned capability matrix keyed by provider. Drives the permission
@@ -192,6 +197,12 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     if (targetProvider === 'codex') {
       setCodexModel(model);
       localStorage.setItem('codex-model', model);
+      return;
+    }
+
+    if (targetProvider === 'devin') {
+      setDevinModel(model);
+      localStorage.setItem('devin-model', model);
       return;
     }
 
@@ -382,8 +393,9 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     claude: claudeModel,
     cursor: cursorModel,
     codex: codexModel,
+    devin: devinModel,
     opencode: opencodeModel,
-  }), [claudeModel, cursorModel, codexModel, opencodeModel]);
+  }), [claudeModel, cursorModel, codexModel, devinModel, opencodeModel]);
 
   useEffect(() => {
     const claude = providerModelCatalog.claude;
@@ -436,6 +448,19 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       }
     }
   }, [providerModelCatalog.opencode, opencodeModel]);
+
+  useEffect(() => {
+    const devin = providerModelCatalog.devin;
+    if (devin) {
+      const next = pickStoredOrCurrent('devin-model', devinModel, devin);
+      if (next !== devinModel) {
+        setDevinModel(next);
+      }
+      if (localStorage.getItem('devin-model') !== next) {
+        localStorage.setItem('devin-model', next);
+      }
+    }
+  }, [providerModelCatalog.devin, devinModel]);
 
   useEffect(() => {
     const nextEfforts: Partial<Record<LLMProvider, string>> = {};
@@ -890,6 +915,8 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     setClaudeModel,
     codexModel,
     setCodexModel,
+    devinModel,
+    setDevinModel,
     currentProviderEffort,
     currentProviderEffortOptions,
     currentProviderModel,

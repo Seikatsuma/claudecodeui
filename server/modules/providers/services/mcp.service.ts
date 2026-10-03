@@ -1,6 +1,23 @@
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type { LLMProvider, McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, isPlatformOwnerWebUser, OPEN_REGISTRATION } from '@/shared/utils.js';
+
+/**
+ * Devin's MCP configs are machine-global files (`~/.config/devin/mcp_config.json`
+ * and per-project `.devin/mcp_config.*.json`) that every Devin run reads — a
+ * guest-written stdio `command` would execute inside the owner's Devin runs.
+ * So on OPEN_REGISTRATION instances the global add/remove iterates only
+ * providers the caller may write to: Devin is skipped for non-owners.
+ */
+function devinMcpAllowedForCaller(): boolean {
+  if (!OPEN_REGISTRATION) {
+    return true;
+  }
+  const userId = getRequestRuntimeContext()?.userId;
+  const numericUserId = userId === undefined || userId === null ? NaN : Number(userId);
+  return Number.isFinite(numericUserId) && isPlatformOwnerWebUser(numericUserId);
+}
 
 
 export const providerMcpService = {
@@ -64,7 +81,8 @@ export const providerMcpService = {
 
     const scope = input.scope ?? 'project';
     const results: Array<{ provider: LLMProvider; created: boolean; error?: string }> = [];
-    const providers = providerRegistry.listProviders();
+    const providers = providerRegistry.listProviders()
+      .filter((provider) => provider.id !== 'devin' || devinMcpAllowedForCaller());
     for (const provider of providers) {
       try {
         await provider.mcp.upsertServer({ ...input, scope });
@@ -90,7 +108,8 @@ export const providerMcpService = {
     input: { name: string; scope?: McpScope; workspacePath?: string },
   ): Promise<Array<{ provider: LLMProvider; removed: boolean; error?: string }>> {
     const results: Array<{ provider: LLMProvider; removed: boolean; error?: string }> = [];
-    const providers = providerRegistry.listProviders();
+    const providers = providerRegistry.listProviders()
+      .filter((provider) => provider.id !== 'devin' || devinMcpAllowedForCaller());
     for (const provider of providers) {
       try {
         const result = await provider.mcp.removeServer(input);

@@ -283,6 +283,38 @@ test('startRun rejects a second concurrent run for the same session', async () =
   });
 });
 
+test('shutdown drain lets the active run finish but rejects every new run', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-drain-active', 'codex', '/workspace/demo');
+    sessionsDb.createAppSession('app-run-drain-new', 'codex', '/workspace/demo');
+    const connection = new FakeConnection();
+    const active = chatRunRegistry.startRun({
+      appSessionId: 'app-run-drain-active',
+      provider: 'codex',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(active);
+
+    chatRunRegistry.beginShutdownDrain();
+    assert.equal(chatRunRegistry.isShutdownDraining(), true);
+    assert.equal(chatRunRegistry.isProcessing('app-run-drain-active'), true);
+
+    const rejected = chatRunRegistry.startRun({
+      appSessionId: 'app-run-drain-new',
+      provider: 'codex',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.equal(rejected, null);
+
+    chatRunRegistry.completeRun('app-run-drain-active', { exitCode: 0 });
+    assert.equal(chatRunRegistry.isProcessing('app-run-drain-active'), false);
+  });
+});
+
 test('каждое событие работы несёт метку этой работы', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('app-run-stamp', 'claude', '/workspace/demo');

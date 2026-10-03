@@ -1,6 +1,10 @@
+import { existsSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 
+import Database from 'better-sqlite3';
+
 import { getConnection } from '@/modules/database/connection.js';
+import { getDevinDatabasePath, normalizeProviderTimestamp } from '@/shared/utils.js';
 
 /**
  * Время последнего сообщения чата — из самой переписки, а не из базы.
@@ -133,7 +137,64 @@ export async function syncSessionActivityOnce(): Promise<number> {
     changed += 1;
   }
 
+  changed += syncDevinSessionActivity(db, update);
   return changed;
+}
+
+/**
+ * То же для чатов Devin: у них нет файла переписки, вместо него колонка
+ * `last_activity_at` (unix-секунды) в общей `sessions.db` Devin CLI.
+ */
+function syncDevinSessionActivity(
+  db: ReturnType<typeof getConnection>,
+  update: { run(...args: unknown[]): unknown },
+): number {
+  const devinRows = db.prepare(
+    `SELECT session_id, provider_session_id, updated_at FROM sessions
+      WHERE provider = 'devin' AND isArchived = 0`
+  ).all() as { session_id: string; provider_session_id: string | null; updated_at: string | null }[];
+  if (devinRows.length === 0) {
+    return 0;
+  }
+
+  const dbPath = getDevinDatabasePath();
+  if (!existsSync(dbPath)) {
+    return 0;
+  }
+
+  let devinDb: InstanceType<typeof Database>;
+  try {
+    devinDb = new Database(dbPath, { readonly: true, fileMustExist: true });
+  } catch {
+    return 0;
+  }
+
+  let changed = 0;
+  try {
+    const readStamp = devinDb.prepare(
+      'SELECT COALESCE(last_activity_at, created_at, 0) AS stamp FROM sessions WHERE id = ?',
+    );
+    for (const row of devinRows) {
+      const providerId = row.provider_session_id ?? row.session_id;
+      const stampRow = readStamp.get(providerId) as { stamp: number } | undefined;
+      if (!stampRow?.stamp) {
+        continue;
+      }
+      const lastMessageAt = normalizeProviderTimestamp(stampRow.stamp);
+      const storedMs = parseStoredTimestamp(row.updated_at);
+      if (storedMs !== null && Math.abs(storedMs - new Date(lastMessageAt).getTime()) < 1000) {
+        continue;
+      }
+      update.run(lastMessageAt, row.session_id);
+      changed += 1;
+    }
+    return changed;
+  } catch {
+    // Mid-loop failure still reports the rows already updated.
+    return changed;
+  } finally {
+    devinDb.close();
+  }
 }
 
 export function startSessionActivitySync(): void {

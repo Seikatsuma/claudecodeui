@@ -51,6 +51,58 @@ const tableExists = (db: Database, tableName: string): boolean =>
 const getTableInfo = (db: Database, tableName: string): TableInfoRow[] =>
   db.prepare(`PRAGMA table_info(${tableName})`).all() as TableInfoRow[];
 
+/**
+ * Rebuilds provider_models when its CHECK constraint predates a provider.
+ *
+ * `CREATE TABLE IF NOT EXISTS` leaves an existing CHECK untouched, so a
+ * database created before Devin existed would reject custom Devin models
+ * forever. SQLite has no ALTER for CHECKs — the table is recreated.
+ */
+const rebuildProviderModelsTableForDevin = (db: Database): void => {
+  if (!tableExists(db, 'provider_models')) {
+    return;
+  }
+
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'provider_models'")
+    .get() as { sql: string | null } | undefined;
+  if (row?.sql?.includes("'devin'")) {
+    return;
+  }
+
+  console.log('Running migration: Rebuilding provider_models to allow the devin provider');
+  // Whole rebuild in one transaction: a crash between steps must not strand
+  // `provider_models_new` (would break the next boot) or drop the old table
+  // without the renamed replacement (would silently lose custom models).
+  db.exec('DROP TABLE IF EXISTS provider_models_new');
+  db.exec('BEGIN TRANSACTION');
+  try {
+    db.exec(`
+      CREATE TABLE provider_models_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          provider TEXT NOT NULL CHECK (provider IN ('claude', 'cursor', 'codex', 'opencode', 'devin')),
+          model_id TEXT NOT NULL,
+          model_name TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(provider, model_id)
+      );
+
+      INSERT INTO provider_models_new (id, provider, model_id, model_name, sort_order, created_at, updated_at)
+      SELECT id, provider, model_id, model_name, sort_order, created_at, updated_at
+      FROM provider_models;
+
+      DROP TABLE provider_models;
+      ALTER TABLE provider_models_new RENAME TO provider_models;
+    `);
+    db.exec('COMMIT');
+  } catch (migrationError) {
+    db.exec('ROLLBACK');
+    throw migrationError;
+  }
+};
+
 const migrateLegacySessionNames = (db: Database): void => {
   const hasLegacySessionNamesTable = tableExists(db, 'session_names');
   const hasSessionsTable = tableExists(db, 'sessions');
@@ -642,6 +694,7 @@ export const runMigrations = (db: Database) => {
     db.exec('CREATE INDEX IF NOT EXISTS idx_notification_channel_endpoints_user_channel ON notification_channel_endpoints(user_id, channel)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_notification_channel_endpoints_enabled ON notification_channel_endpoints(enabled)');
     db.exec(PROVIDER_MODELS_TABLE_SCHEMA_SQL);
+    rebuildProviderModelsTableForDevin(db);
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_provider_models_provider_order
       ON provider_models(provider, sort_order, id)

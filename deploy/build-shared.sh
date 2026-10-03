@@ -158,6 +158,46 @@ wait_site_up() {
     return 0
 }
 
+# Codex, в отличие от Claude, не умеет переподключить уже идущий turn к
+# новому Node-процессу: рестарт записывает turn_aborted. Сначала SIGUSR2
+# закрывает вход новым запускам (их сообщения остаются в серверной очереди),
+# затем ждём, пока все не-Claude ходы закончатся. Без таймаута намеренно:
+# обновление сайта может подождать, работа человека — нет.
+wait_restart_safe_window() {
+    local main_pid health blocking draining waited=0 signaled_pid=""
+    while :; do
+        main_pid="$(systemctl show claudecodeui-shared -p MainPID --value 2>/dev/null)"
+        if [[ ! "$main_pid" =~ ^[1-9][0-9]*$ ]]; then
+            say "ОШИБКА: не удалось узнать PID живого Claude UI — безопасный перезапуск невозможен"
+            return 1
+        fi
+        if [ "$main_pid" != "$signaled_pid" ]; then
+            if ! kill -USR2 "$main_pid" 2>/dev/null; then
+                say "ОШИБКА: не удалось включить ожидание у PID $main_pid"
+                return 1
+            fi
+            signaled_pid="$main_pid"
+        fi
+
+        health="$(curl -sS --max-time 5 http://127.0.0.1:3003/health 2>/dev/null || true)"
+        blocking="$(sed -n 's/.*"restartBlockingRuns":\([0-9][0-9]*\).*/\1/p' <<<"$health")"
+        draining="$(sed -n 's/.*"draining":\(true\|false\).*/\1/p' <<<"$health")"
+        if [ "$draining" = true ] && [ "$blocking" = 0 ]; then
+            [ "$waited" -gt 0 ] && say "Активные ходы закончились — можно безопасно перезапускать"
+            return 0
+        fi
+        if [ -z "$blocking" ] || [ -z "$draining" ]; then
+            say "ОШИБКА: живая версия ещё не умеет безопасно ждать Codex; автоматический перезапуск остановлен"
+            return 1
+        fi
+        if [ "$waited" -eq 0 ] || [ $((waited % 30)) -eq 0 ]; then
+            say "Перед перезапуском жду активные не-Claude ходы: $blocking (новые сообщения остаются в очереди)"
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
 swap() {
     cd "$SHARED" || return 1
     # Живой коммит обязан входить в собираемый. 16.09.26 два чата выкатили
@@ -170,6 +210,7 @@ swap() {
         SWAP_REFUSED=1
         return 1
     fi
+    wait_restart_safe_window || return 1
     git checkout -q "$COMMIT" || return 1
 
     # Предыдущая сборка не удаляется, а отодвигается в *.prev — это мгновенный

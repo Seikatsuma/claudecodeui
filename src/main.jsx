@@ -29,10 +29,50 @@ function CrashHandoff({ error }) {
   return null
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <ErrorBoundary FallbackComponent={CrashHandoff}>
-      <App />
-    </ErrorBoundary>
-  </React.StrictMode>,
-)
+// Стили программы подключаются, не держа первый кадр (vite.config.js,
+// non-blocking-app-css, 01.10.26): пока они в дороге, видна заставка.
+// Рисовать программу раньше стилей нельзя — она мигнёт голой разметкой.
+// Стиль не пришёл — решает страховка из index.html (перезапуск, потом
+// экран с кнопками), а не программа без оформления.
+function whenAppCssReady() {
+  const pending = [...document.querySelectorAll('link[data-app-css]')].filter(link => link.media !== 'all')
+  if (pending.length === 0) return Promise.resolve()
+  return new Promise(resolve => {
+    let finished = false
+    // Не держимся за одно событие load: если браузер его не прислал (приём
+    // media="print" → onload в Safari замером не проверен), стиль, уже
+    // лежащий в link.sheet, подключаем сами.
+    const poll = setInterval(check, 200)
+    function check() {
+      if (finished) return
+      pending.forEach(link => { if (link.media !== 'all' && link.sheet) link.media = 'all' })
+      if (pending.every(link => link.media === 'all')) {
+        finished = true
+        clearInterval(poll)
+        resolve()
+      }
+    }
+    pending.forEach(link => {
+      link.addEventListener('load', check, { once: true })
+      link.addEventListener('error', () => {
+        if (finished) return
+        finished = true
+        clearInterval(poll)
+        const guard = window.__bootGuard
+        if (guard && guard.recover) guard.recover('не загрузился файл стилей ' + link.getAttribute('href'))
+        else resolve()
+      }, { once: true })
+    })
+    check()
+  })
+}
+
+whenAppCssReady().then(() => {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <ErrorBoundary FallbackComponent={CrashHandoff}>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>,
+  )
+})

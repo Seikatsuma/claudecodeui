@@ -1,11 +1,10 @@
 import path from 'node:path';
 
-import { projectsDb, sessionsDb } from '@/modules/database/index.js';
-import { chatGroupsDb } from '@/modules/database/repositories/chat-groups.js';
-import { isSurvivorRunning, listSurvivors } from '@/modules/providers/list/claude/survivor-runs.js';
+import { chatGroupsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { isSurvivorRunning, listSurvivors } from '@/modules/providers/index.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
-import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
+import { broadcastRealtimeEvent } from '@/modules/websocket/services/websocket-state.service.js';
 import type {
   LLMProvider,
   NormalizedMessage,
@@ -64,6 +63,13 @@ const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
  */
 const runs = new Map<string, ChatRun>();
 
+/**
+ * A deliberate server restart first closes this gate. Claude and Codex own
+ * survivable processes and continue across the restart; any provider without
+ * that capability is allowed to finish before the web process exits.
+ */
+let acceptingNewRuns = true;
+
 async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<void> {
   let row = sessionsDb.getSessionById(appSessionId);
   if (!row || row.isArchived) {
@@ -117,11 +123,7 @@ async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<vo
     timestamp: new Date().toISOString(),
   });
 
-  connectedClients.forEach((client) => {
-    if (client.readyState === WS_OPEN_STATE) {
-      client.send(payload);
-    }
-  });
+  broadcastRealtimeEvent(payload, row.provider);
 }
 
 function evictRunLater(appSessionId: string): void {
@@ -264,6 +266,9 @@ export const chatRunRegistry = {
     connection: RealtimeClientConnection;
     userId: string | number | null;
   }): ChatRun | null {
+    if (!acceptingNewRuns) {
+      return null;
+    }
     const existing = runs.get(input.appSessionId);
     if (existing && existing.status === 'running') {
       return null;
@@ -325,6 +330,22 @@ export const chatRunRegistry = {
       }));
     const liveIds = new Set(live.map((run) => run.sessionId));
     return [...live, ...listSurvivors().filter((run) => !liveIds.has(run.sessionId))] as typeof live;
+  },
+
+  /**
+   * Stops new provider runs before a graceful server restart. The websocket
+   * handler interprets a rejected start as "queue this message", so nothing
+   * typed while the deployment is draining is lost.
+   *
+   * Consumed by the server entrypoint's SIGTERM/SIGINT shutdown path.
+   */
+  beginShutdownDrain(): void {
+    acceptingNewRuns = false;
+  },
+
+  /** Used by health reporting and shutdown diagnostics. */
+  isShutdownDraining(): boolean {
+    return !acceptingNewRuns;
   },
 
   /**
@@ -415,5 +436,6 @@ export const chatRunRegistry = {
    */
   clearAll(): void {
     runs.clear();
+    acceptingNewRuns = true;
   },
 };
