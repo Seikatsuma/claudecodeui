@@ -221,6 +221,25 @@ test('devin runtime: model + permission mode are passed to the agent', async () 
   });
 });
 
+test('devin runtime: a model other than SWE-2 is replaced by swe-2-high', async () => {
+  for (const forbidden of ['claude-opus-5-5-medium', 'adaptive', 'fusion-claude-opus-5-5-medium-sidekick-swe-2-medium', 'gpt-6-sol-high']) {
+    await withFakeDevin(async (tempRoot) => {
+      const writer = makeWriter();
+      await devinRuntime.run('Hi', {
+        cwd: tempRoot,
+        sessionId: `app-forbidden-${forbidden}`,
+        model: forbidden,
+        permissionMode: 'default',
+      }, writer, runtimeContext);
+
+      const capture = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'));
+      assert.deepEqual(capture.args, ['acp', '--model', 'swe-2-high'], `model ${forbidden} must not reach the agent`);
+      const setModel = capture.calls.find((c) => c.method === 'session/set_config_option');
+      assert.equal(setModel?.params?.value, 'swe-2-high');
+    });
+  }
+});
+
 test('devin runtime: abort kills the ACP process and ends the run once', async () => {
   await withFakeDevin(async (tempRoot) => {
     process.env.DEVIN_HANG = '1';

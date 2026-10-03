@@ -1123,6 +1123,18 @@ export function resolveDevinCliCommand(): string {
 }
 
 /**
+ * Devin models the owner allows (Egor, 03.10.26: "only SWE-2, the rest are not allowed").
+ * One rule for the picker (devin-models.provider.ts) and for the run itself
+ * (devin-runtime.provider.js): anything else would spend the shared Devin quota
+ * on models the owner has not approved. Matches swe-2, swe-2-high, swe-2-medium, swe-2-max.
+ */
+export function isAllowedDevinModel(model: unknown): boolean {
+  return typeof model === 'string' && /^swe-2(-(high|medium|max|low))?$/i.test(model.trim());
+}
+
+export const DEVIN_DEFAULT_MODEL = 'swe-2-high';
+
+/**
  * Whether a Devin CLI binary exists on this host. The site is published to
  * other people's servers (selfhost update from GitHub main), where Devin is
  * usually not installed — there the Devin tab must stay hidden instead of

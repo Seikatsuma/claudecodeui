@@ -18,6 +18,8 @@ import {
   buildDevinChildEnv,
   createCompleteMessage,
   createNormalizedMessage,
+  DEVIN_DEFAULT_MODEL,
+  isAllowedDevinModel,
   resolveDevinCliCommand,
 } from '@/shared/utils.js';
 import { mapPermissionModeToDevinMode } from '@/modules/providers/list/devin/devin-sessions.provider.js';
@@ -407,7 +409,13 @@ async function queryDevin(command, options = {}, ws, context) {
     activeDevinRuns.set(sessionKey, run);
   }
 
-  const resolvedModel = await context.resolveResumeModel(sessionId, model);
+  // Only SWE-2 may run (owner's rule, 03.10.26): an old chat, a stale tab or a hand-made
+  // request naming another model is run on the default SWE-2 instead of spending the quota elsewhere.
+  const requestedModel = await context.resolveResumeModel(sessionId, model);
+  const resolvedModel = requestedModel && !isAllowedDevinModel(requestedModel) ? DEVIN_DEFAULT_MODEL : requestedModel;
+  if (resolvedModel !== requestedModel) {
+    console.warn(`[Devin] model "${requestedModel}" is not allowed (SWE-2 only) — running ${DEVIN_DEFAULT_MODEL}`);
+  }
   const workingDirectory = cwd || projectPath || process.cwd();
   const devinMode = mapPermissionModeToDevinMode(permissionMode);
 

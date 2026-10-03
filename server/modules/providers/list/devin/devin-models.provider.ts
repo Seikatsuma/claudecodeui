@@ -16,6 +16,7 @@ import {
   readObjectRecord,
   readOptionalString,
   resolveDevinCliCommand,
+  isAllowedDevinModel,
 } from '@/shared/utils.js';
 import { openDevinDatabase } from '@/modules/providers/list/devin/devin-sessions.provider.js';
 
@@ -31,16 +32,9 @@ const CATALOG_TIMEOUT_MS = 15_000;
  * a stale subset is better than an empty picker.
  */
 const FALLBACK_MODELS: ProviderModelOption[] = [
-  { value: 'adaptive', label: 'Adaptive (auto-picked)', description: 'Devin picks the best model per session' },
   { value: 'swe-2-high', label: 'SWE-2 High', description: 'Cognition SWE-2, high effort' },
   { value: 'swe-2-medium', label: 'SWE-2 Medium', description: 'Cognition SWE-2, medium effort' },
   { value: 'swe-2-max', label: 'SWE-2 Max', description: 'Cognition SWE-2, maximum effort' },
-  { value: 'swe-1.7-lightning', label: 'SWE-1.7 Lightning', description: 'Fast Cognition model' },
-  { value: 'swe-1.7-lightning-medium', label: 'SWE-1.7 Lightning Medium' },
-  { value: 'swe-1.7', label: 'SWE-1.7' },
-  { value: 'claude-opus-5-5-medium', label: 'Claude Opus 5.5' },
-  { value: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5' },
-  { value: 'claude-opus-4-7-medium', label: 'Claude Opus 4.7' },
 ];
 
 const DEFAULT_MODEL = 'swe-2-high';
@@ -146,7 +140,9 @@ export class DevinModelsProvider implements IProviderModels {
       }
     }
 
-    const options = models && models.length > 0 ? models : FALLBACK_MODELS;
+    // Only SWE-2 is allowed by the owner; the rest of the Devin catalog stays hidden.
+    const allowed = (models ?? []).filter((option) => isAllowedDevinModel(option.value));
+    const options = allowed.length > 0 ? allowed : FALLBACK_MODELS;
     const configuredDefault = readConfiguredDefaultModel();
     const defaultModel = configuredDefault && options.some((option) => option.value === configuredDefault)
       ? configuredDefault
