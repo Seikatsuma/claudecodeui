@@ -210,6 +210,15 @@ test('owner lists share Codex across Claude accounts without sharing Claude chat
     );
     assert.equal(sessionsDb.countSessionsByProjectPath(projectPath, 'shared-codex'), 2);
 
+    const archivedProjectRows = sessionsDb.getSessionsByProjectPathIncludingArchived(
+      projectPath,
+      'shared-codex',
+    );
+    assert.deepEqual(
+      archivedProjectRows.map((session) => session.session_id).sort(),
+      ['codex-current', 'codex-other'],
+    );
+
     const hiddenCodex = sessionsDb.getSessionsByProjectPathPage(
       projectPath,
       10,
@@ -217,5 +226,9 @@ test('owner lists share Codex across Claude accounts without sharing Claude chat
       'hide-codex',
     );
     assert.deepEqual(hiddenCodex, []);
+    assert.deepEqual(
+      sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath, 'hide-codex'),
+      [],
+    );
   });
 });

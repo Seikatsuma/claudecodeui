@@ -725,16 +725,27 @@ export const sessionsDb = {
    * Permanent project deletion must see every session row for the path,
    * including archived ones, so their transcript files can be cleaned up.
    */
-  getSessionsByProjectPathIncludingArchived(projectPath: string): SessionRow[] {
+  getSessionsByProjectPathIncludingArchived(
+    projectPath: string,
+    accountVisibility?: SessionAccountVisibility,
+  ): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
+    // Permanent project deletion intentionally omits accountVisibility so it
+    // can still clean every transcript for the path. Sidebar/archive reads
+    // pass it explicitly and retain the same owner/guest boundary as active
+    // project pages.
+    const visibilitySql = accountVisibility
+      ? accountVisibilitySql(accountVisibility)
+      : '';
+    const visibilityParams = accountVisibility ? [getActiveAccountDir()] : [];
     const rows = db
       .prepare(
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
-         WHERE project_path = ?`
+         WHERE project_path = ?${visibilitySql}`
       )
-      .all(normalizedProjectPath) as SessionRow[];
+      .all(normalizedProjectPath, ...visibilityParams) as SessionRow[];
 
     return normalizeSessionRows(rows);
   },

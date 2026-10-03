@@ -152,7 +152,13 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
 }
 
 function readProjectSessionsIncludingArchived(projectPath: string): ProjectSessionsPageResult {
-  const rows = sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath) as SessionRepositoryRow[];
+  const requestContext = getRequestRuntimeContext();
+  const canUseCodex = requestContext === undefined
+    || isCodexAllowedForWebUser(requestContext.userId);
+  const rows = sessionsDb.getSessionsByProjectPathIncludingArchived(
+    projectPath,
+    canUseCodex ? 'shared-codex' : 'hide-codex',
+  ) as SessionRepositoryRow[];
 
   return {
     sessions: rows.map(mapSessionRowToSummary),
