@@ -312,7 +312,7 @@ export default function ProviderSelectionEmptyState({
                   })}
                 />
                 <div
-                  className="flex gap-1 overflow-x-auto border-b border-border/60 px-2 py-2"
+                  className="flex flex-wrap gap-1 border-b border-border/60 px-2 py-2"
                   role="tablist"
                   aria-label={t("providerSelection.providers", { defaultValue: "Providers" })}
                 >

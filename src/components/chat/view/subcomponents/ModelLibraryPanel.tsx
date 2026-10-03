@@ -183,7 +183,7 @@ export default function ModelLibraryPanel({
         )}
       </div>
 
-      <div className="scrollbar-thin flex shrink-0 gap-1 overflow-x-auto rounded-xl border border-border/70 bg-muted/25 p-1">
+      <div className="flex shrink-0 flex-wrap gap-1 rounded-xl border border-border/70 bg-muted/25 p-1">
         {visibleProviders.map((provider) => {
           const selected = provider.id === selectedProvider;
           return (
