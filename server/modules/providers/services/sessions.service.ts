@@ -12,7 +12,8 @@ import type {
   NormalizedMessage,
   ServerScope,
 } from '@/shared/types.js';
-import { AppError, normalizeServerScope } from '@/shared/utils.js';
+import { getRequestRuntimeContext } from '@/shared/request-context.js';
+import { AppError, isCodexAllowedForWebUser, normalizeServerScope } from '@/shared/utils.js';
 
 type CreateAppSessionResult = {
   sessionId: string;
@@ -167,7 +168,20 @@ export const sessionsService = {
     serverScope?: ServerScope,
     providerSpace?: 'codex' | 'claude',
   ): RecentSessionsPage {
-    const page = sessionsDb.getRecentSessionsPage(limit, offset, serverScope, providerSpace);
+    const requestContext = getRequestRuntimeContext();
+    const canUseCodex = requestContext === undefined
+      || isCodexAllowedForWebUser(requestContext.userId);
+    if (providerSpace === 'codex' && !canUseCodex) {
+      return { conversations: [], total: 0, hasMore: false };
+    }
+    const accountVisibility = canUseCodex ? 'shared-codex' : 'hide-codex';
+    const page = sessionsDb.getRecentSessionsPage(
+      limit,
+      offset,
+      serverScope,
+      providerSpace,
+      accountVisibility,
+    );
     const projectCache = new Map<string, ReturnType<typeof projectsDb.getProjectPath>>();
     const conversations = page.sessions.map((session) => {
       const projectPath = session.project_path?.trim() ? session.project_path : null;
@@ -425,7 +439,12 @@ export const sessionsService = {
    * group, filter, open, and restore them without a per-row follow-up query.
    */
   listArchivedSessions(): ArchivedSessionListItem[] {
-    const archivedSessions = sessionsDb.getArchivedSessions();
+    const requestContext = getRequestRuntimeContext();
+    const canUseCodex = requestContext === undefined
+      || isCodexAllowedForWebUser(requestContext.userId);
+    const archivedSessions = sessionsDb.getArchivedSessions(
+      canUseCodex ? 'shared-codex' : 'hide-codex',
+    );
     const projectCache = new Map<string, ReturnType<typeof projectsDb.getProjectPath>>();
 
     return archivedSessions.map((session) => {

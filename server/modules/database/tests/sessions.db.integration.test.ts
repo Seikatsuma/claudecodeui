@@ -8,6 +8,7 @@ import { closeConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
+import { getActiveAccountDir } from '@/shared/session-scope.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -139,5 +140,82 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
       claudePage.sessions.map((session) => session.session_id),
       ['session-same-second', 'session-middle', 'session-oldest'],
     );
+  });
+});
+
+test('owner lists share Codex across Claude accounts without sharing Claude chats', async () => {
+  await withIsolatedDatabase(() => {
+    const projectPath = '/workspace/shared-codex-project';
+    const currentAccount = getActiveAccountDir();
+    const otherAccount = `${currentAccount}-other`;
+
+    sessionsDb.createSession(
+      'codex-current',
+      'codex',
+      projectPath,
+      'Codex current account',
+      '2026-10-03T10:00:00.000Z',
+      '2026-10-03T10:00:00.000Z',
+      null,
+      undefined,
+      { accountDir: currentAccount },
+    );
+    sessionsDb.createSession(
+      'codex-other',
+      'codex',
+      projectPath,
+      'Codex other Claude account',
+      '2026-10-03T11:00:00.000Z',
+      '2026-10-03T11:00:00.000Z',
+      null,
+      undefined,
+      { accountDir: otherAccount },
+    );
+    sessionsDb.createSession(
+      'claude-other',
+      'claude',
+      projectPath,
+      'Claude other account',
+      '2026-10-03T12:00:00.000Z',
+      '2026-10-03T12:00:00.000Z',
+      null,
+      undefined,
+      { accountDir: otherAccount },
+    );
+
+    const currentOnly = sessionsDb.getRecentSessionsPage(10, 0, undefined, 'codex');
+    assert.deepEqual(currentOnly.sessions.map((session) => session.session_id), ['codex-current']);
+
+    const sharedCodex = sessionsDb.getRecentSessionsPage(
+      10,
+      0,
+      undefined,
+      'codex',
+      'shared-codex',
+    );
+    assert.deepEqual(
+      sharedCodex.sessions.map((session) => session.session_id),
+      ['codex-other', 'codex-current'],
+    );
+
+    const projectSessions = sessionsDb.getSessionsByProjectPathPage(
+      projectPath,
+      10,
+      0,
+      'shared-codex',
+    );
+    assert.deepEqual(
+      projectSessions.map((session) => session.session_id),
+      ['codex-other', 'codex-current'],
+    );
+    assert.equal(sessionsDb.countSessionsByProjectPath(projectPath, 'shared-codex'), 2);
+
+    const hiddenCodex = sessionsDb.getSessionsByProjectPathPage(
+      projectPath,
+      10,
+      0,
+      'hide-codex',
+    );
+    assert.deepEqual(hiddenCodex, []);
   });
 });

@@ -8,7 +8,12 @@ import { scanStateDb } from '@/modules/database/repositories/scan-state.db.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import { getActiveAccountDir } from '@/shared/session-scope.js';
 import type { RealtimeClientConnection, ServerScope } from '@/shared/types.js';
-import { AppError, isPlatformOwnerWebUser, normalizeServerScope } from '@/shared/utils.js';
+import {
+  AppError,
+  isCodexAllowedForWebUser,
+  isPlatformOwnerWebUser,
+  normalizeServerScope,
+} from '@/shared/utils.js';
 
 type SessionSummary = {
   id: string;
@@ -164,12 +169,17 @@ function readProjectSessionsPageByPath(
   options: SessionPaginationOptions = {},
 ): ProjectSessionsPageResult {
   const pagination = normalizeSessionPagination(options);
+  const requestContext = getRequestRuntimeContext();
+  const canUseCodex = requestContext === undefined
+    || isCodexAllowedForWebUser(requestContext.userId);
+  const accountVisibility = canUseCodex ? 'shared-codex' : 'hide-codex';
   const rows = sessionsDb.getSessionsByProjectPathPage(
     projectPath,
     pagination.limit,
     pagination.offset,
+    accountVisibility,
   ) as SessionRepositoryRow[];
-  const total = sessionsDb.countSessionsByProjectPath(projectPath);
+  const total = sessionsDb.countSessionsByProjectPath(projectPath, accountVisibility);
 
   return {
     sessions: rows.map(mapSessionRowToSummary),

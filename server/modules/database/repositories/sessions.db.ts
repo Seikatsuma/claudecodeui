@@ -141,6 +141,32 @@ function normalizeProjectPathForProvider(provider: string, projectPath: string):
  */
 const ACCOUNT_SCOPE_SQL = ' AND (account_dir IS NULL OR account_dir = ?)';
 
+type SessionAccountVisibility = 'current' | 'shared-codex' | 'hide-codex';
+
+/**
+ * Builds the account boundary used by session-list queries.
+ *
+ * Claude histories remain tied to the selected Claude account. Codex is a
+ * single host-level owner account, so owner-facing lists may deliberately
+ * include Codex rows created while either Claude slot was selected. Guests
+ * use `hide-codex`, which also excludes legacy unscoped Codex rows.
+ */
+function accountVisibilitySql(
+  visibility: SessionAccountVisibility,
+  tableAlias = '',
+): string {
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+  const currentAccount = `(${prefix}account_dir IS NULL OR ${prefix}account_dir = ?)`;
+
+  if (visibility === 'shared-codex') {
+    return ` AND (${prefix}provider = 'codex' OR ${currentAccount})`;
+  }
+  if (visibility === 'hide-codex') {
+    return ` AND ${prefix}provider != 'codex' AND ${currentAccount}`;
+  }
+  return ` AND ${currentAccount}`;
+}
+
 export const sessionsDb = {
   /**
    * Upserts one session row discovered on disk by a provider synchronizer.
@@ -616,6 +642,7 @@ export const sessionsDb = {
     offset: number,
     serverScope?: ServerScope,
     providerSpace?: 'codex' | 'claude',
+    accountVisibility: SessionAccountVisibility = 'current',
   ): RecentSessionsPage {
     const db = getConnection();
     // Лента отдаётся по одному блоку верхней панели за раз. Отбирать на
@@ -632,8 +659,7 @@ export const sessionsDb = {
     const visibilityClause = `
       sessions.isArchived = 0
       AND (projects.isArchived IS NULL OR projects.isArchived = 0)
-      AND (sessions.account_dir IS NULL OR sessions.account_dir = ?)
-    ` + scopeClause;
+    ` + accountVisibilitySql(accountVisibility, 'sessions') + scopeClause;
     const accountDir = getActiveAccountDir();
     const scopeParams = serverScope ? [serverScope] : [];
     const rows = db
@@ -666,13 +692,13 @@ export const sessionsDb = {
    * Archived rows are intentionally queried separately so the caller can render
    * them in a dedicated view without reintroducing them into active session lists.
    */
-  getArchivedSessions(): SessionRow[] {
+  getArchivedSessions(accountVisibility: SessionAccountVisibility = 'current'): SessionRow[] {
     const db = getConnection();
     const rows = db
       .prepare(
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
-         WHERE isArchived = 1` + ACCOUNT_SCOPE_SQL + `
+         WHERE isArchived = 1` + accountVisibilitySql(accountVisibility) + `
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
       )
       .all(getActiveAccountDir()) as SessionRow[];
@@ -713,7 +739,12 @@ export const sessionsDb = {
     return normalizeSessionRows(rows);
   },
 
-  getSessionsByProjectPathPage(projectPath: string, limit: number, offset: number): SessionRow[] {
+  getSessionsByProjectPathPage(
+    projectPath: string,
+    limit: number,
+    offset: number,
+    accountVisibility: SessionAccountVisibility = 'current',
+  ): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
     // Чаты, перенесённые в другой блок поимённо (`server_scope` задан и не
@@ -727,7 +758,7 @@ export const sessionsDb = {
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0` + ACCOUNT_SCOPE_SQL + `
+           AND isArchived = 0` + accountVisibilitySql(accountVisibility) + `
          ORDER BY (
            sessions.server_scope IS NOT NULL
            AND sessions.server_scope <> COALESCE(
@@ -788,7 +819,10 @@ export const sessionsDb = {
     return result.changes;
   },
 
-  countSessionsByProjectPath(projectPath: string): number {
+  countSessionsByProjectPath(
+    projectPath: string,
+    accountVisibility: SessionAccountVisibility = 'current',
+  ): number {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
     const row = db
@@ -796,7 +830,7 @@ export const sessionsDb = {
         `SELECT COUNT(*) AS count
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0` + ACCOUNT_SCOPE_SQL
+           AND isArchived = 0` + accountVisibilitySql(accountVisibility)
       )
       .get(normalizedProjectPath, getActiveAccountDir()) as { count: number } | undefined;
 
