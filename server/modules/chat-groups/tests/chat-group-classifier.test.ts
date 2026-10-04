@@ -57,6 +57,27 @@ function fakeModel(answer: (title: string) => Record<string, unknown>) {
   return { ask, prompts };
 }
 
+test('чаты Devin модели (Claude) не отдаются: режим Devin тратит только токены Devin', async () => {
+  await withIsolatedDatabase(async () => {
+    // Чат Claude (должен уйти на разбор) и чат Devin с обычным названием и обычной папкой.
+    addChat('claude-chat', 'Правка сайта');
+    sessionsDb.createSession('devin-chat', 'devin', '/home/egor', 'Разведка по коду');
+    getConnection()
+      .prepare("UPDATE sessions SET account_dir = ?, origin = 'web', title_source = 'ai' WHERE session_id = 'devin-chat'")
+      .run(ACCOUNT);
+
+    const asked: string[] = [];
+    await classifyAccountChats(ACCOUNT, async (prompt) => {
+      asked.push(prompt);
+      return JSON.stringify({ decisions: [] });
+    }).catch(() => undefined); // пустой ответ модели — сбой прохода, нам важен только состав запроса
+
+    assert.ok(asked.length > 0, 'чат Claude должен был уйти на разбор');
+    assert.ok(asked.every((prompt) => !prompt.includes('Разведка по коду')), 'название чата Devin ушло в Claude');
+    assert.ok(asked.some((prompt) => prompt.includes('Правка сайта')));
+  });
+});
+
 test('ответ модели: несуществующая группа становится темой, лишние id отбрасываются', () => {
   const decisions = parseClassifierResponse(
     'вот: [{"id":0,"group":"сайт claude"},{"id":1,"group":"Покупки"},{"id":2,"skip":true},{"id":9,"group":"Сайт Claude"}]',
