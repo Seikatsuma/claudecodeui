@@ -163,20 +163,20 @@ wait_site_up() {
 # закрывает вход новым запускам (их сообщения остаются в серверной очереди),
 # затем ждём, пока все не-Claude ходы закончатся. Без таймаута намеренно:
 # обновление сайта может подождать, работа человека — нет.
+# SIGUSR2 — аренда на 2 минуты, поэтому шлём его на КАЖДОМ шаге: 04.10.26
+# скрипт оборвался вместе со своим чатом, а разовый сигнал оставил вход
+# закрытым на 33 минуты. Нет скрипта — нет продления — сайт открылся сам.
 wait_restart_safe_window() {
-    local main_pid health blocking draining waited=0 signaled_pid=""
+    local main_pid health blocking draining waited=0
     while :; do
         main_pid="$(systemctl show claudecodeui-shared -p MainPID --value 2>/dev/null)"
         if [[ ! "$main_pid" =~ ^[1-9][0-9]*$ ]]; then
             say "ОШИБКА: не удалось узнать PID живого Claude UI — безопасный перезапуск невозможен"
             return 1
         fi
-        if [ "$main_pid" != "$signaled_pid" ]; then
-            if ! kill -USR2 "$main_pid" 2>/dev/null; then
-                say "ОШИБКА: не удалось включить ожидание у PID $main_pid"
-                return 1
-            fi
-            signaled_pid="$main_pid"
+        if ! kill -USR2 "$main_pid" 2>/dev/null; then
+            say "ОШИБКА: не удалось включить ожидание у PID $main_pid"
+            return 1
         fi
 
         health="$(curl -sS --max-time 5 http://127.0.0.1:3003/health 2>/dev/null || true)"

@@ -70,6 +70,36 @@ const runs = new Map<string, ChatRun>();
  */
 let acceptingNewRuns = true;
 
+/**
+ * Ожидание перед выкладкой (SIGUSR2 от deploy/build-shared.sh) — аренда, а не
+ * выключатель. 04.10.26 скрипт выкладки оборвался вместе со своим чатом через
+ * 5 минут ожидания, а вход остался закрытым: 33 минуты все сообщения Егора во
+ * всех чатах молча ложились в очередь, пока сайт не перезапустили руками.
+ * Теперь скрипт продлевает аренду на каждом шаге ожидания; перестал — через
+ * PRE_RESTART_LEASE_MS вход открывается сам, очередь уходит обходом раз в минуту.
+ *
+ * И закрывает она только неживучих провайдеров: Claude и Codex переживают
+ * перезапуск сами, держать их чаты ради чужого Devin незачем.
+ */
+const PRE_RESTART_LEASE_MS = 120_000;
+let preRestartDrainUntil = 0;
+
+function isRestartSafeProvider(provider: string): boolean {
+  return provider === 'claude' || provider === 'codex';
+}
+
+function isPreRestartDrainActive(): boolean {
+  if (preRestartDrainUntil === 0) {
+    return false;
+  }
+  if (Date.now() < preRestartDrainUntil) {
+    return true;
+  }
+  preRestartDrainUntil = 0;
+  console.log('[shutdown-drain] выкладка перестала продлевать ожидание — вход новым ходам снова открыт');
+  return false;
+}
+
 async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<void> {
   let row = sessionsDb.getSessionById(appSessionId);
   if (!row || row.isArchived) {
@@ -269,6 +299,9 @@ export const chatRunRegistry = {
     if (!acceptingNewRuns) {
       return null;
     }
+    if (!isRestartSafeProvider(input.provider) && isPreRestartDrainActive()) {
+      return null;
+    }
     const existing = runs.get(input.appSessionId);
     if (existing && existing.status === 'running') {
       return null;
@@ -343,10 +376,23 @@ export const chatRunRegistry = {
     acceptingNewRuns = false;
   },
 
+  /**
+   * SIGUSR2 от выкладки: закрыть вход неживучим провайдерам на
+   * PRE_RESTART_LEASE_MS. Скрипт повторяет сигнал на каждом шаге ожидания.
+   * `true` — ожидание только что началось (для одной строки в журнале).
+   */
+  beginPreRestartDrain(): boolean {
+    const started = !isPreRestartDrainActive();
+    preRestartDrainUntil = Date.now() + PRE_RESTART_LEASE_MS;
+    return started;
+  },
+
   /** Used by health reporting and shutdown diagnostics. */
   isShutdownDraining(): boolean {
-    return !acceptingNewRuns;
+    return !acceptingNewRuns || isPreRestartDrainActive();
   },
+
+  isRestartSafeProvider,
 
   /**
    * Counts this user's own currently-running runs, across every session.
@@ -437,5 +483,6 @@ export const chatRunRegistry = {
   clearAll(): void {
     runs.clear();
     acceptingNewRuns = true;
+    preRestartDrainUntil = 0;
   },
 };

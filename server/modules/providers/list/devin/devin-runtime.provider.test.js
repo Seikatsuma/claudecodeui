@@ -10,7 +10,11 @@ import { DevinSessionsProvider, mapPermissionModeToDevinMode } from './devin-ses
 
 const sessionsProvider = new DevinSessionsProvider();
 const runtimeContext = {
-  resolveProviderSessionId: (sessionId) => sessionId === 'app-resume' ? 'devin-sess-1' : null,
+  resolveProviderSessionId: (sessionId) => {
+    if (sessionId === 'app-resume') return 'devin-sess-1';
+    if (sessionId === 'app-missing') return 'app-missing'; // ложный номер, как после запуска сайта 04.10.26
+    return null;
+  },
   resolveResumeModel: async (_sessionId, requestedModel) => requestedModel || undefined,
   getProviderModels: async () => ({ OPTIONS: [], DEFAULT: '' }),
   normalizeMessage: (raw, sessionId) => sessionsProvider.normalizeMessage(raw, sessionId),
@@ -66,6 +70,11 @@ rl.on('line', (line) => {
       respond(msg.id, { sessionId: 'devin-sess-1' });
       break;
     case 'session/load':
+      if (process.env.DEVIN_LOAD_MISSING === '1') {
+        // Живой ответ Devin 04.10.26 на чужой номер беседы.
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32016, message: 'Session not found', data: { 'cognition.ai/errorKind': 'session_not_found', 'cognition.ai/retryable': false } } }) + '\\n');
+        break;
+      }
       // Replayed history MUST be muted by the runtime.
       notify('session/update', { sessionId: msg.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'REPLAYED-OLD-TEXT' } } });
       respond(msg.id, { sessionId: msg.params.sessionId });
@@ -199,6 +208,27 @@ test('devin runtime: resume — session/load replays are muted, no session_creat
     assert.ok(!writer.messages.some((m) => m.content === 'REPLAYED-OLD-TEXT'), 'load replay muted');
     assert.ok(writer.messages.some((m) => m.content === 'LIVE-REPLY'));
     assert.equal(writer.messages.filter((m) => m.kind === 'complete').length, 1);
+  });
+});
+
+test('devin runtime: беседы нет у Devin — начинается новая, а не ошибка', async () => {
+  await withFakeDevin(async (tempRoot) => {
+    process.env.DEVIN_LOAD_MISSING = '1';
+    try {
+      const writer = makeWriter();
+      await devinRuntime.run('Hi', { cwd: tempRoot, sessionId: 'app-missing' }, writer, runtimeContext);
+
+      const methods = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'))
+        .calls.map((c) => c.method);
+      assert.ok(methods.includes('session/load'));
+      assert.ok(methods.includes('session/new'), 'после «Session not found» — новая беседа');
+      const created = writer.messages.find((m) => m.kind === 'session_created');
+      assert.equal(created?.newSessionId, 'devin-sess-1', 'сайт узнаёт настоящий номер беседы');
+      assert.ok(!writer.messages.some((m) => m.kind === 'error'), 'без ошибки');
+      assert.ok(writer.messages.some((m) => m.content === 'LIVE-REPLY'));
+    } finally {
+      delete process.env.DEVIN_LOAD_MISSING;
+    }
   });
 });
 

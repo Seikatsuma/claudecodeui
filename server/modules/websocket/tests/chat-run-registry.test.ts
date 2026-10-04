@@ -315,6 +315,44 @@ test('shutdown drain lets the active run finish but rejects every new run', asyn
   });
 });
 
+test('ожидание перед выкладкой держит только неживучих и само истекает без продления', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-predrain-claude', 'claude', '/workspace/demo');
+    sessionsDb.createAppSession('app-predrain-devin', 'devin', '/workspace/demo');
+    const connection = new FakeConnection();
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      assert.equal(chatRunRegistry.beginPreRestartDrain(), true);
+      assert.equal(chatRunRegistry.beginPreRestartDrain(), false, 'продление — не новое ожидание');
+      assert.equal(chatRunRegistry.isShutdownDraining(), true);
+
+      const devinBlocked = chatRunRegistry.startRun({
+        appSessionId: 'app-predrain-devin', provider: 'devin', providerSessionId: null, connection, userId: null,
+      });
+      assert.equal(devinBlocked, null, 'Devin ждёт перезапуска');
+
+      const claudeRun = chatRunRegistry.startRun({
+        appSessionId: 'app-predrain-claude', provider: 'claude', providerSessionId: null, connection, userId: null,
+      });
+      assert.ok(claudeRun, 'Claude переживает перезапуск — его чат не держим');
+      chatRunRegistry.completeRun('app-predrain-claude', { exitCode: 0 });
+
+      // Скрипт выкладки оборвался и больше не продлевает аренду.
+      now += 121_000;
+      assert.equal(chatRunRegistry.isShutdownDraining(), false);
+      const devinAfter = chatRunRegistry.startRun({
+        appSessionId: 'app-predrain-devin', provider: 'devin', providerSessionId: null, connection, userId: null,
+      });
+      assert.ok(devinAfter, 'вход открылся сам');
+      chatRunRegistry.completeRun('app-predrain-devin', { exitCode: 0 });
+    } finally {
+      Date.now = realNow;
+    }
+  });
+});
+
 test('каждое событие работы несёт метку этой работы', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('app-run-stamp', 'claude', '/workspace/demo');

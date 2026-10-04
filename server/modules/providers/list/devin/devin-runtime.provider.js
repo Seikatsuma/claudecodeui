@@ -108,6 +108,7 @@ function createAcpConnection(child, { onNotification, onRequest, onClose }) {
           if (msg.error) {
             const err = new Error(msg.error.message || `JSON-RPC error ${msg.error.code}`);
             err.code = msg.error.code;
+            err.data = msg.error.data;
             waiter.reject(err);
           } else {
             waiter.resolve(msg.result ?? {});
@@ -620,6 +621,7 @@ async function queryDevin(command, options = {}, ws, context) {
         throw spawnError.error;
       }
 
+      let loaded = false;
       if (providerSessionId) {
         run.muted = true;
         try {
@@ -628,10 +630,22 @@ async function queryDevin(command, options = {}, ws, context) {
             cwd: workingDirectory,
             mcpServers: [],
           }, HANDSHAKE_TIMEOUT_MS);
+          loaded = true;
+        } catch (error) {
+          // Беседы с таким номером у Devin нет — продолжать нечего, истории
+          // тоже. Начинаем новую вместо ошибки (04.10.26: чат с ложным номером
+          // отвечал «Session not found» на каждое сообщение и был мёртв).
+          if (error?.data?.['cognition.ai/errorKind'] !== 'session_not_found') {
+            throw error;
+          }
+          console.warn(`[Devin] беседы ${providerSessionId} нет у Devin — начинаю новую`);
+          run.devinSessionId = null;
+          run.sessionCreatedSent = false;
         } finally {
           run.muted = false;
         }
-      } else {
+      }
+      if (!loaded) {
         const created = await connection.call('session/new', {
           cwd: workingDirectory,
           mcpServers: [],

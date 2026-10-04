@@ -193,7 +193,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.get('/health', (req, res) => {
     const activeRuns = chatRunRegistry.listRunningRuns();
     const restartBlockingRuns = activeRuns.filter(
-        (run) => run.provider !== 'claude' && run.provider !== 'codex',
+        (run) => !chatRunRegistry.isRestartSafeProvider(run.provider),
     );
     res.json({
         status: 'ok',
@@ -667,7 +667,7 @@ async function startServer() {
                 while (true) {
                     const blockingRuns = chatRunRegistry
                         .listRunningRuns()
-                        .filter((run) => run.provider !== 'claude' && run.provider !== 'codex');
+                        .filter((run) => !chatRunRegistry.isRestartSafeProvider(run.provider));
                     if (blockingRuns.length === 0) {
                         break;
                     }
@@ -711,9 +711,12 @@ async function startServer() {
         // Штатная выкладка заранее закрывает вход новым запускам этим
         // сигналом и ждёт restartBlockingRuns=0 ещё ДО systemctl restart.
         // Поэтому даже системный 90-секундный TimeoutStopSec не участвует.
+        // Это аренда на 2 минуты: скрипт повторяет сигнал каждые 5 с, а если
+        // он оборвался — вход открывается сам (chat-run-registry, 04.10.26).
         process.on('SIGUSR2', () => {
-            chatRunRegistry.beginShutdownDrain();
-            console.log('[shutdown-drain] новые ходы закрыты, сообщения остаются в очереди до перезапуска');
+            if (chatRunRegistry.beginPreRestartDrain()) {
+                console.log('[shutdown-drain] новые ходы неживучих провайдеров закрыты до перезапуска, их сообщения остаются в очереди');
+            }
         });
         process.on('SIGTERM', () => void shutdownRuntimeServices());
         process.on('SIGINT', () => void shutdownRuntimeServices());

@@ -450,6 +450,13 @@ const addProviderSessionIdMapping = (db: Database): void => {
   const sessionsTableInfo = getTableInfo(db, 'sessions');
   const columnNames = sessionsTableInfo.map((column) => column.name);
 
+  // Заполнять — только в момент появления столбца. Потом NULL законен: так
+  // выглядит новый чат, чей провайдер ещё не назвал свой номер. 04.10.26
+  // запуск сайта вписал трём таким Devin-чатам их собственный номер, и Devin
+  // ответил «Session not found» на первое же сообщение из очереди.
+  if (columnNames.includes('provider_session_id')) {
+    return;
+  }
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'provider_session_id', 'TEXT');
   db.exec(`
     UPDATE sessions
