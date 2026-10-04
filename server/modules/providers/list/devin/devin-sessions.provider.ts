@@ -212,7 +212,9 @@ export class DevinSessionsProvider implements IProviderSessions {
     if (updateType === 'usage_update') {
       const used = typeof update.used === 'number' ? update.used : null;
       const size = typeof update.size === 'number' ? update.size : null;
-      if (used === null && size === null) {
+      // Неполное событие (только одно поле) затирало бы верный счётчик
+      // нулём — отвечать можно только на пару used+size.
+      if (used === null || size === null) {
         return [];
       }
       return [createNormalizedMessage({
@@ -221,8 +223,8 @@ export class DevinSessionsProvider implements IProviderSessions {
         kind: 'status',
         text: 'token_budget',
         tokenBudget: {
-          used: used ?? 0,
-          total: size ?? 0,
+          used,
+          total: size,
         },
       })];
     }

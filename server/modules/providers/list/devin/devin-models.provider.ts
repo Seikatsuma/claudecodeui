@@ -111,8 +111,12 @@ function readSessionModel(sessionId: string): string | null {
   }
 }
 
-/** `~/.config/devin/config.json` → `agent.model` (the owner's configured default). */
-function readConfiguredDefaultModel(): string | null {
+/**
+ * `~/.config/devin/config.json` → `agent.model` (the owner's configured
+ * default). Exported for `devin-usage.ts`: the token counter resolves the
+ * context window of CLI-started sessions whose `sessions.model` is empty.
+ */
+export function readConfiguredDefaultModel(): string | null {
   try {
     const configPath = path.join(os.homedir(), '.config', 'devin', 'config.json');
     const config: AnyRecord = JSON.parse(readFileSync(configPath, 'utf8'));

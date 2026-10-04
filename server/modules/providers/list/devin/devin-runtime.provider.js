@@ -23,6 +23,7 @@ import {
   resolveDevinCliCommand,
 } from '@/shared/utils.js';
 import { mapPermissionModeToDevinMode } from '@/modules/providers/list/devin/devin-sessions.provider.js';
+import { readDevinTokenUsage, resolveDevinContextWindow } from '@/modules/providers/list/devin/devin-usage.js';
 
 /**
  * Live Devin ACP processes keyed by the app-facing session id.
@@ -49,6 +50,12 @@ const reattachedDevinSurvivors = new Map();
 
 /** How long `abort` lets Devin wind down before SIGKILLing it. */
 const ABORT_GRACE_MS = 3_000;
+/**
+ * Как часто во время хода счётчик читается из sessions.db Devin — ACP
+ * `usage_update` и `session/prompt.usage` у Devin нет (04.10.26, живые
+ * sock-журналы), поэтому свежесть держим опросом его же базы.
+ */
+const DEVIN_USAGE_POLL_MS = 4_000;
 /** initialize/session/new must answer promptly; a hung handshake = broken CLI. */
 const HANDSHAKE_TIMEOUT_MS = 60_000;
 /** Devin logs progress to stderr (INFO lines) — keep the tail for error text. */
@@ -62,6 +69,46 @@ function sendMessage(ws, data) {
       console.error('Error sending Devin stream message:', error);
     }
   }
+}
+
+/**
+ * Шлёт вкладке актуальный `token_budget` чата Devin из его sessions.db
+ * (заполненность окна по последнему ответу живой цепи). Повтор с тем же
+ * `used` не шлём — счётчик и так стоит. Раньше здесь стояло
+ * `total = used` из prompt.usage, и кнопка показывала «150K/150K».
+ */
+function emitDevinTokenBudget(ws, run, appSessionId, { force = false } = {}) {
+  const devinSessionId = run.devinSessionId;
+  if (!devinSessionId) {
+    return;
+  }
+  let usage = null;
+  try {
+    usage = readDevinTokenUsage(devinSessionId, { modelHint: run.resolvedModel });
+  } catch {
+    return; // база занята/недоступна — следующий тик или конец хода дочитает
+  }
+  if (!usage || (!force && usage.used === run.lastEmittedUsage)) {
+    return;
+  }
+  run.lastEmittedUsage = usage.used;
+  sendMessage(ws, createNormalizedMessage({
+    provider: 'devin',
+    sessionId: appSessionId || devinSessionId,
+    kind: 'status',
+    text: 'token_budget',
+    tokenBudget: {
+      used: usage.used,
+      total: usage.contextWindow,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      breakdown: usage.breakdown,
+      contextTokens: usage.contextTokens,
+      contextWindow: usage.contextWindow,
+    },
+  }));
 }
 
 /**
@@ -403,6 +450,9 @@ async function queryDevin(command, options = {}, ws, context) {
     startedAt: Date.now(),
     unregisterSurvivor: null,
     finishRun: null,
+    usageTimer: null,
+    lastEmittedUsage: null,
+    resolvedModel: null,
   };
   const sessionKey = sessionId || providerSessionId;
   run.sessionKey = sessionKey;
@@ -415,6 +465,7 @@ async function queryDevin(command, options = {}, ws, context) {
   const requestedModel = await context.resolveResumeModel(sessionId, model);
   // Пустая модель тоже заменяется: иначе Devin взял бы модель из своего конфига, а защита держалась бы на внешнем файле.
   const resolvedModel = !requestedModel || !isAllowedDevinModel(requestedModel) ? DEVIN_DEFAULT_MODEL : requestedModel;
+  run.resolvedModel = resolvedModel;
   if (resolvedModel !== requestedModel) {
     console.warn(`[Devin] model "${requestedModel}" is not allowed (SWE-2 only) — running ${DEVIN_DEFAULT_MODEL}`);
   }
@@ -520,6 +571,11 @@ async function queryDevin(command, options = {}, ws, context) {
     if (run.unregisterSurvivor) {
       run.unregisterSurvivor();
       run.unregisterSurvivor = null;
+    }
+
+    if (run.usageTimer) {
+      clearInterval(run.usageTimer);
+      run.usageTimer = null;
     }
 
     if (sessionKey) {
@@ -701,10 +757,20 @@ async function queryDevin(command, options = {}, ws, context) {
       // them with its own filesystem tools.
       const promptText = appendFilesInputTag(appendImagesInputTag(command, images), files);
 
+      // Пока ход идёт, счётчик читается из sessions.db — Devin пишет туда
+      // metrics каждого ответа по ходу работы (см. devin-usage.ts).
+      run.usageTimer = setInterval(() => emitDevinTokenBudget(ws, run, sessionId), DEVIN_USAGE_POLL_MS);
+      run.usageTimer.unref?.();
+
       const result = await connection.call('session/prompt', {
         sessionId: run.devinSessionId,
         prompt: [{ type: 'text', text: promptText }],
       });
+
+      if (run.usageTimer) {
+        clearInterval(run.usageTimer);
+        run.usageTimer = null;
+      }
 
       if (run.aborted) {
         finish(0, true);
@@ -713,16 +779,20 @@ async function queryDevin(command, options = {}, ws, context) {
       }
 
       const stopReason = result?.stopReason;
+      // Финальный замер — последний ответ мог дописаться в базу только что.
+      emitDevinTokenBudget(ws, run, sessionId, { force: true });
       const usage = result?.usage;
-      if (usage) {
+      if (usage && run.lastEmittedUsage === null) {
+        // Запасной путь на случай пустого чтения базы: окно берём из
+        // каталога модели, а не равным расходу — иначе «150K/150K».
         sendMessage(ws, createNormalizedMessage({
           provider: 'devin',
-          sessionId: run.devinSessionId || sessionId || null,
+          sessionId: sessionId || run.devinSessionId || null,
           kind: 'status',
           text: 'token_budget',
           tokenBudget: {
             used: usage.totalTokens ?? 0,
-            total: usage.totalTokens ?? 0,
+            total: resolveDevinContextWindow(resolvedModel),
             inputTokens: usage.inputTokens ?? 0,
             outputTokens: usage.outputTokens ?? 0,
             breakdown: {
