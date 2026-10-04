@@ -155,15 +155,32 @@ export class DevinSessionsProvider implements IProviderSessions {
     }
 
     if (updateType === 'tool_call') {
-      return [createNormalizedMessage({
-        id: readOptionalString(update.toolCallId) ?? generateMessageId('devin-tool'),
-        sessionId: eventSessionId,
-        provider: PROVIDER,
-        kind: 'tool_use',
-        toolName: readToolName(update),
-        toolId: readOptionalString(update.toolCallId) ?? undefined,
-        toolInput: update.rawInput ?? {},
-      })];
+      // ACP шлёт текст сплошным потоком `agent_message_chunk` без границ
+      // блоков (нет аналога Claude'овского content_block_stop, на котором
+      // клиент закрывает живую строку). Вызов инструмента — единственная
+      // жёсткая граница: накопленный перед ним текст — законченный блок.
+      // Без stream_end клиент склеивал весь ход в одну живую строку:
+      // статусная реплика слипалась с финальным ответом, ни с одним узлом на
+      // диске такая строка не совпадала — и ответ вставал в ленту второй раз
+      // под «Ходом работы» (04.10.26, снимок Егора). Лишний stream_end подряд
+      // безопасен: аккумулятор пуст, финализировать нечего.
+      const toolId = readOptionalString(update.toolCallId) ?? generateMessageId('devin-tool');
+      return [
+        createNormalizedMessage({
+          sessionId: eventSessionId,
+          provider: PROVIDER,
+          kind: 'stream_end',
+        }),
+        createNormalizedMessage({
+          id: toolId,
+          sessionId: eventSessionId,
+          provider: PROVIDER,
+          kind: 'tool_use',
+          toolName: readToolName(update),
+          toolId,
+          toolInput: update.rawInput ?? {},
+        }),
+      ];
     }
 
     if (updateType === 'tool_call_update') {
