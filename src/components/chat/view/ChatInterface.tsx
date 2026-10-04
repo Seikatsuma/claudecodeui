@@ -611,7 +611,7 @@ function ChatInterface({
           onGrantToolPermission={handleGrantToolPermission}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
-          onRewindToMessage={provider === 'claude' && rewindSessionId ? handleRewindToMessage : undefined}
+          onRewindToMessage={(provider === 'claude' || provider === 'devin') && rewindSessionId ? handleRewindToMessage : undefined}
           selectedProject={selectedProject}
         />
 

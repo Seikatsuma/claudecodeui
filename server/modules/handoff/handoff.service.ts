@@ -56,7 +56,12 @@ import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { sessionsDb } from '@/modules/database/index.js';
-import { codexHome, resolveCodexBinary } from '@/modules/providers/index.js';
+import {
+  codexHome,
+  hideDevinSessionsInDirectory,
+  exportDevinTranscript,
+  resolveCodexBinary,
+} from '@/modules/providers/index.js';
 import {
   digestTranscriptFile,
   exportDialogFile,
@@ -64,9 +69,9 @@ import {
   recentEdits,
   transcriptLineBoundary,
   type TouchedFile,
-  type TranscriptDigest,
 } from '@/modules/handoff/handoff-digest.js';
 import { canonicalizeAccountDir, getActiveAccountDir } from '@/shared/session-scope.js';
+import { resolveDevinCliCommand } from '@/shared/utils.js';
 
 /** Переписка длиннее — разбирается частями, потом части сводятся. */
 const SINGLE_PASS_MAX_CHARS = 300_000;
@@ -166,7 +171,7 @@ function goalBlock(goal: string | null): string {
 }
 
 function singlePassPrompt(digest: string, goal: string | null, half: Half, fileList: string): string {
-  return `Ты готовишь передачу дела. Разговор человека с ИИ-агентом (Claude Code) разросся, и работа продолжится в НОВОМ чате, где у агента этой переписки не будет. Новый агент увидит выжимку и сможет при нужде открыть весь разговор файлом. Твоя часть выжимки должна дать ему продолжить без потерь и без переспросов.
+  return `Ты готовишь передачу дела. Разговор человека с ИИ-агентом разросся, и работа продолжится в НОВОМ чате, где у агента этой переписки не будет. Новый агент увидит выжимку и сможет при нужде открыть весь разговор файлом. Твоя часть выжимки должна дать ему продолжить без потерь и без переспросов.
 ${goalBlock(goal)}
 ${BRIEF_RULES}
 
@@ -183,7 +188,7 @@ ${digest}
 }
 
 function mapPrompt(chunk: string, index: number, total: number): string {
-  return `Это часть ${index} из ${total} длинной переписки человека с ИИ-агентом (Claude Code), в хронологическом порядке. Позже из заметок по всем частям соберут выжимку для нового чата. Выпиши из ЭТОЙ части всё, что может понадобиться, чтобы продолжить дело: цели и просьбы человека, что сделано (с пометкой (проверено)/(со слов)), решения и отвергнутое с причинами, что не сработало, поправки человека почти дословно, цифры и факты, открытые вопросы, пути к файлам и документам. Указывай дату и время из меток, когда что-то решалось или менялось. Ничего не выдумывай. До ~700 слов, пунктами, на языке переписки. Верни только заметки.
+  return `Это часть ${index} из ${total} длинной переписки человека с ИИ-агентом, в хронологическом порядке. Позже из заметок по всем частям соберут выжимку для нового чата. Выпиши из ЭТОЙ части всё, что может понадобиться, чтобы продолжить дело: цели и просьбы человека, что сделано (с пометкой (проверено)/(со слов)), решения и отвергнутое с причинами, что не сработало, поправки человека почти дословно, цифры и факты, открытые вопросы, пути к файлам и документам. Указывай дату и время из меток, когда что-то решалось или менялось. Ничего не выдумывай. До ~700 слов, пунктами, на языке переписки. Верни только заметки.
 
 <transcript part="${index}/${total}">
 ${chunk}
@@ -192,7 +197,7 @@ ${chunk}
 
 function reducePrompt(notes: string[], lastChunk: string, goal: string | null, half: Half, fileList: string): string {
   const joined = notes.map((note, i) => `<notes part="${i + 1}">\n${note}\n</notes>`).join('\n\n');
-  return `Ты готовишь передачу дела. Разговор человека с ИИ-агентом (Claude Code) разросся, и работа продолжится в НОВОМ чате, где у агента этой переписки не будет. Переписка очень длинная, поэтому ниже — заметки по её частям в хронологическом порядке, а последняя часть дана целиком. Сведи всё в свою часть выжимки, по которой новый агент продолжит без потерь.
+  return `Ты готовишь передачу дела. Разговор человека с ИИ-агентом разросся, и работа продолжится в НОВОМ чате, где у агента этой переписки не будет. Переписка очень длинная, поэтому ниже — заметки по её частям в хронологическом порядке, а последняя часть дана целиком. Сведи всё в свою часть выжимки, по которой новый агент продолжит без потерь.
 ${goalBlock(goal)}
 ${BRIEF_RULES}
 
@@ -397,6 +402,60 @@ export async function askCodexOnce(prompt: string): Promise<string> {
   return text.trim();
 }
 
+/** Отдельная служебная папка разовых вызовов `devin -p`: беседы в ней — только выжимки. */
+const DEVIN_MODEL_CWD = path.join(os.homedir(), '.cloudcli', 'handoff-devin-cwd');
+
+/**
+ * Тот же один ответ, но от Devin — для переноса чата Devin (Егор 03.10.26:
+ * «только его токены» — выжимку чата Devin пишет сам Devin, не Claude).
+ *
+ * `devin -p` всегда создаёт беседу в рабочей папке; она идёт в свою папку
+ * DEVIN_MODEL_CWD и после вызова помечается скрытой — в список чатов не
+ * попадает. Ответ — текст stdout; при ошибке — stderr и код выхода.
+ */
+export async function askDevinOnce(prompt: string): Promise<string> {
+  await mkdir(DEVIN_MODEL_CWD, { recursive: true }).catch(() => undefined);
+  const result = await new Promise<{ text: string; error: string | null }>((resolve) => {
+    const child = spawn(resolveDevinCliCommand(), [
+      '--respect-workspace-trust', 'false',
+      '-p', prompt,
+    ], {
+      cwd: DEVIN_MODEL_CWD,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve({ text: '', error: 'Devin не ответил вовремя' });
+    }, MODEL_TIMEOUT_MS);
+    timer.unref?.();
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-2000);
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      resolve({ text: '', error: error.message });
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve({
+        text: stdout,
+        error: code === 0 ? null : (stderr.trim().split('\n').pop() || `Devin завершился с кодом ${String(code)}`),
+      });
+    });
+  });
+  // Беседа вызова пишется в общую базу Devin — прячем, чтобы не всплыла чатом.
+  hideDevinSessionsInDirectory(DEVIN_MODEL_CWD);
+  if (result.error || !result.text.trim()) {
+    throw new Error(result.error || 'Devin не ответил');
+  }
+  return result.text.trim();
+}
+
 type Ask = (prompt: string, accountDir: string) => Promise<string>;
 
 /**
@@ -574,6 +633,8 @@ type HandoffSource = {
   transcriptPath: string;
   providerSessionId: string | null;
   accountDir: string;
+  /** Чей чат переносим: выжимку пишет его же подписка (devin → askDevinOnce). */
+  provider: string;
 };
 
 /** Что сервер кладёт в первое сообщение нового чата, кроме выжимки модели. */
@@ -714,11 +775,38 @@ export async function sweepOldDialogs(accountDir: string, now = Date.now(), ttlD
 async function resolveSource(sessionId: string): Promise<HandoffSource> {
   const row = sessionsDb.getSessionById(sessionId);
   if (!row) throw new HandoffError(404, 'чат не найден');
-  if (row.provider && row.provider !== 'claude') throw new HandoffError(400, 'перенос пока умеет только чаты Claude');
+  if (row.provider && row.provider !== 'claude' && row.provider !== 'devin') {
+    throw new HandoffError(400, 'перенос пока умеет только чаты Claude и Devin');
+  }
 
   const accountDir = getActiveAccountDir();
   const projectsRoot = path.join(accountDir, 'projects') + path.sep;
   const providerSessionId = row.provider_session_id || row.session_id;
+
+  // У Devin разговор — узлы в его общей базе: выгружаем живую цепочку
+  // построчным файлом в папку аккаунта и дальше идём тем же конвейером.
+  if (row.provider === 'devin') {
+    const transcriptPath = path.join(accountDir, 'handoffs', `devin-${providerSessionId}.jsonl`);
+    let exported = 0;
+    try {
+      exported = await exportDevinTranscript(providerSessionId, transcriptPath);
+    } catch (error) {
+      console.error('[handoff] выгрузка беседы Devin не удалась:', error);
+      throw new HandoffError(500, 'не удалось прочитать беседу Devin');
+    }
+    if (exported === 0) {
+      throw new HandoffError(404, 'в чате ещё нет ни одного ответа — дождитесь первого и нажмите снова');
+    }
+    return {
+      sessionId,
+      title: (row.custom_name || '').trim() || 'без названия',
+      projectPath: row.project_path,
+      transcriptPath: canonicalizeAccountDir(transcriptPath),
+      providerSessionId,
+      accountDir,
+      provider: 'devin',
+    };
+  }
 
   let transcriptPath = row.jsonl_path || null;
   if (!transcriptPath && /^[0-9a-f-]{36}$/i.test(providerSessionId)) {
@@ -747,6 +835,7 @@ async function resolveSource(sessionId: string): Promise<HandoffSource> {
     transcriptPath: realTranscript,
     providerSessionId,
     accountDir,
+    provider: row.provider ?? 'claude',
   };
 }
 
@@ -861,6 +950,8 @@ export async function prepareHandoff(
 ): Promise<{ status: 'started' | 'running' | 'done' | 'busy' }> {
   sweepJobs();
   const source = await resolveSource(sessionId);
+  // Выжимку пишет подписка самого чата: Devin — Devin (только его токены).
+  const askForSource = source.provider === 'devin' ? askDevinOnce : ask;
   const key = jobKey(source.accountDir, sessionId);
   const existing = prepared.get(key);
   if (existing?.status === 'running') return { status: 'running' };
@@ -890,7 +981,7 @@ export async function prepareHandoff(
       const digest = await digestTranscriptFile(source.transcriptPath, source.providerSessionId, { end: bytes });
       if (!digest.text.trim()) throw new Error('в переписке нет сообщений');
       const fileMap = await buildFileMap(digest.touchedFiles);
-      item.brief = await writeBrief(await digestWithEdits(digest.text, source), source.accountDir, ask, null, formatFileList(fileMap));
+      item.brief = await writeBrief(await digestWithEdits(digest.text, source), source.accountDir, askForSource, null, formatFileList(fileMap));
       item.changedFiles = digest.changedFiles;
       item.mapPaths = fileMap.map((entry) => entry.path);
       item.guides = await folderGuides(fileMap);
@@ -931,6 +1022,8 @@ function normalizeGoal(goal: unknown): string | null {
 export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, rawGoal: unknown = null): Promise<HandoffJob> {
   sweepJobs();
   const source = await resolveSource(sessionId);
+  // Выжимку пишет подписка самого чата: Devin — Devin (только его токены).
+  const askForSource = source.provider === 'devin' ? askDevinOnce : ask;
   const goal = normalizeGoal(rawGoal);
   const key = jobKey(source.accountDir, sessionId);
   const existing = jobs.get(key);
@@ -989,7 +1082,7 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
         const digest = await digestTranscriptFile(source.transcriptPath, source.providerSessionId);
         if (!digest.text.trim()) throw new Error('в переписке нет сообщений');
         const fileMap = await buildFileMap(digest.touchedFiles);
-        const brief = await writeBrief(await digestWithEdits(digest.text, source), source.accountDir, ask, goal, formatFileList(fileMap));
+        const brief = await writeBrief(await digestWithEdits(digest.text, source), source.accountDir, askForSource, goal, formatFileList(fileMap));
         parts = {
           brief,
           changedFiles: digest.changedFiles,

@@ -597,7 +597,7 @@ export default function ChatComposer({
                     {
                       key: 'compact',
                       label: 'Сжать в этом чате',
-                      description: 'Встроенное сжатие Claude: тот же чат, лучше сохраняет детали. 1–3 минуты',
+                      description: `Встроенное сжатие ${providerLabel}: тот же чат, лучше сохраняет детали. 1–3 минуты`,
                       icon: Minimize2,
                       onSelect: onCompactHere,
                     },

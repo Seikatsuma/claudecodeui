@@ -28,6 +28,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { rewindDevinSession } from '@/modules/providers/list/devin/devin-rewind.js';
 import { isSurvivorRunning, stopSurvivor } from '@/modules/providers/list/claude/survivor-runs.js';
 import { forgetTranscriptTail } from '@/modules/providers/list/claude/transcript-tail-cache.js';
 import { providerRuntimeService } from '@/modules/providers/services/provider-runtime.service.js';
@@ -292,6 +293,21 @@ export const sessionRewindService = {
     const session = sessionsDb.getSessionById(input.sessionId);
     if (!session) {
       throw new AppError('Чат не найден.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+    }
+    if (session.provider === 'devin') {
+      const providerSessionId = session.provider_session_id ?? session.session_id;
+      if (!providerSessionId) {
+        throw new AppError('Беседа Devin ещё не создана — возвращаться не к чему.', {
+          code: 'REWIND_NO_TRANSCRIPT',
+          statusCode: 404,
+        });
+      }
+      return rewindDevinSession({
+        sessionId: input.sessionId,
+        providerSessionId,
+        messageId: input.messageId,
+        text: input.text,
+      });
     }
     if (session.provider !== 'claude') {
       throw new AppError('Возврат к сообщению пока есть только для чатов Claude.', {

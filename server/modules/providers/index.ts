@@ -32,3 +32,9 @@ export { readCodexAccountLimits } from './services/codex-account-limits.service.
 export { readDevinAccount } from './services/devin-account.service.js';
 // codexHome / resolveCodexBinary: handoff module writes a Codex-bound brief with Codex itself.
 export { codexHome, resolveCodexBinary } from './services/codex-account-limits.service.js';
+
+// Потребитель: `handoff` — «Продолжить в новом чате» выгружает беседу Devin
+// построчным файлом формата переписки Claude и скрывает служебные беседы
+// разового вызова `devin -p`.
+export { exportDevinTranscript } from './list/devin/devin-transcript.js';
+export { hideDevinSessionsInDirectory } from './list/devin/devin-chain.js';

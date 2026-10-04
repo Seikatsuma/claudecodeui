@@ -1410,7 +1410,7 @@ export function useChatComposerState({
   const [handoffStatus, setHandoffStatus] = useState<'idle' | 'running'>('idle');
   const handoffTickRef = useRef(0);
   const [handoffTick, setHandoffTick] = useState(0);
-  const canHandoff = Boolean(sessionKey && selectedProject && onStartNewChat && provider === 'claude');
+  const canHandoff = Boolean(sessionKey && selectedProject && onStartNewChat && (provider === 'claude' || provider === 'devin'));
 
   /**
    * Опрос задачи до готовности. `resumeSessionId` — продолжить уже начатую

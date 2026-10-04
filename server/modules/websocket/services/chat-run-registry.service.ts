@@ -64,9 +64,9 @@ const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
 const runs = new Map<string, ChatRun>();
 
 /**
- * A deliberate server restart first closes this gate. Claude and Codex own
- * survivable processes and continue across the restart; any provider without
- * that capability is allowed to finish before the web process exits.
+ * A deliberate server restart first closes this gate. Claude, Codex and Devin
+ * own survivable processes and continue across the restart; any provider
+ * without that capability is allowed to finish before the web process exits.
  */
 let acceptingNewRuns = true;
 
@@ -78,14 +78,18 @@ let acceptingNewRuns = true;
  * Теперь скрипт продлевает аренду на каждом шаге ожидания; перестал — через
  * PRE_RESTART_LEASE_MS вход открывается сам, очередь уходит обходом раз в минуту.
  *
- * И закрывает она только неживучих провайдеров: Claude и Codex переживают
- * перезапуск сами, держать их чаты ради чужого Devin незачем.
+ * И закрывает она только неживучих провайдеров: Claude, Codex и Devin
+ * переживают перезапуск сами, держать их чаты ради чужого неживучего незачем.
  */
 const PRE_RESTART_LEASE_MS = 120_000;
 let preRestartDrainUntil = 0;
 
 function isRestartSafeProvider(provider: string): boolean {
-  return provider === 'claude' || provider === 'codex';
+  // У Devin ход переживает перезапуск так же, как у Codex: ACP-процесс держит
+  // devin-acp-supervisor, а после рестарта рантайм переподключается к сокету
+  // (survivor-runs знает devin отдельно). Иначе выкладка ждала бы каждый ход
+  // Devin до конца — а они длятся десятки минут.
+  return provider === 'claude' || provider === 'codex' || provider === 'devin';
 }
 
 function isPreRestartDrainActive(): boolean {
