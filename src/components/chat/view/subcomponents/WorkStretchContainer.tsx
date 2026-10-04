@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 
 import type { ChatMessage, ClaudePermissionSuggestion, PermissionGrantResult, Provider } from '../../types/types';
 import type { Project } from '../../../../types/app';
+import { useSelectedChatProvider } from '../../../../hooks/useCodexAccount';
 import { api } from '../../../../utils/api';
 import { isToolGroupItem } from '../../utils/toolGrouping';
 import {
@@ -174,10 +175,13 @@ export default function WorkStretchContainer({
   isLive = false,
 }: WorkStretchContainerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const digest = useThoughtDigest(stretch.thoughts, isExpanded);
+  // В режиме «Devin» перевод мыслей не запрашивается: он идёт через Claude (Haiku),
+  // а там должны тратиться только токены Devin (Егор 03.10.26).
+  const claudeFree = useSelectedChatProvider() === 'devin';
+  const digest = useThoughtDigest(stretch.thoughts, isExpanded && !claudeFree);
   const showLiveTail = isLive && !isExpanded;
   const liveThoughts = useMemo(() => stretch.thoughts.slice(-LIVE_THOUGHTS), [stretch.thoughts]);
-  const liveDigest = useThoughtDigest(liveThoughts, showLiveTail);
+  const liveDigest = useThoughtDigest(liveThoughts, showLiveTail && !claudeFree);
   const liveTail = showLiveTail ? workStretchLiveTail(stretch, liveDigest.stageText) : [];
   const label = describeWorkStretch({
     actionCount: stretch.actionCount,

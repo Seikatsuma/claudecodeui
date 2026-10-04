@@ -28,5 +28,7 @@ export { startSessionActivitySync, stopSessionActivitySync } from './services/se
 
 // readCodexAccountLimits: used by the user module for the Codex account row and its limits.
 export { readCodexAccountLimits } from './services/codex-account-limits.service.js';
+// readDevinAccount: used by the user module for the Devin account row in the account menu.
+export { readDevinAccount } from './services/devin-account.service.js';
 // codexHome / resolveCodexBinary: handoff module writes a Codex-bound brief with Codex itself.
 export { codexHome, resolveCodexBinary } from './services/codex-account-limits.service.js';

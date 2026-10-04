@@ -174,8 +174,11 @@ type CandidateRow = {
   group_id: string | null;
 };
 
+// Чаты Devin сюда не попадают: режим «Devin» работает только на токенах Devin (Егор 03.10.26), а
+// разбор по группам — запрос к Claude. Название чата Devin Claude не отправляется.
 const HUMAN_CHAT_SQL = `
   isArchived = 0
+  AND provider <> 'devin'
   AND (origin IS NULL OR origin IN ('terminal', 'web'))
   AND COALESCE(project_path, '') NOT LIKE '/tmp/%'
   AND COALESCE(project_path, '') NOT LIKE '%/e2e%'`;

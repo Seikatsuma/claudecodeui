@@ -143,6 +143,31 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
   });
 });
 
+test('Devin has its own list: owner sees it across Claude accounts, Claude and Codex lists do not, guests never', async () => {
+  await withIsolatedDatabase(() => {
+    const projectPath = '/workspace/devin-space-project';
+    const currentAccount = getActiveAccountDir();
+    const otherAccount = `${currentAccount}-other`;
+    const make = (id: string, provider: string, at: string, accountDir: string) => sessionsDb.createSession(
+      id, provider, projectPath, id, at, at, null, undefined, { accountDir },
+    );
+    make('devin-current', 'devin', '2026-10-03T10:00:00.000Z', currentAccount);
+    make('devin-other', 'devin', '2026-10-03T11:00:00.000Z', otherAccount);
+    make('claude-current', 'claude', '2026-10-03T12:00:00.000Z', currentAccount);
+    make('codex-current', 'codex', '2026-10-03T13:00:00.000Z', currentAccount);
+
+    const ids = (page: ReturnType<typeof sessionsDb.getRecentSessionsPage>) => page.sessions.map((session) => session.session_id);
+
+    // Owner: the Devin list is Devin only, and shared across both Claude accounts.
+    assert.deepEqual(ids(sessionsDb.getRecentSessionsPage(10, 0, undefined, 'devin', 'shared-codex')), ['devin-other', 'devin-current']);
+    // The other lists never contain Devin chats.
+    assert.deepEqual(ids(sessionsDb.getRecentSessionsPage(10, 0, undefined, 'claude', 'shared-codex')), ['claude-current']);
+    assert.deepEqual(ids(sessionsDb.getRecentSessionsPage(10, 0, undefined, 'codex', 'shared-codex')), ['codex-current']);
+    // Guest: no Devin (and no Codex) rows at all, even in the unfiltered feed.
+    assert.deepEqual(ids(sessionsDb.getRecentSessionsPage(10, 0, undefined, undefined, 'hide-codex')), ['claude-current']);
+  });
+});
+
 test('owner lists share Codex across Claude accounts without sharing Claude chats', async () => {
   await withIsolatedDatabase(() => {
     const projectPath = '/workspace/shared-codex-project';

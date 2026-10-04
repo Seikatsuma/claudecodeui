@@ -28,6 +28,7 @@ import {
 } from "../../../../shared/view/ui";
 
 import ModelLibraryPanel from "./ModelLibraryPanel";
+import { useSelectedChatProvider } from "../../../../hooks/useCodexAccount";
 
 const PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "claude", name: "Anthropic" },
@@ -157,11 +158,14 @@ export default function ProviderSelectionEmptyState({
   // A provider whose catalog never loaded stays hidden once loading is over —
   // this keeps the owner-only Devin tab invisible to guests (the backend
   // rejects their /devin/models request with 403).
+  // В режиме «Devin» (выбор в меню аккаунтов) работает только он: других вкладок нет,
+  // чтобы случайно не потратить токены Claude или Codex (Егор 03.10.26).
+  const devinOnly = useSelectedChatProvider() === "devin";
   const visibleProviderTabs = useMemo(
-    () => PROVIDER_META.filter(
-      (p) => p.id !== "devin" || providerModelsLoading || providerModelCatalog[p.id] !== undefined,
-    ),
-    [providerModelCatalog, providerModelsLoading],
+    () => PROVIDER_META.filter((p) => (devinOnly
+      ? p.id === "devin"
+      : p.id !== "devin" || providerModelsLoading || providerModelCatalog[p.id] !== undefined)),
+    [providerModelCatalog, providerModelsLoading, devinOnly],
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {

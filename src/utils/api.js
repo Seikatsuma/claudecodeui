@@ -278,7 +278,7 @@ export const api = {
   // делает сервер: страница берётся по 40 чатов, и отбор после выдачи
   // оставлял бы второй блок почти пустым.
   /**
-   * @param {{ limit?: number, offset?: number, serverScope?: 'main' | 'second', providerSpace?: 'codex' | 'claude' }} [options]
+   * @param {{ limit?: number, offset?: number, serverScope?: 'main' | 'second', providerSpace?: 'codex' | 'devin' | 'claude' }} [options]
    */
   recentConversations: (options = {}) => {
     const { limit = 40, offset = 0, serverScope, providerSpace } = options;
@@ -479,6 +479,7 @@ export const api = {
   user: {
     usageLimits: () => authenticatedFetch('/api/user/usage-limits'),
     codexAccount: () => authenticatedFetch('/api/user/codex-account'),
+    devinAccount: () => authenticatedFetch('/api/user/devin-account'),
     thoughtDigest: (texts) =>
       authenticatedFetch('/api/user/thought-digest', {
         method: 'POST',

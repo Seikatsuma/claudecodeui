@@ -32,17 +32,19 @@ export const SELECT_PROVIDER_EVENT = 'ccui:select-provider';
 export const CONTINUE_IN_PROVIDER_EVENT = 'ccui:continue-in-provider';
 
 /** Выбор помощника человеком в меню аккаунтов: запомнить и открыть его список. */
-export function switchChatProvider(provider: 'claude' | 'codex'): void {
+export type ChatProviderChoice = 'claude' | 'codex' | 'devin';
+
+export function switchChatProvider(provider: ChatProviderChoice): void {
   selectChatProvider(provider);
   window.dispatchEvent(new CustomEvent(CONTINUE_IN_PROVIDER_EVENT, { detail: provider }));
 }
 
 /**
- * Выбрать помощника (claude / codex) для следующего нового чата — так же, как
+ * Выбрать помощника (claude / codex / devin) для следующего нового чата — так же, как
  * это делает выбор модели на пустом экране: запись в localStorage плюс событие
  * для уже открытого поля ввода.
  */
-export function selectChatProvider(provider: 'claude' | 'codex'): void {
+export function selectChatProvider(provider: ChatProviderChoice): void {
   localStorage.setItem('selected-provider', provider);
   window.dispatchEvent(new CustomEvent(SELECT_PROVIDER_EVENT, { detail: provider }));
 }
@@ -79,6 +81,42 @@ export function useCodexAccount(): CodexAccount | null {
       }
     } catch {
       // Справочные данные: молча пропускаем, как и лимиты Claude.
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  return account;
+}
+
+export type DevinAccount = {
+  available: boolean;
+  name: string | null;
+  /** Единственное семейство моделей, разрешённое на этом аккаунте. */
+  models: string;
+  fetchedAtMs: number | null;
+};
+
+/**
+ * Подписка Devin хозяина (GET /api/user/devin-account): имя входа и признак
+ * «вошёл». Окон лимитов Devin не публикует, поэтому полос в «Расходе» нет.
+ * У гостя и без входа — `available: false`, и тогда пункта в меню аккаунтов нет.
+ */
+export function useDevinAccount(): DevinAccount | null {
+  const [account, setAccount] = useState<DevinAccount | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await api.user.devinAccount();
+      if (response.ok) {
+        setAccount((await response.json()) as DevinAccount);
+      }
+    } catch {
+      // Справочные данные: молча пропускаем.
     }
   }, []);
 

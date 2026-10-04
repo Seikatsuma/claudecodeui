@@ -2,7 +2,7 @@ import { Check, ChevronsUpDown, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { switchChatProvider, useCodexAccount, useSelectedChatProvider } from '../../../../hooks/useCodexAccount';
+import { selectChatProvider, switchChatProvider, useCodexAccount, useDevinAccount, useSelectedChatProvider } from '../../../../hooks/useCodexAccount';
 import { useOwnerAccountSettings } from '../../../settings/hooks/useOwnerAccountSettings';
 
 type SidebarAccountSwitcherProps = {
@@ -47,7 +47,20 @@ export default function SidebarAccountSwitcher({
   const codexReady = Boolean(codex?.available);
   const selectedProvider = useSelectedChatProvider();
   const codexSelected = codexReady && selectedProvider === 'codex';
-  const canSwitch = available.length + (codexReady ? 1 : 0) > 1;
+  // Подписка Devin — четвёртый аккаунт хозяина (Егор 03.10.26): свой список
+  // чатов, только токены Devin, только SWE-2. Слот Claude тоже не трогает.
+  const devin = useDevinAccount();
+  const devinReady = Boolean(devin?.available);
+  const devinSelected = devinReady && selectedProvider === 'devin';
+  const otherSelected = codexSelected || devinSelected;
+  // Devin пропал (вышли из аккаунта, сняли доступ), а выбор остался запомненным:
+  // вернуть Claude, иначе список чатов остался бы пустым.
+  useEffect(() => {
+    if (devin && !devin.available && selectedProvider === 'devin') {
+      selectChatProvider('claude');
+    }
+  }, [devin, selectedProvider]);
+  const canSwitch = available.length + (codexReady ? 1 : 0) + (devinReady ? 1 : 0) > 1;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -74,16 +87,18 @@ export default function SidebarAccountSwitcher({
     };
   }, [isOpen]);
 
-  const activeEmail = codexSelected
-    ? (codex?.email ?? 'Codex')
-    : (available.find((account) => account.slot === activeSlot)?.email ?? accountEmail);
+  const activeEmail = devinSelected
+    ? (devin?.name ?? 'Devin')
+    : codexSelected
+      ? (codex?.email ?? 'Codex')
+      : (available.find((account) => account.slot === activeSlot)?.email ?? accountEmail);
 
   const badgeInner = (
     <>
       <Users className="h-4 w-4 flex-shrink-0 text-violet-500 dark:text-violet-400" />
       <div className="min-w-0 flex-1 text-left">
         <span className="block truncate text-xs font-medium text-violet-700 dark:text-violet-300">
-          {codexSelected ? 'Codex' : accountLabel}
+          {devinSelected ? 'Devin' : codexSelected ? 'Codex' : accountLabel}
         </span>
         {activeEmail && (
           <span
@@ -147,7 +162,7 @@ export default function SidebarAccountSwitcher({
                   Ваши аккаунты
                 </div>
                 {available.map((account) => {
-                  const isActive = account.slot === activeSlot && !codexSelected;
+                  const isActive = account.slot === activeSlot && !otherSelected;
                   const isBusy = pendingSlot === account.slot;
                   return (
                     <button
@@ -156,10 +171,10 @@ export default function SidebarAccountSwitcher({
                       role="menuitem"
                       disabled={isActive || pendingSlot !== null}
                       onClick={() => {
-                        const fromCodex = codexSelected;
-                        if (fromCodex) switchChatProvider('claude');
+                        const fromOther = otherSelected;
+                        if (fromOther) switchChatProvider('claude');
                         if (account.slot === activeSlot) {
-                          // Слот уже этот — вернуться с Codex на Claude.
+                          // Слот уже этот — вернуться с Codex или Devin на Claude.
                           setIsOpen(false);
                           return;
                         }
@@ -195,6 +210,24 @@ export default function SidebarAccountSwitcher({
                     </span>
                     <span className="min-w-0 flex-1 truncate">{codex?.email ?? 'Codex'}</span>
                     <span className="flex-shrink-0 text-[10px] text-muted-foreground">Codex</span>
+                  </button>
+                )}
+                {devinReady && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={devinSelected || pendingSlot !== null}
+                    onClick={() => {
+                      switchChatProvider('devin');
+                      setIsOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/60 disabled:cursor-default"
+                  >
+                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
+                      {devinSelected && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{devin?.name ?? 'Devin'}</span>
+                    <span className="flex-shrink-0 text-[10px] text-muted-foreground">Devin · SWE-2</span>
                   </button>
                 )}
                 {errorMessage && (

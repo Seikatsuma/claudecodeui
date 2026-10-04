@@ -77,7 +77,11 @@ export default function SidebarUsageLimits() {
   // Подписка Codex (третий аккаунт) — те же два окна, числа прямо от Codex.
   const codex = useCodexAccount();
   // Показываем окна того аккаунта, с которым идёт работа, — не оба сразу.
-  const showCodex = useSelectedChatProvider() === 'codex' && Boolean(codex?.available);
+  const selectedProvider = useSelectedChatProvider();
+  const showCodex = selectedProvider === 'codex' && Boolean(codex?.available);
+  // У Devin окон лимитов нет (квота — на app.devin.ai); лимиты Claude в его
+  // режиме не показываем: они к этой работе не относятся.
+  const devinMode = selectedProvider === 'devin';
 
   const load = useCallback(async () => {
     try {
@@ -137,7 +141,7 @@ export default function SidebarUsageLimits() {
         expired: false,
       }))
     : [];
-  if (showCodex ? codexRows.length === 0 : !hasRows) {
+  if (devinMode || (showCodex ? codexRows.length === 0 : !hasRows)) {
     return null;
   }
 

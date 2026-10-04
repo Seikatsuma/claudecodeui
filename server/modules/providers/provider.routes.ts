@@ -813,8 +813,8 @@ router.get(
     const serverScope = typeof req.query.serverScope === 'string'
       ? normalizeServerScope(req.query.serverScope)
       : undefined;
-    // `space` — чаты Codex или все остальные (Codex — свой список).
-    const providerSpace = req.query.space === 'codex' || req.query.space === 'claude'
+    // `space` — чаты Codex, чаты Devin или все остальные (у каждого помощника свой список).
+    const providerSpace = req.query.space === 'codex' || req.query.space === 'devin' || req.query.space === 'claude'
       ? req.query.space
       : undefined;
     const page = sessionsService.listRecentSessions(limit, offset, serverScope, providerSpace);

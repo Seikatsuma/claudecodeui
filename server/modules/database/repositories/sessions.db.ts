@@ -146,10 +146,11 @@ type SessionAccountVisibility = 'current' | 'shared-codex' | 'hide-codex';
 /**
  * Builds the account boundary used by session-list queries.
  *
- * Claude histories remain tied to the selected Claude account. Codex is a
- * single host-level owner account, so owner-facing lists may deliberately
- * include Codex rows created while either Claude slot was selected. Guests
- * use `hide-codex`, which also excludes legacy unscoped Codex rows.
+ * Claude histories remain tied to the selected Claude account. Codex and
+ * Devin are single host-level owner accounts, so owner-facing lists may
+ * deliberately include their rows created while either Claude slot was
+ * selected. Guests use `hide-codex`, which also excludes legacy unscoped Codex
+ * rows and every Devin row.
  */
 function accountVisibilitySql(
   visibility: SessionAccountVisibility,
@@ -159,10 +160,10 @@ function accountVisibilitySql(
   const currentAccount = `(${prefix}account_dir IS NULL OR ${prefix}account_dir = ?)`;
 
   if (visibility === 'shared-codex') {
-    return ` AND (${prefix}provider = 'codex' OR ${currentAccount})`;
+    return ` AND (${prefix}provider IN ('codex', 'devin') OR ${currentAccount})`;
   }
   if (visibility === 'hide-codex') {
-    return ` AND ${prefix}provider != 'codex' AND ${currentAccount}`;
+    return ` AND ${prefix}provider NOT IN ('codex', 'devin') AND ${currentAccount}`;
   }
   return ` AND ${currentAccount}`;
 }
@@ -641,7 +642,7 @@ export const sessionsDb = {
     limit: number,
     offset: number,
     serverScope?: ServerScope,
-    providerSpace?: 'codex' | 'claude',
+    providerSpace?: 'codex' | 'devin' | 'claude',
     accountVisibility: SessionAccountVisibility = 'current',
   ): RecentSessionsPage {
     const db = getConnection();
@@ -655,7 +656,8 @@ export const sessionsDb = {
       // Чаты Codex — свой список, как второй блок (Егор 29.09.26: «его чат
       // находится среди других чатов — странно и неудобно»).
       + (providerSpace === 'codex' ? ` AND sessions.provider = 'codex'` : '')
-      + (providerSpace === 'claude' ? ` AND sessions.provider != 'codex'` : '');
+      + (providerSpace === 'devin' ? ` AND sessions.provider = 'devin'` : '')
+      + (providerSpace === 'claude' ? ` AND sessions.provider NOT IN ('codex', 'devin')` : '');
     const visibilityClause = `
       sessions.isArchived = 0
       AND (projects.isArchived IS NULL OR projects.isArchived = 0)

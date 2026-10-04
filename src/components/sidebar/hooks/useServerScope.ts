@@ -105,16 +105,19 @@ export function scopeProjectsToServer(
 }
 
 /*
- * Чаты Codex — отдельный список, как второй блок (Егор 29.09.26: «его чат
- * находится среди других чатов — странно и неудобно, должна быть система как
- * между двумя блоками»). Какой список открыт, решает выбор в меню аккаунтов:
- * Codex — только чаты Codex, Claude — все остальные. Папки остаются все:
+ * Чаты Codex и чаты Devin — отдельные списки, как второй блок (Егор 29.09.26:
+ * «его чат находится среди других чатов — странно и неудобно, должна быть
+ * система как между двумя блоками»; про Devin 03.10.26: «чаты отдельно, как с
+ * другими ИИ»). Какой список открыт, решает выбор в меню аккаунтов: Codex —
+ * только чаты Codex, Devin — только чаты Devin, Claude — все остальные. Папки остаются все:
  * новый чат Codex заводится в той же папке, что и чат Claude.
  */
-export type ProviderSpace = 'codex' | 'claude';
+export type ProviderSpace = 'codex' | 'devin' | 'claude';
 
 export function providerSpaceOf(provider: string | null | undefined): ProviderSpace {
-  return provider === 'codex' ? 'codex' : 'claude';
+  if (provider === 'codex') return 'codex';
+  if (provider === 'devin') return 'devin';
+  return 'claude';
 }
 
 export function scopeProjectsToProvider(projects: Project[], space: ProviderSpace): Project[] {

@@ -96,6 +96,15 @@ export function isCodexAllowedForWebUser(userId: number | string | null | undefi
 }
 
 /**
+ * Whether this web user may use the host's Devin login (~/.local/share/devin).
+ * Same boundary as Codex: one login per machine, so on a multi-tenant instance
+ * only the platform owner may chat on it (and spend its quota).
+ */
+export function isDevinAllowedForWebUser(userId: number | string | null | undefined): boolean {
+  return isCodexAllowedForWebUser(userId);
+}
+
+/**
  * Resolves this process's Claude Code CLI config directory - the directory
  * that normally holds settings.json, .credentials.json, projects/, commands/,
  * skills/. Honors CLAUDE_CONFIG_DIR exactly like the `claude` CLI itself does

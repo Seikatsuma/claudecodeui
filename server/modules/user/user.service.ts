@@ -2,8 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { AppError, getClaudeConfigDir, getClaudeJsonPath, isCodexAllowedForWebUser, isPlatformOwnerWebUser } from '@/shared/utils.js';
-import { getLiveLimits, readCodexAccountLimits } from '@/modules/providers/index.js';
+import { AppError, getClaudeConfigDir, getClaudeJsonPath, isCodexAllowedForWebUser, isDevinAllowedForWebUser, isPlatformOwnerWebUser } from '@/shared/utils.js';
+import { getLiveLimits, readCodexAccountLimits, readDevinAccount } from '@/modules/providers/index.js';
 import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
 import { resolveWebUserRuntimeContext } from '@/shared/web-user-runtime.js';
 import { getOfficialUsage } from '@/modules/user/official-usage.js';
@@ -251,6 +251,18 @@ export function createUserService(dependencies: UserDependencies) {
         return { success: true, available: false, email: null, planType: null, fetchedAtMs: null, limits: [] };
       }
       return { success: true, ...(await readCodexAccountLimits()) };
+    },
+
+    /**
+     * Подписка Devin — «четвёртый аккаунт» хозяина (Егор 03.10.26): имя входа
+     * и признак «вошёл». Вход в Devin на машине один, поэтому гостю общего
+     * экземпляра отвечаем «нет». Окон лимитов Devin не публикует.
+     */
+    async getDevinAccount(userId: number) {
+      if (!isDevinAllowedForWebUser(userId)) {
+        return { success: true, available: false, name: null, models: 'SWE-2', fetchedAtMs: null };
+      }
+      return { success: true, ...(await readDevinAccount()) };
     },
 
     async getOwnerAccountEmail(userId: number) {

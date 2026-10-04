@@ -192,12 +192,13 @@ export const sessionsService = {
     limit: number,
     offset: number,
     serverScope?: ServerScope,
-    providerSpace?: 'codex' | 'claude',
+    providerSpace?: 'codex' | 'devin' | 'claude',
   ): RecentSessionsPage {
     const requestContext = getRequestRuntimeContext();
     const canUseCodex = requestContext === undefined
       || isCodexAllowedForWebUser(requestContext.userId);
-    if (providerSpace === 'codex' && !canUseCodex) {
+    if ((providerSpace === 'codex' || providerSpace === 'devin') && !canUseCodex) {
+      // Codex and Devin share one owner boundary (isCodexAllowedForWebUser).
       return { conversations: [], total: 0, hasMore: false };
     }
     const accountVisibility = canUseCodex ? 'shared-codex' : 'hide-codex';
