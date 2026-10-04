@@ -124,6 +124,15 @@ LOCK_HELD_START=$SECONDS
 # С 22.09 новые агенты живут в ccui-agents.slice (agent-rooms.js), но
 # пережившие перезапуск старые остаются в группе, пока не закончат.
 CG=/sys/fs/cgroup/system.slice/claudecodeui-shared.service
+# Продлить аренду ожидания (SIGUSR2, 2 мин) на шагах ПОСЛЕ wait_restart_safe_window:
+# ожидание памяти может длиться до 5 мин — без продления вход открылся бы
+# и Devin-ход стартовал бы прямо под перезапуск.
+renew_drain() {
+    local pid
+    pid="$(systemctl show claudecodeui-shared -p MainPID --value 2>/dev/null)"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -USR2 "$pid" 2>/dev/null
+    return 0
+}
 wait_room_free() {
     local high cur waited=0
     high="$(cat "$CG/memory.high" 2>/dev/null)"
@@ -139,6 +148,7 @@ wait_room_free() {
             say "Группа сайта забита: $((cur/1048576)) из $((high/1048576)) МБ — жду до 5 мин, иначе новый сервер застрянет. Кто занял:"
             for p in $(cat "$CG/cgroup.procs"); do ps -o rss=,etime=,args= -p "$p" 2>/dev/null; done | sort -n -r | head -5 | cut -c1-120
         }
+        renew_drain
         sleep 15; waited=$((waited + 15))
     done
 }
@@ -221,8 +231,10 @@ swap() {
         cp -a "$SELF/$d" "$d" || return 1
     done
 
+    renew_drain
     cp -a "$DB" "$BACKUP"
     wait_room_free
+    renew_drain
     sudo -n systemctl restart claudecodeui-shared
     wait_site_up
 }
