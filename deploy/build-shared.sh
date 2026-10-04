@@ -169,14 +169,19 @@ wait_site_up() {
 }
 
 # Codex, в отличие от Claude, не умеет переподключить уже идущий turn к
-# новому Node-процессу: рестарт записывает turn_aborted. Сначала SIGUSR2
-# закрывает вход новым запускам (их сообщения остаются в серверной очереди),
-# затем ждём, пока все не-Claude ходы закончатся. Без таймаута намеренно:
+# новому Node-процессу: рестарт записывает turn_aborted. Ждём, пока все
+# не-Claude ходы закончатся, и только тогда SIGUSR2 закрывает вход (их
+# сообщения остаются в серверной очереди). Без таймаута намеренно:
 # обновление сайта может подождать, работа человека — нет.
-# SIGUSR2 — аренда на 2 минуты, поэтому шлём его на КАЖДОМ шаге: 04.10.26
+# SIGUSR2 — аренда на 2 минуты, дальше её продлевает renew_drain: 04.10.26
 # скрипт оборвался вместе со своим чатом, а разовый сигнал оставил вход
 # закрытым на 33 минуты. Нет скрипта — нет продления — сайт открылся сам.
 wait_restart_safe_window() {
+    # Приём закрываем только когда окно УЖЕ пустое, а не на всё ожидание.
+    # 04.10.26 22:01: выкатка закрыла приём и ждала ответ Devin, шедший
+    # 58 мин, — всё это время любое сообщение в любой чат Devin висело
+    # «В очереди». Теперь ждём при открытом приёме; аренда сайта (2 мин)
+    # сама гаснет, если мы её не продлеваем.
     local main_pid health blocking draining waited=0
     while :; do
         main_pid="$(systemctl show claudecodeui-shared -p MainPID --value 2>/dev/null)"
@@ -184,24 +189,35 @@ wait_restart_safe_window() {
             say "ОШИБКА: не удалось узнать PID живого Claude UI — безопасный перезапуск невозможен"
             return 1
         fi
-        if ! kill -USR2 "$main_pid" 2>/dev/null; then
-            say "ОШИБКА: не удалось включить ожидание у PID $main_pid"
-            return 1
-        fi
 
         health="$(curl -sS --max-time 5 http://127.0.0.1:3003/health 2>/dev/null || true)"
         blocking="$(sed -n 's/.*"restartBlockingRuns":\([0-9][0-9]*\).*/\1/p' <<<"$health")"
         draining="$(sed -n 's/.*"draining":\(true\|false\).*/\1/p' <<<"$health")"
-        if [ "$draining" = true ] && [ "$blocking" = 0 ]; then
-            [ "$waited" -gt 0 ] && say "Активные ходы закончились — можно безопасно перезапускать"
-            return 0
-        fi
         if [ -z "$blocking" ] || [ -z "$draining" ]; then
             say "ОШИБКА: живая версия ещё не умеет безопасно ждать Codex; автоматический перезапуск остановлен"
             return 1
         fi
-        if [ "$waited" -eq 0 ] || [ $((waited % 30)) -eq 0 ]; then
-            say "Перед перезапуском жду активные не-Claude ходы: $blocking (новые сообщения остаются в очереди)"
+
+        if [ "$blocking" = 0 ]; then
+            # Окно пустое: закрываем приём и перепроверяем — между замером и
+            # сигналом мог начаться новый ход.
+            if ! kill -USR2 "$main_pid" 2>/dev/null; then
+                say "ОШИБКА: не удалось включить ожидание у PID $main_pid"
+                return 1
+            fi
+            health="$(curl -sS --max-time 5 http://127.0.0.1:3003/health 2>/dev/null || true)"
+            blocking="$(sed -n 's/.*"restartBlockingRuns":\([0-9][0-9]*\).*/\1/p' <<<"$health")"
+            draining="$(sed -n 's/.*"draining":\(true\|false\).*/\1/p' <<<"$health")"
+            if [ "$draining" = true ] && [ "$blocking" = 0 ]; then
+                [ "$waited" -gt 0 ] && say "Активные ходы закончились за $waited с — приём закрыт, перезапускаю"
+                return 0
+            fi
+            # Успел начаться ход: больше не продлеваем аренду — через 2 мин
+            # приём откроется сам, ждём дальше.
+        fi
+
+        if [ "$waited" -eq 0 ] || [ $((waited % 60)) -eq 0 ]; then
+            say "Перед перезапуском жду активные не-Claude ходы: $blocking (приём сообщений открыт)"
         fi
         sleep 5
         waited=$((waited + 5))
