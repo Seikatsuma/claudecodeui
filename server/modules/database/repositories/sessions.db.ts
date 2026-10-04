@@ -523,7 +523,8 @@ export const sessionsDb = {
 
   /**
    * Active (non-archived) sessions for a project that have no topic group
-   * yet, newest first - the candidate pool for "Organize by topic".
+   * yet, newest first - the candidate pool for "Organize by topic". Devin chats are
+   * left out: that pass asks Claude, and Devin mode must spend only Devin tokens.
    */
   getUngroupedSessionsByProjectPath(projectPath: string, limit: number): SessionRow[] {
     const db = getConnection();
@@ -535,6 +536,7 @@ export const sessionsDb = {
          WHERE project_path = ?
            AND isArchived = 0
            AND group_id IS NULL
+           AND provider <> 'devin'
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ?`
       )

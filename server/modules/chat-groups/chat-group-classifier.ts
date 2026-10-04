@@ -175,7 +175,8 @@ type CandidateRow = {
 };
 
 // Чаты Devin сюда не попадают: режим «Devin» работает только на токенах Devin (Егор 03.10.26), а
-// разбор по группам — запрос к Claude. Название чата Devin Claude не отправляется.
+// разбор по группам — запрос к Claude. Название чата Devin Claude не отправляется: ни как чат на разбор,
+// ни как пример группы (groupExamples).
 const HUMAN_CHAT_SQL = `
   isArchived = 0
   AND provider <> 'devin'
@@ -208,7 +209,7 @@ function groupExamples(accountDir: string): ClassifierGroup[] {
     examples: (
       db.prepare(
         `SELECT custom_name FROM sessions
-         WHERE group_id = ? AND isArchived = 0 AND TRIM(COALESCE(custom_name, '')) <> ''
+         WHERE group_id = ? AND isArchived = 0 AND provider <> 'devin' AND TRIM(COALESCE(custom_name, '')) <> ''
          ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?`,
       ).all(group.id, EXAMPLES_PER_GROUP) as Array<{ custom_name: string }>
     ).map((row) => row.custom_name.slice(0, 80)),

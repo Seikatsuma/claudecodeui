@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -180,7 +181,8 @@ test('devin runtime: new session — handshake, session_created, streamed deltas
     const capture = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'));
     const methods = capture.calls.map((c) => c.method);
     assert.deepEqual(methods.slice(0, 2), ['initialize', 'session/new']);
-    assert.deepEqual(capture.args, ['acp']);
+    // The model is always named (SWE-2 only): an empty one is replaced, never left to the agent's own config.
+    assert.deepEqual(capture.args, ['acp', '--model', 'swe-2-high']);
   });
 });
 
@@ -238,6 +240,30 @@ test('devin runtime: a model other than SWE-2 is replaced by swe-2-high', async 
       assert.equal(setModel?.params?.value, 'swe-2-high');
     });
   }
+});
+
+test('devin runtime: /model, /fusion and /adaptive inside the chat are refused without starting the agent', async () => {
+  for (const forbidden of ['/model opus', '  /fusion', '/Adaptive']) {
+    await withFakeDevin(async (tempRoot) => {
+      const writer = makeWriter();
+      await devinRuntime.run(forbidden, { cwd: tempRoot, sessionId: `app-slash-${forbidden.trim()}` }, writer, runtimeContext);
+      const errors = writer.messages.filter((m) => m.kind === 'error');
+      const completes = writer.messages.filter((m) => m.kind === 'complete');
+      assert.equal(errors.length, 1, `${forbidden}: one error`);
+      assert.match(String(errors[0].content), /только SWE-2/);
+      assert.equal(completes.length, 1, `${forbidden}: exactly one complete`);
+      assert.equal(existsSync(process.env.DEVIN_RPC_CAPTURE), false, `${forbidden}: the agent must not have been started`);
+    });
+  }
+});
+
+test('devin runtime: an empty model is replaced by swe-2-high, not left to the agent config', async () => {
+  await withFakeDevin(async (tempRoot) => {
+    const writer = makeWriter();
+    await devinRuntime.run('Hi', { cwd: tempRoot, sessionId: 'app-nomodel-1', permissionMode: 'default' }, writer, runtimeContext);
+    const capture = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'));
+    assert.deepEqual(capture.args, ['acp', '--model', 'swe-2-high']);
+  });
 });
 
 test('devin runtime: abort kills the ACP process and ends the run once', async () => {
