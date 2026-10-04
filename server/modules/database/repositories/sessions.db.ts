@@ -181,11 +181,13 @@ export const sessionsDb = {
    */
   /**
    * `titleSource` is opt-in: callers that know how to classify their
-   * candidate title (currently only the Claude synchronizer) pass it and get
-   * the tiered naive/ai/custom comparison from `resolveTitleUpdate()`.
-   * Callers that omit it (cursor/codex/opencode synchronizers) keep the
-   * original "freeze once any custom_name exists" behavior unchanged, so
-   * this fix stays scoped to the provider it was reported for.
+   * candidate title (the Claude synchronizer from transcript title events,
+   * the Devin synchronizer from the CLI's generated `sessions.title`) pass
+   * it and get the tiered naive/ai/custom comparison from
+   * `resolveTitleUpdate()`. Callers that omit it (cursor/codex/opencode
+   * synchronizers) keep the original "freeze once any custom_name exists"
+   * behavior unchanged, so this fix stays scoped to the provider it was
+   * reported for.
    */
   createSession(
     providerSessionId: string,

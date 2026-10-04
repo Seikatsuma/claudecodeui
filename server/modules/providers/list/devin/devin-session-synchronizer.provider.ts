@@ -27,6 +27,77 @@ type SynchronizeRowsResult = {
 };
 
 /**
+ * How many distinct user messages a chat needs before its Devin-generated
+ * title may replace the naive first-words name. The prompt start is an
+ * acceptable placeholder early on, but the topic only becomes clear after a
+ * couple of exchanges — promote once the conversation has that context.
+ */
+const MIN_USER_MESSAGES_FOR_TITLE = 2;
+
+/**
+ * Devin's `sessions.title` column holds two kinds of values: a summary the
+ * CLI generates from the chat's task a few moments after the first turn —
+ * a real title, the same evidence tier as Claude's `ai-title` transcript
+ * entries — and, until that summary lands (or when the session opened with
+ * a tool call rather than typed text), a serialization of that call like
+ * `functions.read_file:0{"file_path": ...}`. Surfacing the blob would put
+ * raw JSON in the sidebar in place of a readable prompt-derived name, so
+ * tool-call-shaped titles count as "no title yet": the naive name stays
+ * until a real one arrives.
+ */
+const SERIALIZED_TOOL_TITLE = /^functions\.[\w-]+:\d+/;
+
+function usableDevinTitle(rawTitle: string | null): string | undefined {
+  const title = readOptionalString(rawTitle);
+  if (!title || SERIALIZED_TOOL_TITLE.test(title) || title.startsWith('{') || title.startsWith('[')) {
+    return undefined;
+  }
+  return title;
+}
+
+/**
+ * Devin sometimes stores the verbatim start of the first prompt in `title`
+ * instead of a summary — the same useless text the naive name already
+ * shows, but promoting it would freeze the placeholder forever. Such echoes
+ * count as "no real title", keeping the row open for a later genuine
+ * summary.
+ */
+function isEchoTitle(title: string, messageContent: string | undefined): boolean {
+  if (!messageContent) {
+    return false;
+  }
+  const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const normalizedTitle = normalize(title);
+  const normalizedContent = normalize(messageContent);
+  return normalizedContent.startsWith(normalizedTitle)
+    || normalizedTitle.startsWith(normalizedContent);
+}
+
+/**
+ * Extracts plain text out of a `message_nodes.chat_message` JSON blob. ACP
+ * content is a string for typed messages and an array of blocks for
+ * messages with attachments; only the text matters for echo detection.
+ */
+function messageText(chatMessageJson: string): string | undefined {
+  try {
+    const content = (JSON.parse(chatMessageJson) as { content?: unknown }).content;
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      const text = content
+        .map((block) => (block && typeof block === 'object' ? (block as { text?: unknown }).text : undefined))
+        .filter((part): part is string => typeof part === 'string')
+        .join(' ');
+      return text || undefined;
+    }
+  } catch {
+    // Unparseable node — treated as no content.
+  }
+  return undefined;
+}
+
+/**
  * Devin's session store is machine-global: stamp rows with the owner's account
  * dir — the server's own config dir, NOT the request context (a guest listing
  * projects triggers this sync and must not claim the owner's sessions).
@@ -105,7 +176,7 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
       let processed = 0;
       let firstSessionId: string | null = null;
       for (const row of rows) {
-        const indexedSessionId = this.upsertSession(row);
+        const indexedSessionId = this.upsertSession(db, row);
         if (!indexedSessionId) {
           continue;
         }
@@ -125,7 +196,49 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
     }
   }
 
-  private upsertSession(row: DevinSessionRow): string | null {
+  /**
+   * Distinct user messages in the chat so far. Devin rebuilds context every
+   * turn, replaying earlier messages into fresh branches, so raw node rows
+   * overcount roughly 2x — dedupe on the stored blob. Summarizer branches
+   * ("Conversation to summarize:") are internal plumbing, not user input.
+   */
+  private userMessageCount(db: InstanceType<typeof Database>, sessionId: string): number {
+    try {
+      const row = db.prepare(`
+        SELECT COUNT(DISTINCT chat_message) AS c FROM message_nodes
+        WHERE session_id = ?
+          AND json_extract(chat_message, '$.role') = 'user'
+          AND instr(chat_message, 'onversation to summarize') = 0
+      `).get(sessionId) as { c: number };
+      return row.c;
+    } catch {
+      // Older Devin databases may lack message_nodes — without it there is
+      // no evidence the chat has context, so the naive name stays.
+      return 0;
+    }
+  }
+
+  /**
+   * Whether Devin's title merely repeats the chat's opening prompt.
+   */
+  private echoesFirstPrompt(
+    db: InstanceType<typeof Database>,
+    sessionId: string,
+    title: string,
+  ): boolean {
+    try {
+      const row = db.prepare(`
+        SELECT chat_message FROM message_nodes
+        WHERE session_id = ? AND json_extract(chat_message, '$.role') = 'user'
+        ORDER BY node_id LIMIT 1
+      `).get(sessionId) as { chat_message: string } | undefined;
+      return isEchoTitle(title, row ? messageText(row.chat_message) : undefined);
+    } catch {
+      return false;
+    }
+  }
+
+  private upsertSession(db: InstanceType<typeof Database>, row: DevinSessionRow): string | null {
     const sessionId = readOptionalString(row.id);
     const projectPath = readOptionalString(row.working_directory);
     if (!sessionId || !projectPath) {
@@ -145,9 +258,25 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
     const existingSession = sessionsDb.getSessionByProviderSessionId(sessionId)
       ?? sessionsDb.getSessionById(sessionId);
     const existingName = existingSession?.custom_name;
-    const nextName = existingName && existingName !== fallbackTitle
-      ? existingName
-      : readOptionalString(row.title);
+    const existingSource = existingSession?.title_source;
+    // A chat keeps one settled name: once a real title has landed ('ai' from
+    // a generated summary, 'custom' from a human rename) sync never proposes
+    // another — Devin's own title may still evolve, the sidebar must not.
+    // While the name is 'naive', the generated summary outranks it (the same
+    // way a CLI `ai-title` does for Claude sessions) once the chat has a few
+    // messages for the summary to draw on.
+    const titleOpen = !existingSource || existingSource === 'naive';
+    const devinTitle = titleOpen ? usableDevinTitle(row.title) : undefined;
+    const derivedTitle = devinTitle
+      && this.userMessageCount(db, sessionId) >= MIN_USER_MESSAGES_FOR_TITLE
+      && !this.echoesFirstPrompt(db, sessionId, devinTitle)
+      ? devinTitle
+      : undefined;
+    const nextName = derivedTitle
+      ?? (existingName && existingName !== fallbackTitle
+        ? existingName
+        : usableDevinTitle(row.title))
+      ?? undefined;
 
     // sessions.db is shared storage — jsonl_path must stay null so deleting an
     // app session never removes other sessions' history.
@@ -159,7 +288,7 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
       normalizeProviderTimestamp(row.created_at),
       normalizeProviderTimestamp(row.last_activity_at ?? row.created_at),
       null,
-      undefined,
+      derivedTitle ? 'ai' : undefined,
       { accountDir: getMachineAccountDir(), origin: 'terminal' },
     );
   }
