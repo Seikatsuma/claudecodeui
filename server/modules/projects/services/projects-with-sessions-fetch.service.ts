@@ -1,10 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { projectsDb, scanStateDb, sessionsDb } from '@/modules/database/index.js';
 import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
-import { scanStateDb } from '@/modules/database/repositories/scan-state.db.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import { getActiveAccountDir } from '@/shared/session-scope.js';
 import type { RealtimeClientConnection, ServerScope } from '@/shared/types.js';
@@ -53,6 +52,13 @@ export type ProjectListItem = {
   sessionMeta: {
     hasMore: boolean;
     total: number;
+    /**
+     * «Сколько всего» в каждом срезе панели: ключ `<помощник>:<блок>`
+     * (`devin:main`, `claude:second`, …). Панель смотрит список одного
+     * помощника и одного блока, поэтому «есть ли ещё» решается по своему
+     * числу, а не по общему `total`.
+     */
+    scopeTotals?: Record<string, number>;
   };
 };
 
@@ -76,6 +82,14 @@ type GetProjectsWithSessionsOptions = {
 type SessionPaginationOptions = {
   limit?: number;
   offset?: number;
+  /**
+   * Срез под открытый вид панели: чаты одного помощника и одного блока
+   * верхней панели. Без него страница смешанная, и в списке Devin «Показать
+   * ещё чаты» догружало в основном чужие чаты — со стороны кнопка была
+   * мёртвой.
+   */
+  providerSpace?: 'codex' | 'devin' | 'claude';
+  serverScope?: ServerScope;
 };
 
 type ProjectSessionsPageResult = {
@@ -179,19 +193,48 @@ function readProjectSessionsPageByPath(
   const canUseCodex = requestContext === undefined
     || isCodexAllowedForWebUser(requestContext.userId);
   const accountVisibility = canUseCodex ? 'shared-codex' : 'hide-codex';
+  const scope = { providerSpace: options.providerSpace, serverScope: options.serverScope };
   const rows = sessionsDb.getSessionsByProjectPathPage(
     projectPath,
     pagination.limit,
     pagination.offset,
     accountVisibility,
+    scope,
   ) as SessionRepositoryRow[];
-  const total = sessionsDb.countSessionsByProjectPath(projectPath, accountVisibility);
+  const total = sessionsDb.countSessionsByProjectPath(projectPath, accountVisibility, scope);
 
   return {
     sessions: rows.map(mapSessionRowToSummary),
     total,
     hasMore: pagination.offset + rows.length < total,
   };
+}
+
+/**
+ * Раскладка `provider` строк базы в помощник панели: всё, что не Codex и не
+ * Devin, живёт в общем списке Claude — то же правило, что
+ * `providerSpaceOf` на клиенте и фильтр `space` у ленты последних чатов.
+ */
+function providerBucket(provider: string): 'codex' | 'devin' | 'claude' {
+  if (provider === 'codex' || provider === 'devin') {
+    return provider;
+  }
+  return 'claude';
+}
+
+function readProjectSessionScopeTotals(projectPath: string): Record<string, number> {
+  const requestContext = getRequestRuntimeContext();
+  const canUseCodex = requestContext === undefined
+    || isCodexAllowedForWebUser(requestContext.userId);
+  const accountVisibility = canUseCodex ? 'shared-codex' : 'hide-codex';
+  const rows = sessionsDb.countSessionsByProjectPathGrouped(projectPath, accountVisibility);
+
+  const totals: Record<string, number> = {};
+  for (const row of rows) {
+    const key = `${providerBucket(row.provider)}:${row.serverScope}`;
+    totals[key] = (totals[key] ?? 0) + row.count;
+  }
+  return totals;
 }
 
 // Broadcast progress to all connected WebSocket clients.
@@ -322,6 +365,7 @@ export async function getProjectsWithSessions(
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
         total: sessionsPage.total,
+        scopeTotals: readProjectSessionScopeTotals(projectPath),
       },
     });
   }
@@ -399,7 +443,12 @@ export async function getProjectSessionsPage(
     });
   }
 
-  const sessionsPage = readProjectSessionsPageByPath(projectRow.project_path, options);
+  const sessionsPage = readProjectSessionsPageByPath(projectRow.project_path, {
+    limit: options.limit,
+    offset: options.offset,
+    providerSpace: options.providerSpace,
+    serverScope: options.serverScope,
+  });
   return {
     projectId: projectRow.project_id,
     sessions: sessionsPage.sessions,

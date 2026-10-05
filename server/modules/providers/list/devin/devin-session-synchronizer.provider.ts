@@ -45,10 +45,13 @@ const MIN_USER_MESSAGES_FOR_TITLE = 2;
  * tool-call-shaped titles count as "no title yet": the naive name stays
  * until a real one arrives.
  */
-const SERIALIZED_TOOL_TITLE = /^functions\.[\w-]+:\d+/;
+const SERIALIZED_TOOL_TITLE = /functions\.[\w-]+:\d+/;
 
 function usableDevinTitle(rawTitle: string | null): string | undefined {
   const title = readOptionalString(rawTitle);
+  // The blob can also follow readable text ("I need to look at the image
+  // you sent.functions.ReadImage:0{...}"), so the tool-call marker is
+  // rejected anywhere in the string, not just at the start.
   if (!title || SERIALIZED_TOOL_TITLE.test(title) || title.startsWith('{') || title.startsWith('[')) {
     return undefined;
   }

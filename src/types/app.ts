@@ -75,6 +75,13 @@ export interface ProjectSession {
 export interface ProjectSessionMeta {
   total?: number;
   hasMore?: boolean;
+  /**
+   * «Сколько всего» в каждом срезе панели: ключ `<помощник>:<блок>`
+   * (`devin:main`, `claude:second`, …) — панель листает чаты одного
+   * помощника и одного блока, поэтому «есть ли ещё» решается по своему
+   * числу, а не по общему `total`.
+   */
+  scopeTotals?: Record<string, number>;
   [key: string]: unknown;
 }
 

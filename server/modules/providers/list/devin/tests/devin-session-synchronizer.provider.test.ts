@@ -258,6 +258,32 @@ test('serialized tool-call titles do not replace the prompt-derived name', async
   });
 });
 
+test('a readable prefix does not rescue a title ending in a tool-call blob', async () => {
+  await withIsolatedStores(async (devinDbPath) => {
+    const appSession = sessionsDb.createAppSession(
+      'app-session-mixed',
+      'devin',
+      '/tmp/project',
+      'Сделай кнопку показать ещё чаты',
+    );
+    sessionsDb.assignProviderSessionId(appSession, 'dev-sess-mixed');
+
+    writeDevinDb(devinDbPath, [
+      // Devin's title can start with real assistant text and still end in a
+      // serialized call — the whole string is junk either way.
+      { id: 'dev-sess-mixed', title: 'I need to look at the image you sent.functions.ReadImage:0{"uri": "/x"}' },
+    ]);
+    seedTwoTurns(devinDbPath, 'dev-sess-mixed');
+
+    const synchronizer = new DevinSessionSynchronizer();
+    await synchronizer.synchronize();
+
+    const session = sessionsDb.getSessionById(appSession);
+    assert.equal(session?.custom_name, 'Сделай кнопку показать ещё чаты');
+    assert.equal(session?.title_source, 'naive');
+  });
+});
+
 test('a title that merely echoes the first prompt is not promoted', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     const appSession = sessionsDb.createAppSession(
