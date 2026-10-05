@@ -134,7 +134,15 @@ router.get(
     const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
     const limit = parseNonNegativeIntQuery(req.query.limit, 'limit', 20);
     const offset = parseNonNegativeIntQuery(req.query.offset, 'offset', 0);
-    const sessionsPage = await getProjectSessionsPage(projectId, { limit, offset });
+    // Тот же срез, что у ленты последних чатов: панель смотрит чаты одного
+    // помощника и одного блока, и «показать ещё» обязано догружать именно их.
+    const providerSpace = req.query.space === 'codex' || req.query.space === 'devin' || req.query.space === 'claude'
+      ? req.query.space
+      : undefined;
+    const serverScope = typeof req.query.serverScope === 'string'
+      ? normalizeServerScope(req.query.serverScope)
+      : undefined;
+    const sessionsPage = await getProjectSessionsPage(projectId, { limit, offset, providerSpace, serverScope });
     res.json(sessionsPage);
   }),
 );

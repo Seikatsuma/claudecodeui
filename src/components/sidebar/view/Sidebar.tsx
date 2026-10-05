@@ -124,6 +124,7 @@ function Sidebar({
     () => scopeProjectsToProvider(
       scopeProjectsToServer(projects, serverScope, Boolean(secondServerLabel)),
       providerSpace,
+      serverScope,
     ),
     [projects, serverScope, secondServerLabel, providerSpace],
   );

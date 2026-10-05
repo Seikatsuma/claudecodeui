@@ -1,5 +1,6 @@
 import type { AppTab, LoadingProgress, Project, ProjectSession, LLMProvider, ServerScope } from '../../../types/app';
 import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
+import type { SessionListScope } from '../hooks/useServerScope';
 
 export type ProjectSortOrder = 'name' | 'date';
 // Режим «conversations» убран: после того как чаты избранной папки стали
@@ -60,7 +61,7 @@ export type SidebarProps = {
   onSessionSelect: (session: ProjectSession) => void;
   onNewSession: (project: Project) => void;
   onSessionDelete?: (sessionId: string) => void;
-  onLoadMoreSessions?: (projectId: string) => Promise<void> | void;
+  onLoadMoreSessions?: (projectId: string, scope?: SessionListScope) => Promise<void> | void;
   // `projectId` is the DB identifier; the sidebar hands it back to the parent
   // when the delete flow completes.
   onProjectDelete?: (projectId: string) => void;
