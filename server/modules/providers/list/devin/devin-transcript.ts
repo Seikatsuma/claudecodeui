@@ -26,7 +26,7 @@ import Database from 'better-sqlite3';
 
 import { getDevinDatabasePath, readJsonRecord, readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
-import { liveDevinChain } from './devin-chain.js';
+import { fullDevinConversation } from './devin-chain.js';
 
 /** Действия Devin → имена, которые описывает дайджест (карта файлов, «· действие»). */
 const TOOL_NAME_MAP: Record<string, string> = {
@@ -129,7 +129,7 @@ export async function exportDevinTranscript(providerSessionId: string, outPath: 
   const db = new Database(getDevinDatabasePath(), { readonly: true, fileMustExist: true });
   let lines: string[] = [];
   try {
-    for (const row of liveDevinChain(db, providerSessionId)) {
+    for (const row of fullDevinConversation(db, providerSessionId)) {
       for (const record of nodeToRecords(providerSessionId, row.chatMessage, row.createdAt)) {
         lines.push(JSON.stringify(record));
       }

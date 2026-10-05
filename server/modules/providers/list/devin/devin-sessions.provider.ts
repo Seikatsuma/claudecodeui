@@ -20,6 +20,8 @@ import {
   sliceTailPage,
 } from '@/shared/utils.js';
 
+import { fullDevinConversation } from './devin-chain.js';
+
 const PROVIDER = 'devin' as const;
 
 /**
@@ -238,10 +240,10 @@ export class DevinSessionsProvider implements IProviderSessions {
   /**
    * Loads Devin history from the shared SQLite `sessions.db`.
    *
-   * Devin stores every turn as a node in a parent-linked tree (`main_chain_id`
-   * points at the current tip; abandoned branches stay in the table), so
-   * history is reconstructed by walking parent links from the tip rather than
-   * by ordering the whole table.
+   * `main_chain_id` points at the current context window, not the whole
+   * conversation — turns that fell out of the window stay in the table as
+   * detached branches. `fullDevinConversation` rebuilds the complete accepted
+   * history across all context snapshots (see devin-chain.ts).
    */
   async fetchHistory(
     sessionId: string,
@@ -262,30 +264,13 @@ export class DevinSessionsProvider implements IProviderSessions {
         return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
       }
 
-      const rows = db
-        .prepare('SELECT node_id, parent_node_id, chat_message, created_at FROM message_nodes WHERE session_id = ?')
-        .all(providerSessionId) as DevinMessageNodeRow[];
-
-      const byId = new Map<number, DevinMessageNodeRow>();
-      for (const row of rows) {
-        byId.set(row.node_id, row);
-      }
-
-      // Walk the live chain tip-to-root; if the chain pointer is missing (or
-      // dangling), fall back to the newest node so history still opens.
-      let tip = sessionRow.main_chain_id != null && byId.has(sessionRow.main_chain_id)
-        ? sessionRow.main_chain_id
-        : rows.reduce<number | null>((acc, row) => (acc === null || row.node_id > acc ? row.node_id : acc), null);
-
-      const chain: DevinMessageNodeRow[] = [];
-      const seen = new Set<number>();
-      while (tip !== null && byId.has(tip) && !seen.has(tip)) {
-        seen.add(tip);
-        const row = byId.get(tip)!;
-        chain.push(row);
-        tip = row.parent_node_id;
-      }
-      chain.reverse();
+      const chain: DevinMessageNodeRow[] = fullDevinConversation(db, providerSessionId)
+        .map((row) => ({
+          node_id: row.nodeId,
+          parent_node_id: row.parentId,
+          chat_message: row.chatMessage,
+          created_at: row.createdAt,
+        }));
 
       const normalized = this.normalizeHistoryChain(chain, sessionId);
 
