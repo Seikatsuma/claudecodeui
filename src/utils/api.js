@@ -222,10 +222,18 @@ export const api = {
   // the DB-assigned `projectId`; parameter names reflect that for clarity.
   projects: () => authenticatedFetch('/api/projects'),
   archivedProjects: () => authenticatedFetch('/api/projects/archived'),
-  projectSessions: (projectId, { limit = 20, offset = 0 } = {}) => {
+  /**
+   * @param {string} projectId
+   * @param {{ limit?: number, offset?: number, space?: string, serverScope?: string }} [options]
+   */
+  projectSessions: (projectId, { limit = 20, offset = 0, space, serverScope } = {}) => {
     const params = new URLSearchParams();
     params.set('limit', String(limit));
     params.set('offset', String(offset));
+    // Панель показывает чаты одного помощника и одного блока — догружать
+    // надо тот же срез, иначе страница приходит со всеми помощниками сразу.
+    if (space) params.set('space', space);
+    if (serverScope) params.set('serverScope', serverScope);
     return authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/sessions?${params.toString()}`);
   },
   projectTaskmaster: (projectId) =>

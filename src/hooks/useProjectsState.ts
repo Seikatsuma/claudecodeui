@@ -4,6 +4,12 @@ import type { NavigateFunction } from 'react-router-dom';
 
 import { api } from '../utils/api';
 import type { ServerEvent } from '../contexts/WebSocketContext';
+import {
+  effectiveScope,
+  providerSpaceOf,
+  sessionScopeKey,
+  type SessionListScope,
+} from '../components/sidebar/hooks/useServerScope';
 import type {
   AppTab,
   LLMProvider,
@@ -220,11 +226,25 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
 const mergeProjectSessionPage = (
   existingProject: Project,
   sessionsPage: ProjectSessionPage,
+  scopeKey?: string,
 ): Project => {
   const mergedProject: Project = {
     ...existingProject,
     sessions: mergeSessionProviderLists(existingProject.sessions ?? [], sessionsPage.sessions ?? []),
   };
+
+  if (scopeKey) {
+    // Страница среза: её total — только «сколько всего» в этом срезе. Общие
+    // total/hasMore по всем помощникам не трогаем, обновляем свою ячейку.
+    mergedProject.sessionMeta = {
+      ...existingProject.sessionMeta,
+      scopeTotals: {
+        ...(existingProject.sessionMeta?.scopeTotals ?? {}),
+        [scopeKey]: Number(sessionsPage.sessionMeta?.total ?? 0),
+      },
+    };
+    return mergedProject;
+  }
 
   const totalSessions = Number(sessionsPage.sessionMeta?.total ?? existingProject.sessionMeta?.total ?? 0);
   mergedProject.sessionMeta = {
@@ -1099,14 +1119,29 @@ export function useProjectsState({
     }
   }, [projects, selectedProject, selectedSession]);
 
-  const loadMoreProjectSessions = useCallback(async (projectId: string) => {
+  const loadMoreProjectSessions = useCallback(async (projectId: string, scope?: SessionListScope) => {
     const project = projects.find((candidate) => candidate.projectId === projectId);
     if (!project) {
       return;
     }
 
-    const loadedCount = countLoadedProjectSessions(project);
-    const totalCount = Number(project.sessionMeta?.total ?? 0);
+    // Панель листает чаты одного помощника и одного блока: «сколько уже
+    // загружено» и «сколько всего» считаются внутри этого среза, иначе
+    // offset и «есть ли ещё» шли по смешанному списку всех помощников.
+    const allSessions = getProjectSessions(project);
+    const scopedSessions = scope?.providerSpace
+      ? allSessions.filter((session) =>
+          providerSpaceOf(session.__provider ?? session.provider) === scope.providerSpace
+          && effectiveScope(
+            session.serverScope as ServerScope | null | undefined,
+            project.serverScope,
+          ) === (scope.serverScope ?? 'main'))
+      : null;
+    const loadedCount = scopedSessions ? scopedSessions.length : allSessions.length;
+    const scopeKey = scope?.providerSpace ? sessionScopeKey(scope) : null;
+    const totalCount = scopeKey
+      ? Number(project.sessionMeta?.scopeTotals?.[scopeKey] ?? project.sessionMeta?.total ?? 0)
+      : Number(project.sessionMeta?.total ?? 0);
     if (totalCount > 0 && loadedCount >= totalCount) {
       return;
     }
@@ -1114,6 +1149,8 @@ export function useProjectsState({
     const response = await api.projectSessions(projectId, {
       limit: 20,
       offset: loadedCount,
+      space: scope?.providerSpace,
+      serverScope: scope?.serverScope,
     });
 
     if (!response.ok) {
@@ -1137,7 +1174,7 @@ export function useProjectsState({
           return candidate;
         }
 
-        const mergedProject = mergeProjectSessionPage(candidate, sessionsPage);
+        const mergedProject = mergeProjectSessionPage(candidate, sessionsPage, scopeKey ?? undefined);
         mergedProjectForSelection = mergedProject;
         return mergedProject;
       }),

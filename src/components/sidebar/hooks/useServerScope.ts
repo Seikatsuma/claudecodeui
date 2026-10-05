@@ -114,28 +114,55 @@ export function scopeProjectsToServer(
  */
 export type ProviderSpace = 'codex' | 'devin' | 'claude';
 
+/** Срез, в котором панель листает чаты: помощник + блок верхней панели. */
+export type SessionListScope = {
+  providerSpace?: ProviderSpace;
+  serverScope?: ServerScope;
+};
+
+/** Ключ среза в `sessionMeta.scopeTotals` — `<помощник>:<блок>`. */
+export function sessionScopeKey(scope: SessionListScope): string {
+  return `${scope.providerSpace ?? 'claude'}:${scope.serverScope ?? 'main'}`;
+}
+
 export function providerSpaceOf(provider: string | null | undefined): ProviderSpace {
   if (provider === 'codex') return 'codex';
   if (provider === 'devin') return 'devin';
   return 'claude';
 }
 
-export function scopeProjectsToProvider(projects: Project[], space: ProviderSpace): Project[] {
+export function scopeProjectsToProvider(
+  projects: Project[],
+  space: ProviderSpace,
+  serverScope?: ServerScope,
+): Project[] {
   return projects.map((project) => {
     const allSessions = project.sessions ?? [];
     const sessions = allSessions.filter(
       (session) => providerSpaceOf(session.__provider ?? session.provider) === space,
     );
-    return sessions.length === allSessions.length
-      ? project
-      : {
-        ...project,
-        sessions,
-        sessionMeta: {
-          hasMore: project.sessionMeta?.hasMore ?? false,
-          total: sessions.length,
-        },
-      };
+
+    // «Есть ли ещё» внутри среза решается по его полному числу из базы
+    // (scopeTotals), а не по общему total со всеми помощниками — иначе в
+    // списке Devin кнопка «Показать ещё чаты» горела, пока не догрузятся
+    // сотни чужих чатов, и клик почти ничего не добавлял.
+    const scopedTotal = serverScope
+      ? project.sessionMeta?.scopeTotals?.[sessionScopeKey({ providerSpace: space, serverScope })]
+      : undefined;
+    if (sessions.length === allSessions.length && scopedTotal === undefined) {
+      return project;
+    }
+
+    return {
+      ...project,
+      sessions,
+      sessionMeta: {
+        hasMore: scopedTotal !== undefined
+          ? sessions.length < scopedTotal
+          : (project.sessionMeta?.hasMore ?? false),
+        total: scopedTotal ?? sessions.length,
+      },
+    };
   });
 }
 

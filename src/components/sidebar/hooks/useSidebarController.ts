@@ -22,7 +22,7 @@ import {
   readProjectSortOrder,
   sortProjects,
 } from '../utils/utils';
-import { providerSpaceOf, useServerScope } from './useServerScope';
+import { providerSpaceOf, useServerScope, type SessionListScope } from './useServerScope';
 import { useSelectedChatProvider } from '../../../hooks/useCodexAccount';
 
 type SnippetHighlight = {
@@ -110,7 +110,7 @@ type UseSidebarControllerArgs = {
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: ProjectSession) => void;
   onSessionDelete?: (sessionId: string) => void;
-  onLoadMoreSessions?: (projectId: string) => Promise<void> | void;
+  onLoadMoreSessions?: (projectId: string, scope?: SessionListScope) => Promise<void> | void;
   // `projectId` is the DB-assigned identifier; callbacks use that post-migration.
   onProjectDelete?: (projectId: string) => void;
   setCurrentProject: (project: Project) => void;
@@ -603,7 +603,10 @@ export function useSidebarController({
     }
 
     try {
-      await onLoadMoreSessions(projectId);
+      // Панель показывает чаты одного помощника и одного блока — догружаем
+      // тот же срез, иначе страница приходит смешанной и в списке почти
+      // ничего не появляется (Егор 05.10: «кнопка не работает»).
+      await onLoadMoreSessions(projectId, { providerSpace, serverScope });
     } catch (error) {
       console.error('[Sidebar] Failed to load more sessions:', error);
       alert(t('messages.refreshError'));

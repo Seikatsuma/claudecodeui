@@ -168,6 +168,40 @@ function accountVisibilitySql(
   return ` AND ${currentAccount}`;
 }
 
+/**
+ * Срез списка чатов под открытый вид панели: помощник (Codex, Devin или все
+ * остальные) и блок верхней панели. Тот же отбор, что у ленты последних
+ * чатов (`getRecentSessionsPage`), — иначе «Показать ещё чаты» грузит
+ * страницы со всеми помощниками и в отфильтрованном списке почти ничего не
+ * добавляется.
+ */
+export type SessionListScope = {
+  providerSpace?: 'codex' | 'devin' | 'claude';
+  serverScope?: ServerScope;
+};
+
+function sessionListScopeSql(
+  scope: SessionListScope | undefined,
+  tableAlias = 'sessions',
+): { sql: string; params: unknown[] } {
+  const prefix = `${tableAlias}.`;
+  let sql = '';
+  const params: unknown[] = [];
+
+  if (scope?.providerSpace === 'codex' || scope?.providerSpace === 'devin') {
+    sql += ` AND ${prefix}provider = '${scope.providerSpace}'`;
+  } else if (scope?.providerSpace === 'claude') {
+    sql += ` AND ${prefix}provider NOT IN ('codex', 'devin')`;
+  }
+
+  if (scope?.serverScope) {
+    sql += ` AND COALESCE(${prefix}server_scope, (SELECT projects.server_scope FROM projects WHERE projects.project_path = ${prefix}project_path), 'main') = ?`;
+    params.push(scope.serverScope);
+  }
+
+  return { sql, params };
+}
+
 export const sessionsDb = {
   /**
    * Upserts one session row discovered on disk by a provider synchronizer.
@@ -759,9 +793,11 @@ export const sessionsDb = {
     limit: number,
     offset: number,
     accountVisibility: SessionAccountVisibility = 'current',
+    scope?: SessionListScope,
   ): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
+    const scopeSql = sessionListScopeSql(scope);
     // Чаты, перенесённые в другой блок поимённо (`server_scope` задан и не
     // совпадает с блоком папки), идут в первую порцию: панель делит папку по
     // блокам уже у себя, и старый перенесённый чат за пределами первых 20 не
@@ -773,7 +809,7 @@ export const sessionsDb = {
         `SELECT ${SESSION_ROW_COLUMNS}
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0` + accountVisibilitySql(accountVisibility) + `
+           AND isArchived = 0` + accountVisibilitySql(accountVisibility) + scopeSql.sql + `
          ORDER BY (
            sessions.server_scope IS NOT NULL
            AND sessions.server_scope <> COALESCE(
@@ -783,7 +819,7 @@ export const sessionsDb = {
          ) DESC, datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(normalizedProjectPath, getActiveAccountDir(), limit, offset) as SessionRow[];
+      .all(normalizedProjectPath, getActiveAccountDir(), ...scopeSql.params, limit, offset) as SessionRow[];
 
     return normalizeSessionRows(rows);
   },
@@ -837,19 +873,58 @@ export const sessionsDb = {
   countSessionsByProjectPath(
     projectPath: string,
     accountVisibility: SessionAccountVisibility = 'current',
+    scope?: SessionListScope,
   ): number {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
+    const scopeSql = sessionListScopeSql(scope);
     const row = db
       .prepare(
         `SELECT COUNT(*) AS count
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0` + accountVisibilitySql(accountVisibility)
+           AND isArchived = 0` + accountVisibilitySql(accountVisibility) + scopeSql.sql
       )
-      .get(normalizedProjectPath, getActiveAccountDir()) as { count: number } | undefined;
+      .get(normalizedProjectPath, getActiveAccountDir(), ...scopeSql.params) as { count: number } | undefined;
 
     return Number(row?.count ?? 0);
+  },
+
+  /**
+   * Раскладка чатов папки по помощнику и блоку верхней панели — «сколько
+   * всего» в каждом из срезов, по которым панель делит список. Нужна, чтобы
+   * «Показать ещё чаты» знало конец списка внутри своего среза, а не всех
+   * помощников сразу.
+   */
+  countSessionsByProjectPathGrouped(
+    projectPath: string,
+    accountVisibility: SessionAccountVisibility = 'current',
+  ): Array<{ provider: string; serverScope: ServerScope; count: number }> {
+    const db = getConnection();
+    const normalizedProjectPath = normalizeProjectPath(projectPath);
+    const rows = db
+      .prepare(
+        `SELECT sessions.provider AS provider,
+                COALESCE(sessions.server_scope,
+                  (SELECT projects.server_scope FROM projects WHERE projects.project_path = sessions.project_path),
+                  'main') AS effective_scope,
+                COUNT(*) AS count
+         FROM sessions
+         WHERE sessions.project_path = ?
+           AND sessions.isArchived = 0` + accountVisibilitySql(accountVisibility, 'sessions') + `
+         GROUP BY sessions.provider, effective_scope`
+      )
+      .all(normalizedProjectPath, getActiveAccountDir()) as Array<{
+        provider: string;
+        effective_scope: ServerScope;
+        count: number;
+      }>;
+
+    return rows.map((row) => ({
+      provider: row.provider,
+      serverScope: row.effective_scope,
+      count: Number(row.count),
+    }));
   },
 
   deleteSessionsByProjectPath(projectPath: string): void {
