@@ -67,7 +67,7 @@ function topPreloadMargin(container: HTMLElement): number {
 /*  Helper: Convert a ChatMessage to a NormalizedMessage for the store */
 /* ------------------------------------------------------------------ */
 
-function chatMessageToNormalized(
+export function chatMessageToNormalized(
   msg: ChatMessage,
   sessionId: string,
   provider: LLMProvider,
@@ -104,7 +104,12 @@ function chatMessageToNormalized(
     } as NormalizedMessage;
   }
   if (msg.type === 'error') {
-    return { ...base, kind: 'error', content: msg.content || '' } as NormalizedMessage;
+    return {
+      ...base,
+      kind: 'error',
+      content: msg.content || '',
+      clientNotice: typeof msg.clientNotice === 'string' ? msg.clientNotice : undefined,
+    } as NormalizedMessage;
   }
   return {
     ...base,

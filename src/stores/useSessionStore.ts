@@ -104,6 +104,12 @@ export interface NormalizedMessage {
   subagentTools?: unknown[];
   isFinal?: boolean;
   /**
+   * Пометка локальной служебной строки (не с сервера): сейчас —
+   * 'connection-lost' у плашки «связь прервалась». По ней плашку можно найти
+   * и снять, когда выяснится, что ответ всё же доехал (см. ChatInterface).
+   */
+  clientNotice?: string;
+  /**
    * Measured seconds a live thinking block streamed for, set once by
    * `finalizeThinkingStreaming` when the block closes. Lets the Reasoning
    * header show an accurate "Thought for Ns" without relying on the
@@ -1126,6 +1132,19 @@ export function useSessionStore() {
   }, [notify]);
 
   /**
+   * Убрать из realtime-части ленты строки по условию — для снятия локальных
+   * служебных плашек (clientNotice), когда выяснилось, что они лгали.
+   */
+  const removeRealtimeWhere = useCallback((sessionId: string, predicate: (message: NormalizedMessage) => boolean) => {
+    const slot = getSlot(sessionId);
+    const next = slot.realtimeMessages.filter((message) => !predicate(message));
+    if (next.length === slot.realtimeMessages.length) return;
+    slot.realtimeMessages = next;
+    recomputeMergedIfNeeded(slot);
+    notify(sessionId);
+  }, [getSlot, notify]);
+
+  /**
    * Clear realtime messages for a session (e.g., after stream completes and server fetch catches up).
    */
   const clearRealtime = useCallback((sessionId: string) => {
@@ -1167,6 +1186,7 @@ export function useSessionStore() {
     updateThinkingStreaming,
     finalizeThinkingStreaming,
     clearRealtime,
+    removeRealtimeWhere,
     getMessages,
     getSessionSlot,
   }), [
@@ -1174,7 +1194,7 @@ export function useSessionStore() {
     appendRealtime, appendRealtimeBatch, refreshLatestFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming,
     updateThinkingStreaming, finalizeThinkingStreaming,
-    clearRealtime, getMessages, getSessionSlot,
+    clearRealtime, removeRealtimeWhere, getMessages, getSessionSlot,
   ]);
 }
 
