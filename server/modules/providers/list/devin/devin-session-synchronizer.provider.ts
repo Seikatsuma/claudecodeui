@@ -13,6 +13,16 @@ import {
   readOptionalString,
 } from '@/shared/utils.js';
 
+import { askDevinOnce, DEVIN_MODEL_CWD } from './devin-model.js';
+import {
+  buildChatTitlePrompt,
+  cleanGeneratedTitle,
+  isEchoTitle,
+  TITLE_ASK_TIMEOUT_MS,
+  TITLE_MAX_ATTEMPTS,
+  TITLE_RETRY_MS,
+} from './devin-title.js';
+
 type DevinSessionRow = {
   id: string;
   working_directory: string | null;
@@ -59,24 +69,6 @@ function usableDevinTitle(rawTitle: string | null): string | undefined {
 }
 
 /**
- * Devin sometimes stores the verbatim start of the first prompt in `title`
- * instead of a summary — the same useless text the naive name already
- * shows, but promoting it would freeze the placeholder forever. Such echoes
- * count as "no real title", keeping the row open for a later genuine
- * summary.
- */
-function isEchoTitle(title: string, messageContent: string | undefined): boolean {
-  if (!messageContent) {
-    return false;
-  }
-  const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
-  const normalizedTitle = normalize(title);
-  const normalizedContent = normalize(messageContent);
-  return normalizedContent.startsWith(normalizedTitle)
-    || normalizedTitle.startsWith(normalizedContent);
-}
-
-/**
  * Extracts plain text out of a `message_nodes.chat_message` JSON blob. ACP
  * content is a string for typed messages and an array of blocks for
  * messages with attachments; only the text matters for echo detection.
@@ -114,6 +106,16 @@ function getMachineAccountDir(): string {
   }
 }
 
+/** Чего достаточно модели для имени: сессия, папка, черновик CLI и первые реплики. */
+type TitleCandidate = {
+  sessionId: string;
+  projectPath: string;
+  devinTitle?: string;
+  userMessages: string[];
+  createdAt: number | null;
+  updatedAt: number | null;
+};
+
 /**
  * Session indexer for Devin's shared `sessions.db` (`~/.local/share/devin/cli`).
  *
@@ -124,6 +126,42 @@ function getMachineAccountDir(): string {
  */
 export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'devin' as const;
+
+  /**
+   * Имя чата пишет разовый `devin -p` (devin-title.ts): сырой `sessions.title`
+   * длинный и начинается с общих слов — в узкой панели различительное съезжало
+   * за край. Генерация асинхронна и дороже чтения строки, поэтому она идёт
+   * фоном, не внутри прохода синхронизации: проход лишь ставит задание, когда
+   * у чата набрались сообщения и имя ещё открыто. `titleAttempts`/`titleInFlight`
+   * — защита от перезапуска на каждом тике; после TITLE_MAX_ATTEMPTS сбоев
+   * ставится сырой title CLI как запасной вариант (старое поведение).
+   * Живут в памяти: рестарт процесса сбрасывает счётчики — это лишь лишние
+   * попытки, безопасно.
+   */
+  private readonly titleAttempts = new Map<string, { attempts: number; nextTryAt: number }>();
+  private readonly titleInFlight = new Set<string>();
+  private readonly pendingTitleJobs = new Set<Promise<void>>();
+  private readonly askTitle: (prompt: string, timeoutMs: number) => Promise<string>;
+  private readonly titleRetryMs: number;
+  private readonly titleMaxAttempts: number;
+
+  constructor(
+    askTitle: (prompt: string, timeoutMs: number) => Promise<string> = askDevinOnce,
+    options?: { titleRetryMs?: number; titleMaxAttempts?: number },
+  ) {
+    this.askTitle = askTitle;
+    this.titleRetryMs = options?.titleRetryMs ?? TITLE_RETRY_MS;
+    this.titleMaxAttempts = options?.titleMaxAttempts ?? TITLE_MAX_ATTEMPTS;
+  }
+
+  /**
+   * Потребитель: тесты — дождаться конца фоновых заданий имени, поставленных
+   * проходом синхронизации. В проде вызывать не нужно: задания идут фоном,
+   * чтобы проход (и висевший на нём запрос списка) не ждал ответа модели.
+   */
+  async drainTitleJobs(): Promise<void> {
+    await Promise.allSettled([...this.pendingTitleJobs]);
+  }
 
   /**
    * Scans the Devin session table and upserts non-hidden sessions into DB.
@@ -200,28 +238,6 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
   }
 
   /**
-   * Distinct user messages in the chat so far. Devin rebuilds context every
-   * turn, replaying earlier messages into fresh branches, so raw node rows
-   * overcount roughly 2x — dedupe on the stored blob. Summarizer branches
-   * ("Conversation to summarize:") are internal plumbing, not user input.
-   */
-  private userMessageCount(db: InstanceType<typeof Database>, sessionId: string): number {
-    try {
-      const row = db.prepare(`
-        SELECT COUNT(DISTINCT chat_message) AS c FROM message_nodes
-        WHERE session_id = ?
-          AND json_extract(chat_message, '$.role') = 'user'
-          AND instr(chat_message, 'onversation to summarize') = 0
-      `).get(sessionId) as { c: number };
-      return row.c;
-    } catch {
-      // Older Devin databases may lack message_nodes — without it there is
-      // no evidence the chat has context, so the naive name stays.
-      return 0;
-    }
-  }
-
-  /**
    * Whether Devin's title merely repeats the chat's opening prompt.
    */
   private echoesFirstPrompt(
@@ -235,7 +251,8 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
         WHERE session_id = ? AND json_extract(chat_message, '$.role') = 'user'
         ORDER BY node_id LIMIT 1
       `).get(sessionId) as { chat_message: string } | undefined;
-      return isEchoTitle(title, row ? messageText(row.chat_message) : undefined);
+      const content = row ? messageText(row.chat_message) : undefined;
+      return content !== undefined && isEchoTitle(title, content);
     } catch {
       return false;
     }
@@ -244,7 +261,9 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
   private upsertSession(db: InstanceType<typeof Database>, row: DevinSessionRow): string | null {
     const sessionId = readOptionalString(row.id);
     const projectPath = readOptionalString(row.working_directory);
-    if (!sessionId || !projectPath) {
+    if (!sessionId || !projectPath || path.resolve(projectPath) === path.resolve(DEVIN_MODEL_CWD)) {
+      // Беседы разовых вызовов `devin -p` — служебные: имя им ставить нечего,
+      // в списке чатов их быть не должно даже в окне до пометки hidden.
       return null;
     }
 
@@ -263,26 +282,33 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
     const existingName = existingSession?.custom_name;
     const existingSource = existingSession?.title_source;
     // A chat keeps one settled name: once a real title has landed ('ai' from
-    // a generated summary, 'custom' from a human rename) sync never proposes
-    // another — Devin's own title may still evolve, the sidebar must not.
-    // While the name is 'naive', the generated summary outranks it (the same
-    // way a CLI `ai-title` does for Claude sessions) once the chat has a few
-    // messages for the summary to draw on.
+    // the generated name, 'custom' from a human rename) sync never proposes
+    // another — the sidebar must not churn. While the name is 'naive', the
+    // chat is a candidate for the async name job once it has a few messages.
     const titleOpen = !existingSource || existingSource === 'naive';
-    const devinTitle = titleOpen ? usableDevinTitle(row.title) : undefined;
-    const derivedTitle = devinTitle
-      && this.userMessageCount(db, sessionId) >= MIN_USER_MESSAGES_FOR_TITLE
-      && !this.echoesFirstPrompt(db, sessionId, devinTitle)
-      ? devinTitle
-      : undefined;
-    const nextName = derivedTitle
-      ?? (existingName && existingName !== fallbackTitle
-        ? existingName
-        : usableDevinTitle(row.title))
+    if (titleOpen) {
+      const devinTitle = usableDevinTitle(row.title);
+      const draft = devinTitle && !this.echoesFirstPrompt(db, sessionId, devinTitle)
+        ? devinTitle
+        : undefined;
+      this.scheduleTitleJob({
+        sessionId,
+        projectPath,
+        devinTitle: draft,
+        userMessages: this.firstUserMessages(db, sessionId),
+        createdAt: row.created_at,
+        updatedAt: row.last_activity_at ?? row.created_at,
+      });
+    }
+    const nextName = (existingName && existingName !== fallbackTitle
+      ? existingName
+      : usableDevinTitle(row.title))
       ?? undefined;
 
     // sessions.db is shared storage — jsonl_path must stay null so deleting an
-    // app session never removes other sessions' history.
+    // app session never removes other sessions' history. The name candidate
+    // here is only the provisional one (raw CLI title or the existing name):
+    // the generated short name lands via the async job with source 'ai'.
     return sessionsDb.createSession(
       sessionId,
       this.provider,
@@ -291,8 +317,114 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
       normalizeProviderTimestamp(row.created_at),
       normalizeProviderTimestamp(row.last_activity_at ?? row.created_at),
       null,
-      derivedTitle ? 'ai' : undefined,
+      undefined,
       { accountDir: getMachineAccountDir(), origin: 'terminal' },
     );
+  }
+
+  /**
+   * Первые различные реплики человека — материал для имени. Тот же лес и
+   * тот же фильтр, что у счётчика: дедупликация по blob, ветки
+   * суммаризатора не считаются.
+   */
+  private firstUserMessages(db: InstanceType<typeof Database>, sessionId: string): string[] {
+    try {
+      const rows = db.prepare(`
+        SELECT chat_message, MIN(node_id) AS first_seen FROM message_nodes
+        WHERE session_id = ?
+          AND json_extract(chat_message, '$.role') = 'user'
+          AND instr(chat_message, 'onversation to summarize') = 0
+        GROUP BY chat_message
+        ORDER BY first_seen
+        LIMIT 3
+      `).all(sessionId) as Array<{ chat_message: string }>;
+      return rows
+        .map((row) => messageText(row.chat_message))
+        .filter((text): text is string => Boolean(text && text.trim()));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Ставит имя в очередь на генерацию — по достижении порога сообщений,
+   * с защитой от повторов. Без читаемых сообщений имя не рождается:
+   * модели не из чего выбрать сущность.
+   */
+  private scheduleTitleJob(candidate: TitleCandidate): void {
+    // Порог тот же, что у счётчика: список из firstUserMessages LIMIT 3 —
+    // >= 2 различных реплик набралось ровно тогда, когда их есть в базе.
+    if (candidate.userMessages.length < MIN_USER_MESSAGES_FOR_TITLE) {
+      return;
+    }
+    if (this.titleInFlight.has(candidate.sessionId)) {
+      return;
+    }
+    const state = this.titleAttempts.get(candidate.sessionId);
+    if (state && Date.now() < state.nextTryAt) {
+      return;
+    }
+    if (state && state.attempts >= this.titleMaxAttempts) {
+      // Модель так и не ответила — чат не должен остаться на обрезке
+      // промпта: ставим длинный сырой title CLI, если он пригоден, ровно
+      // один раз (attempts > MAX — запасной вариант уже записан).
+      if (candidate.devinTitle && state.attempts === this.titleMaxAttempts) {
+        state.attempts += 1;
+        this.applyTitle(candidate, candidate.devinTitle);
+      }
+      return;
+    }
+    this.titleInFlight.add(candidate.sessionId);
+    const job = this.generateAndApplyTitle(candidate)
+      .catch(() => undefined)
+      .finally(() => {
+        this.titleInFlight.delete(candidate.sessionId);
+        this.pendingTitleJobs.delete(job);
+      });
+    this.pendingTitleJobs.add(job);
+  }
+
+  private async generateAndApplyTitle(candidate: TitleCandidate): Promise<void> {
+    let title: string | null = null;
+    try {
+      const raw = await this.askTitle(buildChatTitlePrompt(candidate), TITLE_ASK_TIMEOUT_MS);
+      title = cleanGeneratedTitle(raw, candidate.userMessages[0]);
+    } catch {
+      title = null;
+    }
+    if (title) {
+      this.applyTitle(candidate, title);
+      this.titleAttempts.delete(candidate.sessionId);
+      return;
+    }
+    const previous = this.titleAttempts.get(candidate.sessionId);
+    this.titleAttempts.set(candidate.sessionId, {
+      attempts: (previous?.attempts ?? 0) + 1,
+      nextTryAt: Date.now() + this.titleRetryMs,
+    });
+  }
+
+  /**
+   * Записывает придуманное имя как 'ai' — рангами `resolveTitleUpdate` это
+   * заменит naive и уступит позднему ручному переименованию ('custom').
+   */
+  private applyTitle(candidate: TitleCandidate, title: string): void {
+    const internalSessionId = sessionsDb.createSession(
+      candidate.sessionId,
+      this.provider,
+      candidate.projectPath,
+      normalizeSessionName(title, 'Untitled Devin Session'),
+      normalizeProviderTimestamp(candidate.createdAt),
+      normalizeProviderTimestamp(candidate.updatedAt),
+      null,
+      'ai',
+      { accountDir: getMachineAccountDir(), origin: 'terminal' },
+    );
+    // Ленивый импорт: прямой `import` из sessions-watcher образует цикл
+    // (watcher → synchronizer.service → реестр → этот провайдер) и роняет
+    // инициализацию модулей — рассылке нужен только рантайм.
+    void import('../../services/sessions-watcher.service.js')
+      .then(({ broadcastSessionUpserted }) => broadcastSessionUpserted(internalSessionId))
+      .catch(() => undefined);
   }
 }

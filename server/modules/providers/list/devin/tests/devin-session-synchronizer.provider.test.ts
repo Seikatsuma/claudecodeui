@@ -7,6 +7,7 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { DEVIN_MODEL_CWD } from '@/modules/providers/list/devin/devin-model.js';
 import { DevinSessionSynchronizer } from '@/modules/providers/list/devin/devin-session-synchronizer.provider.js';
 
 /**
@@ -136,19 +137,40 @@ function seedTwoTurns(devinDbPath: string, sessionId: string, firstPrompt = 'Р�
   addUserMessages(devinDbPath, sessionId, [firstPrompt, 'А подробнее про ретраи?']);
 }
 
-test('generated Devin title lands as the session name with ai provenance', async () => {
+/** Synchronizer whose name-writing model is a stub; zero retry delay so tests can replay passes. */
+function testSynchronizer(ask: (prompt: string) => Promise<string>): {
+  synchronizer: DevinSessionSynchronizer;
+  calls: string[];
+} {
+  const calls: string[] = [];
+  const synchronizer = new DevinSessionSynchronizer(
+    async (prompt: string) => {
+      calls.push(prompt);
+      return ask(prompt);
+    },
+    { titleRetryMs: 0, titleMaxAttempts: 2 },
+  );
+  return { synchronizer, calls };
+}
+
+test('generated name lands as the session name with ai provenance, built from chat content', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     writeDevinDb(devinDbPath, [
-      { id: 'dev-sess-1', title: 'Разбор очереди доставки сообщений' },
+      { id: 'dev-sess-1', title: 'Разбор очереди доставки сообщений в деталях реализации' },
     ]);
     seedTwoTurns(devinDbPath, 'dev-sess-1');
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer, calls } = testSynchronizer(async () => 'Очередь доставки — ретраи');
     assert.equal(await synchronizer.synchronize(), 1);
+    await synchronizer.drainTitleJobs();
 
     const session = sessionsDb.getSessionById('dev-sess-1');
-    assert.equal(session?.custom_name, 'Разбор очереди доставки сообщений');
+    assert.equal(session?.custom_name, 'Очередь доставки — ретраи');
     assert.equal(session?.title_source, 'ai');
+    // The model saw both the CLI draft and the chat's own words.
+    assert.equal(calls.length, 1);
+    assert.match(calls[0] ?? '', /очеред[а-я]+ доставки/i);
+    assert.match(calls[0] ?? '', /очередь сообщений/i);
   });
 });
 
@@ -167,25 +189,29 @@ test('a single-message chat keeps the prompt-derived name until the topic develo
     ]);
     addUserMessages(devinDbPath, 'dev-sess-early', ['Смотри, сейчас твоя задача — сравни модели']);
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer, calls } = testSynchronizer(async () => 'ИИ-модели видео 4K');
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
 
     let session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.custom_name, 'Смотри, сейчас твоя задача');
     assert.equal(session?.title_source, 'naive');
+    assert.equal(calls.length, 0);
 
-    // The second user message gives the generated title enough context —
+    // The second user message gives the generated name enough context —
     // the next sync pass promotes it once.
     addUserMessages(devinDbPath, 'dev-sess-early', ['А какие из них умеют в 4k?']);
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
 
     session = sessionsDb.getSessionById(appSession);
-    assert.equal(session?.custom_name, 'Анализ лучших ИИ-моделей для видео');
+    assert.equal(session?.custom_name, 'ИИ-модели видео 4K');
     assert.equal(session?.title_source, 'ai');
+    assert.equal(calls.length, 1);
   });
 });
 
-test('generated title replaces the naive first-words name of a web-created chat', async () => {
+test('generated name replaces the naive first-words name of a web-created chat', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     // What the sidebar does today: the app session row exists first, named
     // from the opening words of the first message.
@@ -202,16 +228,17 @@ test('generated title replaces the naive first-words name of a web-created chat'
     ]);
     seedTwoTurns(devinDbPath, 'dev-sess-2');
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer } = testSynchronizer(async () => 'ИИ-модели видео 4K');
     assert.equal(await synchronizer.synchronize(), 1);
+    await synchronizer.drainTitleJobs();
 
     const session = sessionsDb.getSessionById(appSession);
-    assert.equal(session?.custom_name, 'Анализ лучших ИИ-моделей для видео');
+    assert.equal(session?.custom_name, 'ИИ-модели видео 4K');
     assert.equal(session?.title_source, 'ai');
   });
 });
 
-test('a manual rename is never overwritten by a generated title', async () => {
+test('a manual rename is never overwritten and never even asks the model', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     const appSession = sessionsDb.createAppSession(
       'app-session-rename',
@@ -225,17 +252,20 @@ test('a manual rename is never overwritten by a generated title', async () => {
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-3', title: 'Анализ лучших ИИ-моделей для видео' },
     ]);
+    seedTwoTurns(devinDbPath, 'dev-sess-3');
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer, calls } = testSynchronizer(async () => 'ИИ-модели видео 4K');
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
 
     const session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.custom_name, 'Мой разбор квартала');
     assert.equal(session?.title_source, 'custom');
+    assert.equal(calls.length, 0);
   });
 });
 
-test('serialized tool-call titles do not replace the prompt-derived name', async () => {
+test('serialized tool-call titles never surface — the naive name stays without messages', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     const appSession = sessionsDb.createAppSession(
       'app-session-tool',
@@ -249,16 +279,18 @@ test('serialized tool-call titles do not replace the prompt-derived name', async
       { id: 'dev-sess-4', title: 'functions.read_file:0{"file_path": "/home/claude/.cloudcli/assets/u1/img.png"}' },
     ]);
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer, calls } = testSynchronizer(async () => 'Сгенерированное имя');
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
 
     const session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.custom_name, 'Сделай так чтобы работало');
     assert.equal(session?.title_source, 'naive');
+    assert.equal(calls.length, 0);
   });
 });
 
-test('a readable prefix does not rescue a title ending in a tool-call blob', async () => {
+test('a junk CLI title does not block the generated name once the chat has context', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     const appSession = sessionsDb.createAppSession(
       'app-session-mixed',
@@ -275,16 +307,21 @@ test('a readable prefix does not rescue a title ending in a tool-call blob', asy
     ]);
     seedTwoTurns(devinDbPath, 'dev-sess-mixed');
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer, calls } = testSynchronizer(async () => 'Кнопка «показать ещё чаты»');
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
 
     const session = sessionsDb.getSessionById(appSession);
-    assert.equal(session?.custom_name, 'Сделай кнопку показать ещё чаты');
-    assert.equal(session?.title_source, 'naive');
+    // Junk is not shown and not passed to the model as a draft, but the chat
+    // still gets its real name — from the messages themselves.
+    assert.equal(session?.custom_name, 'Кнопка «показать ещё чаты»');
+    assert.equal(session?.title_source, 'ai');
+    assert.equal(calls.length, 1);
+    assert.doesNotMatch(calls[0] ?? '', /functions\.ReadImage/);
   });
 });
 
-test('a title that merely echoes the first prompt is not promoted', async () => {
+test('a generated name echoing the first prompt is rejected, keeping the row open', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     const appSession = sessionsDb.createAppSession(
       'app-session-echo',
@@ -303,8 +340,11 @@ test('a title that merely echoes the first prompt is not promoted', async () => 
       'И ещё одна порция данных',
     ]);
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer } = testSynchronizer(
+      async () => 'Отвечай ТОЛЬКО JSON-объектом по запрошенной схеме',
+    );
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
 
     const session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.custom_name, 'Отвечай ТОЛЬКО JSON-объектом');
@@ -312,26 +352,105 @@ test('a title that merely echoes the first prompt is not promoted', async () => 
   });
 });
 
-test('once a generated title landed, the chat is never renamed again', async () => {
+test('once a generated name landed, the chat is never renamed again', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-5', title: 'Первое название' },
     ]);
     seedTwoTurns(devinDbPath, 'dev-sess-5');
 
-    const synchronizer = new DevinSessionSynchronizer();
+    const { synchronizer, calls } = testSynchronizer(async () => 'Первое название');
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
     assert.equal(sessionsDb.getSessionById('dev-sess-5')?.custom_name, 'Первое название');
     assert.equal(sessionsDb.getSessionById('dev-sess-5')?.title_source, 'ai');
+    assert.equal(calls.length, 1);
 
-    // Devin keeps evolving its own title — the sidebar must stay put.
+    // Devin keeps evolving its own title — the sidebar must stay put and the
+    // model is not even asked again.
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-5', title: 'Совсем другое название' },
     ]);
     await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
 
     const session = sessionsDb.getSessionById('dev-sess-5');
     assert.equal(session?.custom_name, 'Первое название');
     assert.equal(session?.title_source, 'ai');
+    assert.equal(calls.length, 1);
+  });
+});
+
+test('a failing model retries, then falls back to the raw CLI title', async () => {
+  await withIsolatedStores(async (devinDbPath) => {
+    writeDevinDb(devinDbPath, [
+      { id: 'dev-sess-flaky', title: 'Сырой заголовок от CLI' },
+    ]);
+    seedTwoTurns(devinDbPath, 'dev-sess-flaky');
+
+    let failures = 0;
+    const { synchronizer, calls } = testSynchronizer(async () => {
+      failures += 1;
+      throw new Error('Devin не ответил');
+    });
+
+    // Two failed attempts (titleMaxAttempts = 2), then the next pass writes
+    // the raw CLI title — better a long real name than a prompt fragment.
+    await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
+    await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
+    assert.equal(sessionsDb.getSessionById('dev-sess-flaky')?.title_source, 'naive');
+
+    await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
+    const session = sessionsDb.getSessionById('dev-sess-flaky');
+    assert.equal(session?.custom_name, 'Сырой заголовок от CLI');
+    assert.equal(session?.title_source, 'ai');
+    assert.equal(calls.length, 2);
+    assert.equal(failures, 2);
+  });
+});
+
+test('a recovered model beats the fallback on the next pass', async () => {
+  await withIsolatedStores(async (devinDbPath) => {
+    writeDevinDb(devinDbPath, [
+      { id: 'dev-sess-recover', title: 'Сырой заголовок от CLI' },
+    ]);
+    seedTwoTurns(devinDbPath, 'dev-sess-recover');
+
+    let attempt = 0;
+    const { synchronizer } = testSynchronizer(async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw new Error('Devin не ответил');
+      }
+      return 'Короткое имя от модели';
+    });
+
+    await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
+    assert.equal(sessionsDb.getSessionById('dev-sess-recover')?.title_source, 'naive');
+
+    await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
+    assert.equal(sessionsDb.getSessionById('dev-sess-recover')?.custom_name, 'Короткое имя от модели');
+    assert.equal(sessionsDb.getSessionById('dev-sess-recover')?.title_source, 'ai');
+  });
+});
+
+test('one-shot `devin -p` helper sessions in the model cwd are never indexed', async () => {
+  await withIsolatedStores(async (devinDbPath) => {
+    writeDevinDb(devinDbPath, [
+      { id: 'dev-sess-helper', working_directory: DEVIN_MODEL_CWD, title: 'Ответь только названием' },
+      { id: 'dev-sess-real', title: 'Настоящий чат' },
+    ]);
+
+    const synchronizer = new DevinSessionSynchronizer(async () => 'Имя');
+    assert.equal(await synchronizer.synchronize(), 1);
+    await synchronizer.drainTitleJobs();
+
+    assert.equal(sessionsDb.getSessionById('dev-sess-helper'), null);
+    assert.ok(sessionsDb.getSessionById('dev-sess-real'));
   });
 });

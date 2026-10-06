@@ -57,8 +57,8 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import {
+  askDevinOnce,
   codexHome,
-  hideDevinSessionsInDirectory,
   exportDevinTranscript,
   resolveCodexBinary,
 } from '@/modules/providers/index.js';
@@ -71,7 +71,6 @@ import {
   type TouchedFile,
 } from '@/modules/handoff/handoff-digest.js';
 import { canonicalizeAccountDir, getActiveAccountDir } from '@/shared/session-scope.js';
-import { resolveDevinCliCommand } from '@/shared/utils.js';
 
 /** Переписка длиннее — разбирается частями, потом части сводятся. */
 const SINGLE_PASS_MAX_CHARS = 300_000;
@@ -400,60 +399,6 @@ export async function askCodexOnce(prompt: string): Promise<string> {
     throw new Error(errorText || 'Codex не ответил');
   }
   return text.trim();
-}
-
-/** Отдельная служебная папка разовых вызовов `devin -p`: беседы в ней — только выжимки. */
-const DEVIN_MODEL_CWD = path.join(os.homedir(), '.cloudcli', 'handoff-devin-cwd');
-
-/**
- * Тот же один ответ, но от Devin — для переноса чата Devin (Егор 03.10.26:
- * «только его токены» — выжимку чата Devin пишет сам Devin, не Claude).
- *
- * `devin -p` всегда создаёт беседу в рабочей папке; она идёт в свою папку
- * DEVIN_MODEL_CWD и после вызова помечается скрытой — в список чатов не
- * попадает. Ответ — текст stdout; при ошибке — stderr и код выхода.
- */
-export async function askDevinOnce(prompt: string): Promise<string> {
-  await mkdir(DEVIN_MODEL_CWD, { recursive: true }).catch(() => undefined);
-  const result = await new Promise<{ text: string; error: string | null }>((resolve) => {
-    const child = spawn(resolveDevinCliCommand(), [
-      '--respect-workspace-trust', 'false',
-      '-p', prompt,
-    ], {
-      cwd: DEVIN_MODEL_CWD,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve({ text: '', error: 'Devin не ответил вовремя' });
-    }, MODEL_TIMEOUT_MS);
-    timer.unref?.();
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-2000);
-    });
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      resolve({ text: '', error: error.message });
-    });
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      resolve({
-        text: stdout,
-        error: code === 0 ? null : (stderr.trim().split('\n').pop() || `Devin завершился с кодом ${String(code)}`),
-      });
-    });
-  });
-  // Беседа вызова пишется в общую базу Devin — прячем, чтобы не всплыла чатом.
-  hideDevinSessionsInDirectory(DEVIN_MODEL_CWD);
-  if (result.error || !result.text.trim()) {
-    throw new Error(result.error || 'Devin не ответил');
-  }
-  return result.text.trim();
 }
 
 type Ask = (prompt: string, accountDir: string) => Promise<string>;
@@ -951,7 +896,7 @@ export async function prepareHandoff(
   sweepJobs();
   const source = await resolveSource(sessionId);
   // Выжимку пишет подписка самого чата: Devin — Devin (только его токены).
-  const askForSource = source.provider === 'devin' ? askDevinOnce : ask;
+  const askForSource: Ask = source.provider === 'devin' ? (prompt) => askDevinOnce(prompt) : ask;
   const key = jobKey(source.accountDir, sessionId);
   const existing = prepared.get(key);
   if (existing?.status === 'running') return { status: 'running' };
@@ -1023,7 +968,7 @@ export async function startHandoff(sessionId: string, ask: Ask = askModelOnce, r
   sweepJobs();
   const source = await resolveSource(sessionId);
   // Выжимку пишет подписка самого чата: Devin — Devin (только его токены).
-  const askForSource = source.provider === 'devin' ? askDevinOnce : ask;
+  const askForSource: Ask = source.provider === 'devin' ? (prompt) => askDevinOnce(prompt) : ask;
   const goal = normalizeGoal(rawGoal);
   const key = jobKey(source.accountDir, sessionId);
   const existing = jobs.get(key);

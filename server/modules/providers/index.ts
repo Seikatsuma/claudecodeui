@@ -35,6 +35,8 @@ export { codexHome, resolveCodexBinary } from './services/codex-account-limits.s
 
 // Потребитель: `handoff` — «Продолжить в новом чате» выгружает беседу Devin
 // построчным файлом формата переписки Claude и скрывает служебные беседы
-// разового вызова `devin -p`.
+// разового вызова `devin -p`. askDevinOnce — тот же разовый вызов для
+// выжимки переноса (имена чатов Devin им пишет сам синхронизатор).
 export { exportDevinTranscript } from './list/devin/devin-transcript.js';
 export { hideDevinSessionsInDirectory } from './list/devin/devin-chain.js';
+export { askDevinOnce } from './list/devin/devin-model.js';
