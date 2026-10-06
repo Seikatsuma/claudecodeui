@@ -439,6 +439,30 @@ test('a recovered model beats the fallback on the next pass', async () => {
   });
 });
 
+test('a session hidden upstream gets archived out of the sidebar', async () => {
+  await withIsolatedStores(async (devinDbPath) => {
+    writeDevinDb(devinDbPath, [
+      { id: 'dev-sess-hidden', title: 'Видимый чат' },
+    ]);
+
+    const synchronizer = new DevinSessionSynchronizer(async () => 'Имя');
+    await synchronizer.synchronize();
+    let session = sessionsDb.getSessionById('dev-sess-hidden');
+    assert.ok(session);
+    assert.equal(session?.isArchived, 0);
+
+    // Devin пометил сессию скрытой (так делают разовые вызовы `devin -p`
+    // после ответа) — следующий проход убирает её из списка.
+    writeDevinDb(devinDbPath, [
+      { id: 'dev-sess-hidden', title: 'Видимый чат', hidden: 1 },
+    ]);
+    await synchronizer.synchronize();
+
+    session = sessionsDb.getSessionById('dev-sess-hidden');
+    assert.equal(session?.isArchived, 1);
+  });
+});
+
 test('one-shot `devin -p` helper sessions in the model cwd are never indexed', async () => {
   await withIsolatedStores(async (devinDbPath) => {
     writeDevinDb(devinDbPath, [

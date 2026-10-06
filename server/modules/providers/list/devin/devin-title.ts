@@ -40,6 +40,7 @@ export function buildChatTitlePrompt(input: DevinTitleInput): string {
     .filter(Boolean);
   const draft = input.devinTitle?.replace(/\s+/g, ' ').trim().slice(0, 120);
   return [
+    'Это разовый вопрос, а не задача: ответь сразу текстом, НЕ вызывай инструменты, скиллы и не читай файлы.',
     'Назови чат человека с ИИ-помощником. Название показывается в узком списке слева — видно примерно 35–40 символов, хвост обрезается.',
     '',
     'Требования к названию:',

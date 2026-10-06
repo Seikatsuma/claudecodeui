@@ -174,6 +174,7 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
    */
   async synchronize(since?: Date): Promise<number> {
     const result = this.synchronizeRows(since);
+    this.archiveHiddenSessions();
     return result.processed;
   }
 
@@ -238,6 +239,39 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
       const message = error instanceof Error ? error.message : String(error);
       console.warn('[DevinProvider] Failed to synchronize sessions:', message);
       return { processed: 0, firstSessionId: null };
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Сессии, ставшие hidden=1 в базе Devin, вычищаются из индекса: фильтр
+   * `hidden=0` в SELECT лишь не пускает их ВНОВЬ, а проиндексированные до
+   * сокрытия (разовые вызовы `devin -p` успевают попасть в список до
+   * пометки) висели бы призраками в сайдбаре вечно. Архив, не удаление —
+   * обратимо и не трогает историю.
+   */
+  private archiveHiddenSessions(): void {
+    const dbPath = getDevinDatabasePath();
+    let db: InstanceType<typeof Database>;
+    try {
+      db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    } catch {
+      return;
+    }
+    try {
+      const hidden = db.prepare(
+        `SELECT id FROM sessions WHERE COALESCE(hidden, 0) = 1`,
+      ).all() as Array<{ id: string }>;
+      for (const { id } of hidden) {
+        const indexed = sessionsDb.getSessionByProviderSessionId(id)
+          ?? sessionsDb.getSessionById(id);
+        if (indexed && !indexed.isArchived) {
+          sessionsDb.updateSessionIsArchived(indexed.session_id, true);
+        }
+      }
+    } catch {
+      // База без таблицы/залочена — вычистим на следующем проходе.
     } finally {
       db.close();
     }
