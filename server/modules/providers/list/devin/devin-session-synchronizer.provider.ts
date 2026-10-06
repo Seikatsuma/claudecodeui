@@ -141,6 +141,12 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly titleAttempts = new Map<string, { attempts: number; nextTryAt: number }>();
   private readonly titleInFlight = new Set<string>();
   private readonly pendingTitleJobs = new Set<Promise<void>>();
+  /**
+   * Генерация идёт строго по одной: полный рескан или старт после рестarta
+   * ставит десятки заданий разом, и сотня параллельных `devin -p` — это
+   * сотня CLI-процессов на 8-гиговом сервере. Очередь-цепочка сериализует.
+   */
+  private titleQueue: Promise<void> = Promise.resolve();
   private readonly askTitle: (prompt: string, timeoutMs: number) => Promise<string>;
   private readonly titleRetryMs: number;
   private readonly titleMaxAttempts: number;
@@ -375,12 +381,13 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
       return;
     }
     this.titleInFlight.add(candidate.sessionId);
-    const job = this.generateAndApplyTitle(candidate)
+    const job = (this.titleQueue = this.titleQueue
+      .then(() => this.generateAndApplyTitle(candidate))
       .catch(() => undefined)
       .finally(() => {
         this.titleInFlight.delete(candidate.sessionId);
         this.pendingTitleJobs.delete(job);
-      });
+      }));
     this.pendingTitleJobs.add(job);
   }
 
