@@ -932,6 +932,21 @@
     padding-top: var(--header-base-padding);
   }
 
+  /*
+    Телефон в браузере: содержимое шапки (бургер, название, папка, индикатор
+    связи) зрительно прижато к верхней линии — замер по снимку Егора 06.10.26
+    дал зазор над текстом ~5 px против ~13 px под ним. Добавляем шесть
+    точек сверху, чтобы строка читалась по центру полосы. Граница 768 px —
+    та же, что у isMobile в useDeviceSettings. В приложении это правило не
+    действует: pwa-mode ниже сбрасывает отступ обратно — там договорённость
+    «полоса впритык к шапке айфона».
+  */
+  @media screen and (max-width: 768px) {
+    .pwa-header-safe {
+      padding-top: calc(var(--header-base-padding) + 6px);
+    }
+  }
+
   /* When PWA mode is detected by JavaScript */
   body.pwa-mode .pwa-header-safe {
     /* Reset padding since #root already handles safe area */
