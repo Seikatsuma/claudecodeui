@@ -220,7 +220,11 @@ export const api = {
   // config endpoint removed - no longer needed (frontend uses window.location)
   // After the projectName → projectId migration the path/query identifier is
   // the DB-assigned `projectId`; parameter names reflect that for clarity.
-  projects: () => authenticatedFetch('/api/projects'),
+  // gate: список проектов держит заставку «Настройка рабочего пространства» —
+  // заморозка провайдера (см. doors.js) на этом запросе оставляла приложение
+  // в вечной загрузке. Запрос лёгкий (~0,5 с), поэтому безопасно резать его
+  // по времени и пробовать запасной вход, как проверку входа.
+  projects: () => authenticatedFetch('/api/projects', {}, { gate: true }),
   archivedProjects: () => authenticatedFetch('/api/projects/archived'),
   /**
    * @param {string} projectId
@@ -476,8 +480,10 @@ export const api = {
     }),
 
   // Открытые вкладки чатов — общие для всех устройств пользователя.
+  // gate: зависший запрос держал бы sync.fetching навечно — синхронизация
+  // вкладок молча умирала на этой загрузке страницы. Ответ лёгкий, режем смело.
   openTabs: {
-    get: (since) => authenticatedFetch(`/api/open-tabs${Number.isInteger(since) ? `?since=${since}` : ''}`),
+    get: (since) => authenticatedFetch(`/api/open-tabs${Number.isInteger(since) ? `?since=${since}` : ''}`, {}, { gate: true }),
     // keepalive — запрос доходит, даже если страница закрывается или перезагружается.
     put: (tabs, keepalive = false, merge = false) =>
       authenticatedFetch('/api/open-tabs', { method: 'PUT', body: JSON.stringify({ tabs, merge }), keepalive }),
