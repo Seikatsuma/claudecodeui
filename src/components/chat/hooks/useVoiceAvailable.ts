@@ -15,6 +15,30 @@ let healthRequest: Promise<boolean> | null = null;
 const HEALTH_CACHE_MS = 60_000;
 let healthResult: { value: boolean; archived: boolean; at: number } | null = null;
 
+// Повтор после неудачи — один на всех экземпляров хука (кнопка стоит в поле
+// ввода и у каждого сообщения): иначе открытый длинный чат слал бы по запросу
+// с каждой кнопки. 06.10.26: на мёртвом мобильном интернете (дни «белых
+// списков») единственная проверка висла без таймаута или падала, и кнопка
+// микрофона пропадала до перезагрузки страницы — повтора не было ни у кого.
+const HEALTH_RETRY_MS = 30_000;
+const HEALTH_CHANGED_EVENT = 'voice-health:changed';
+let healthRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let mountedConsumers = 0;
+
+function scheduleHealthRetry() {
+  if (healthRetryTimer || mountedConsumers === 0) return;
+  healthRetryTimer = setTimeout(() => {
+    healthRetryTimer = null;
+    checkVoiceHealth()
+      .catch(() => false)
+      .then((value) => {
+        // Слушатели читают готовый ответ, второго запроса не будет.
+        window.dispatchEvent(new Event(HEALTH_CHANGED_EVENT));
+        if (!value) scheduleHealthRetry();
+      });
+  }, HEALTH_RETRY_MS);
+}
+
 /**
  * Whether the server keeps a copy of this user's recordings (owner only on a
  * shared instance). Read from the last health answer, so it costs nothing at
@@ -30,7 +54,9 @@ function checkVoiceHealth(): Promise<boolean> {
     return Promise.resolve(healthResult.value);
   }
   if (healthRequest) return healthRequest;
-  const request = authenticatedFetch('/api/voice/health')
+  // gate: та же связка «таймаут + другой вход», что у /api/projects — без неё
+  // проверка на замороженном соединении висела бессрочно и кнопка не появлялась.
+  const request = authenticatedFetch('/api/voice/health', {}, { gate: true })
     .then(async (response) => {
       if (!response.ok) throw new Error(`Voice health check failed (${response.status})`);
       const data = await response.json();
@@ -79,14 +105,15 @@ export function useVoiceAvailable(): boolean {
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      setAvailable(false);
+      return;
+    }
+    mountedConsumers += 1;
     let active = true;
     let requestId = 0;
 
     const check = async () => {
-      if (!enabled) {
-        setAvailable(false);
-        return;
-      }
       if (readVoiceConfig().baseUrl.trim()) {
         setAvailable(true);
         return;
@@ -97,14 +124,24 @@ export function useVoiceAvailable(): boolean {
         if (active && id === requestId) setAvailable(result);
       } catch {
         if (active && id === requestId) setAvailable(false);
+        scheduleHealthRetry();
       }
     };
 
+    // Повторный тик пришёл от общего таймера: читаем готовый ответ, новый
+    // запрос не нужен.
+    const onHealthChanged = () => setAvailable(healthResult?.value === true);
+
     void check();
     window.addEventListener(VOICE_CONFIG_SYNC_EVENT, check);
+    window.addEventListener('online', check);
+    window.addEventListener(HEALTH_CHANGED_EVENT, onHealthChanged);
     return () => {
+      mountedConsumers -= 1;
       active = false;
       window.removeEventListener(VOICE_CONFIG_SYNC_EVENT, check);
+      window.removeEventListener('online', check);
+      window.removeEventListener(HEALTH_CHANGED_EVENT, onHealthChanged);
     };
   }, [enabled]);
 
