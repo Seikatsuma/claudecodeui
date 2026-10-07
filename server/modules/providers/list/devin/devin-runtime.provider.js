@@ -22,6 +22,11 @@ import {
   isAllowedDevinModel,
   resolveDevinCliCommand,
 } from '@/shared/utils.js';
+import {
+  devinSlotHasCredentials,
+  getActiveDevinSlot,
+  setActiveDevinSlot,
+} from '@/shared/devin-slots.js';
 import { mapPermissionModeToDevinMode } from '@/modules/providers/list/devin/devin-sessions.provider.js';
 import { readDevinTokenUsage, resolveDevinContextWindow } from '@/modules/providers/list/devin/devin-usage.js';
 
@@ -60,6 +65,24 @@ const DEVIN_USAGE_POLL_MS = 4_000;
 const HANDSHAKE_TIMEOUT_MS = 60_000;
 /** Devin logs progress to stderr (INFO lines) — keep the tail for error text. */
 const STDERR_TAIL_BYTES = 4_000;
+/** Пауза перед повтором хода на другом слоте: процесс должен умереть и отпустить замок сессии. */
+const FAILOVER_KILL_WAIT_MS = 1_500;
+
+/**
+ * Ошибка «у аккаунта кончилась квота/лимит» — живой вид (журнал 07.10.26):
+ * `session/prompt` отвечает error -32010 «Reached free model rate limit…»,
+ * data `{cognition.ai/errorKind:'unavailable', cognition.ai/retryable:true}`.
+ * Тот же текст ловим в хвосте stderr на случай, если процесс умер до ответа.
+ */
+function isDevinQuotaError(error) {
+  const kind = error?.data?.['cognition.ai/errorKind'];
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return kind === 'unavailable' || /rate limit|limit will reset|quota|insufficient|credits|billing/i.test(message);
+}
+
+function isDevinQuotaText(text) {
+  return /rate limit|limit will reset|quota|insufficient|credits|billing/i.test(String(text || ''));
+}
 
 function sendMessage(ws, data) {
   if (ws && typeof ws.send === 'function') {
@@ -431,9 +454,14 @@ async function queryDevin(command, options = {}, ws, context) {
     images,
     files,
     permissionMode = 'default',
+    // Внутренние флаги повтора на другом аккаунте (авто-фейловер по лимиту):
+    // devinSessionIdOverride — беседа, уже созданная первой попыткой;
+    // slotFailoverDone — повтор был, второй раз не переключаемся.
+    devinSessionIdOverride,
+    slotFailoverDone,
   } = options;
 
-  const providerSessionId = context.resolveProviderSessionId(sessionId);
+  const providerSessionId = devinSessionIdOverride ?? context.resolveProviderSessionId(sessionId);
 
   // Register the run BEFORE the async resolves: `chat.abort` can land while
   // resolveResumeModel is still awaiting — the run must already exist so
@@ -448,6 +476,10 @@ async function queryDevin(command, options = {}, ws, context) {
     sessionCreatedSent: Boolean(providerSessionId),
     terminalFailure: null,
     startedAt: Date.now(),
+    // Слот, под которым пошёл этот ход, и флаг «убиваем сами ради повтора на
+    // другом аккаунте» — onClose такого процесса не должен гасить ход.
+    slot: getActiveDevinSlot(),
+    slotRetryPending: false,
     unregisterSurvivor: null,
     finishRun: null,
     usageTimer: null,
@@ -492,7 +524,7 @@ async function queryDevin(command, options = {}, ws, context) {
   const workingDirectory = cwd || projectPath || process.cwd();
   const devinMode = mapPermissionModeToDevinMode(permissionMode);
 
-  const childEnv = buildDevinChildEnv();
+  const childEnv = buildDevinChildEnv(run.slot);
 
   // `devin --permission-mode dangerous acp`: the flag is a top-level option
   // (dangerous = alias of bypass), accepted before the subcommand. It covers
@@ -601,6 +633,87 @@ async function queryDevin(command, options = {}, ws, context) {
   };
 
   return await new Promise((resolve, reject) => {
+    /**
+     * Лимит активного аккаунта → тот же ход заново на другом слоте (Егор
+     * 07.10.26: «токены переключаются сами, чаты те же»). Чат не теряется:
+     * sessions.db у слотов общая, созданную беседу передаём через
+     * devinSessionIdOverride, и повторная попытка делает session/load в неё.
+     * Активный слот переключаем насовсем — следующие ходы сразу идут на
+     * живой аккаунт. Один раз на сообщение: если и второй слот ограничен —
+     * ошибка показывается как раньше. true = повтор запущен, вызывающему
+     * коду гасить ход не нужно.
+     */
+    const failoverToOtherSlot = (error, extraText = '') => {
+      if (slotFailoverDone || run.aborted || run.finishRun || run.slotRetryPending) {
+        return false;
+      }
+      if (!isDevinQuotaError(error) && !isDevinQuotaText(extraText)) {
+        return false;
+      }
+      const nextSlot = run.slot === 2 ? 1 : 2;
+      if (!devinSlotHasCredentials(nextSlot)) {
+        return false; // второго входа нет — переключаться некуда
+      }
+      run.slotRetryPending = true;
+      try {
+        setActiveDevinSlot(nextSlot);
+      } catch (switchError) {
+        // Файл слота не записался (диск/права) — остаёмся на текущем и
+        // показываем исходную ошибку лимита, без повтора.
+        console.warn('[Devin] не удалось переключить слот:', switchError?.message || switchError);
+        run.slotRetryPending = false;
+        return false;
+      }
+      console.warn(`[Devin] лимит слота ${run.slot} — переключаюсь на слот ${nextSlot} и повторяю ход (${sessionKey || 'новый чат'})`);
+      sendMessage(ws, createNormalizedMessage({
+        provider: 'devin',
+        sessionId: sessionId || run.devinSessionId || null,
+        kind: 'status',
+        text: 'У аккаунта Devin кончился лимит — переключаюсь на другой аккаунт и повторяю…',
+      }));
+      cancelPendingPermissions(sessionKey, ws, sessionId || run.devinSessionId);
+      if (run.unregisterSurvivor) {
+        run.unregisterSurvivor();
+        run.unregisterSurvivor = null;
+      }
+      if (run.usageTimer) {
+        clearInterval(run.usageTimer);
+        run.usageTimer = null;
+      }
+      // Из activeDevinRuns запись НЕ убираем: надгробие нужно, чтобы «стоп»,
+      // нажатый в окне до повтора, находил ход и ставил run.aborted (иначе
+      // повтор молча пошёл бы дальше на втором аккаунте).
+      try { child.kill('SIGKILL'); } catch { /* уже умер */ }
+      // Ждём смерть процесса, чтобы замок сессии отпустил, затем повтор.
+      // Уже мёртвому процессу (close случился до failover — ошибка лимита
+      // пришла через stderr) ждать нечего — повторяем сразу.
+      let resumed = false;
+      const resume = () => {
+        if (resumed) {
+          return;
+        }
+        resumed = true;
+        if (run.aborted) {
+          finish(0, true);
+          resolve();
+          return;
+        }
+        resolve(queryDevin(command, {
+          ...options,
+          devinSessionIdOverride: run.devinSessionId || providerSessionId || undefined,
+          slotFailoverDone: true,
+        }, ws, context));
+      };
+      if (connection.isClosed()) {
+        setImmediate(resume);
+      } else {
+        child.once('close', resume);
+        // Без unref: единственный остающийся таймер обязан дожить до повтора.
+        setTimeout(resume, FAILOVER_KILL_WAIT_MS);
+      }
+      return true;
+    };
+
     const hardFail = (message, extra = {}) => {
       sendMessage(ws, createNormalizedMessage({
         provider: 'devin',
@@ -642,13 +755,16 @@ async function queryDevin(command, options = {}, ws, context) {
       },
 
       onClose: () => {
-        if (run.finishRun) {
-          return;
+        if (run.finishRun || run.slotRetryPending) {
+          return; // retryPending: процесс убит нами ради повтора на другом слоте
         }
         const tail = connection.getStderrTail();
         const message = run.aborted
           ? 'Devin run aborted'
           : `Devin exited before finishing the turn${tail ? `: ${tail.trim().split('\n').pop()}` : ''}`;
+        if (!run.aborted && failoverToOtherSlot(null, `${message} ${tail || ''}`)) {
+          return;
+        }
         if (!run.aborted) {
           notifyRunFailed({
             userId: ws?.userId || null,
@@ -834,10 +950,19 @@ async function queryDevin(command, options = {}, ws, context) {
         resolve();
         return;
       }
+      if (run.slotRetryPending) {
+        // Повтор на другом слоте уже запущен из onClose (процесс умер с
+        // лимитом в stderr) — отклонённый вызов здесь не должен добивать ход
+        // красной ошибкой; промис отпустит resume() из failoverToOtherSlot.
+        return;
+      }
       const tail = connection.getStderrTail();
       const detail = tail && !message.includes(tail.trim().split('\n').pop() || '')
         ? `${message} — ${tail.trim().split('\n').pop()}`
         : message;
+      if (failoverToOtherSlot(error, `${detail} ${tail || ''}`)) {
+        return; // лимит аккаунта — ход повторяется на другом слоте
+      }
       notifyRunFailed({
         userId: ws?.userId || null,
         provider: 'devin',

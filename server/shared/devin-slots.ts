@@ -135,6 +135,30 @@ function linkSiblings(mainBase: string, slotBase: string): void {
   }
 }
 
+/**
+ * Файл входа слота. Devin кладёт его в `<XDG_DATA_HOME>/devin/credentials.toml`:
+ * слот 1 — `~/.local/share/devin/credentials.toml`, слот 2 —
+ * `~/.devin-account2/data/devin/credentials.toml`.
+ */
+function devinSlotCredentialsFile(slot: DevinSlot): string {
+  return slot === 2
+    ? path.join(DEVIN_SLOT2_DATA_HOME, 'devin', 'credentials.toml')
+    : path.join(slot1DataDir(), 'credentials.toml');
+}
+
+/**
+ * В слот есть вход, когда лежит его `credentials.toml` — тот же признак, что
+ * проверяет `devin auth status` (он лишь читает этот файл). Дёшево: без запуска
+ * процесса, поэтому годится на горячем пути ошибок (авто-переход при лимите).
+ */
+export function devinSlotHasCredentials(slot: DevinSlot): boolean {
+  try {
+    return fs.statSync(devinSlotCredentialsFile(slot)).size > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function getActiveDevinSlot(): DevinSlot {
   try {
     return fs.readFileSync(ACTIVE_SLOT_FILE, 'utf8').trim() === '2' ? 2 : 1;
