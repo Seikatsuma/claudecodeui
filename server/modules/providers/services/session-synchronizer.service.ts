@@ -59,6 +59,10 @@ export const sessionSynchronizerService = {
       if (tidied > 0) {
         console.log(`[Sessions] Archived ${tidied} script-launched session(s) for ${accountDir}.`);
       }
+      const tidiedDevin = sessionsDb.archiveForeignDevinSessionsOnce(accountDir);
+      if (tidiedDevin > 0) {
+        console.log(`[Sessions] Archived ${tidiedDevin} Devin session(s) never owned by the app for ${accountDir}.`);
+      }
     } else {
       console.warn(
         `[Sessions] Skipping scan cursor advance for ${accountDir} because ${failures.length} provider sync(s) failed.`,

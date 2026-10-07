@@ -872,6 +872,45 @@ export const sessionsDb = {
     return result.changes;
   },
 
+  /**
+   * Moves indexed Devin sessions that never had an app row into the archive
+   * - once.
+   *
+   * Before 07.10.26 the Devin synchronizer stamped every session it found on
+   * disk as origin 'terminal' and left it in the active list, so one-shot
+   * probes and model loans (`devin -p`, external ACP runs) piled up in the
+   * regular sidebar. Foreign sessions now arrive as 'auto' and archive on
+   * insert; this is the one-off catch-up for the rows indexed before that.
+   *
+   * Discriminator: an app-owned chat's row keeps its own UUID `session_id`
+   * with the Devin slug in `provider_session_id`; a row indexed straight
+   * off disk repeats the slug in both columns. The origin is flipped to
+   * 'auto' too - 'terminal' was a placeholder that claimed these runs were
+   * typed by a person.
+   *
+   * Records that it ran, so a session the user later takes back OUT of the
+   * archive is never quietly re-archived behind them.
+   */
+  archiveForeignDevinSessionsOnce(accountDir: string): number {
+    const db = getConnection();
+    const flagKey = `devin_foreign_sessions_tidied:${accountDir}`;
+    if (appConfigDb.get(flagKey)) {
+      return 0;
+    }
+
+    const result = db
+      .prepare(
+        `UPDATE sessions SET isArchived = 1, origin = 'auto'
+         WHERE account_dir = ? AND provider = 'devin'
+           AND provider_session_id IS NOT NULL
+           AND session_id = provider_session_id`
+      )
+      .run(accountDir);
+
+    appConfigDb.set(flagKey, new Date().toISOString());
+    return result.changes;
+  },
+
   countSessionsByProjectPath(
     projectPath: string,
     accountVisibility: SessionAccountVisibility = 'current',
