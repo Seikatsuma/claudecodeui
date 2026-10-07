@@ -166,7 +166,8 @@ export async function submitDevinLoginCode(rawCode: string): Promise<DevinLoginR
     // Новый аккаунт сразу делаем рабочим: именно ради него его и добавляли.
     setActiveDevinSlot(2);
     forgetDevinAccountCache();
-    closeSession(session);
+    // Даём Devin самому закончить: после файла входа он может дописать свой конфиг (org_id).
+    setTimeout(() => closeSession(session), 5_000).unref?.();
     return { ok: true, name: account.name, message: 'Аккаунт Devin подключён.' };
   }
 

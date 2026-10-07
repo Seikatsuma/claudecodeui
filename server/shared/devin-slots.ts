@@ -66,6 +66,8 @@ export function syncDevinSlot2Config(): void {
   const mainDir = mainConfigDir();
   const slotDir = path.join(SLOT2_CONFIG_HOME, 'devin');
   fs.mkdirSync(slotDir, { recursive: true, mode: 0o700 });
+  linkSiblings(path.dirname(mainDir), SLOT2_CONFIG_HOME);
+  linkSiblings(path.dirname(slot1DataDir()), DEVIN_SLOT2_DATA_HOME);
 
   const main = readJsonObject(path.join(mainDir, 'config.json'));
   if (main) {
@@ -99,6 +101,35 @@ export function syncDevinSlot2Config(): void {
     } catch {
       if (fs.existsSync(target)) {
         fs.symlinkSync(target, link);
+      }
+    }
+  }
+}
+
+/**
+ * Подмена XDG_*_HOME для Devin спрятала бы от него и от программ, которые он
+ * запускает, всё остальное из `~/.config` и `~/.local/share` (проверяющий
+ * 07.10.26: `gh` в таком окружении «не вошёл», пропали настройки uv, chrome и др.).
+ * Поэтому в каталогах слота 2 каждая соседняя запись общего каталога — ссылка;
+ * своей остаётся только `devin`.
+ */
+function linkSiblings(mainBase: string, slotBase: string): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(mainBase);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name === 'devin') continue;
+    const link = path.join(slotBase, name);
+    try {
+      fs.lstatSync(link);
+    } catch {
+      try {
+        fs.symlinkSync(path.join(mainBase, name), link);
+      } catch {
+        // Гонка с другим запуском — ссылка уже есть.
       }
     }
   }

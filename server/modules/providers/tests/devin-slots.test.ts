@@ -52,6 +52,13 @@ test('конфиг слота 2: настройки и хуки общие, org_
   assert.equal(fs.lstatSync(path.join(path.dirname(slotFile), 'hooks')).isSymbolicLink(), true);
   assert.equal(fs.lstatSync(path.join(path.dirname(slotFile), 'AGENTS.md')).isSymbolicLink(), true);
 
+  // Остальное из ~/.config (gh и др.) видно из слота 2 ссылками — иначе программы Devin теряют настройки.
+  fs.mkdirSync(path.join(fakeHome, '.config', 'gh'), { recursive: true });
+  slots.getDevinSlotEnv(2);
+  const ghLink = path.join(fakeHome, '.devin-account2', 'config', 'gh');
+  assert.equal(fs.lstatSync(ghLink).isSymbolicLink(), true);
+  assert.equal(fs.realpathSync(ghLink), fs.realpathSync(path.join(fakeHome, '.config', 'gh')));
+
   // Вход второго аккаунта записал свою организацию; общий конфиг поменялся — своя остаётся, новое подтягивается.
   first.devin.org_id = 'org-second';
   fs.writeFileSync(slotFile, JSON.stringify(first));
