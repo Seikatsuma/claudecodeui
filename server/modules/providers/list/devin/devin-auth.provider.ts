@@ -4,6 +4,7 @@ import fsSync from 'node:fs';
 
 import spawn from 'cross-spawn';
 
+import { DEVIN_SLOT2_DATA_HOME } from '@/shared/devin-slots.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { getDevinDataDir, resolveDevinCliCommand } from '@/shared/utils.js';
@@ -32,8 +33,8 @@ export class DevinProviderAuth implements IProviderAuth {
 
   async getStatus(): Promise<ProviderAuthStatus> {
     const installed = this.checkInstalled();
-    const credentialsPath = path.join(getDevinDataDir(), 'credentials.toml');
-    const hasCredentials = this.checkCredentialsFile(credentialsPath);
+    const hasCredentials = [getDevinDataDir(), path.join(DEVIN_SLOT2_DATA_HOME, 'devin')]
+      .some((dir) => this.checkCredentialsFile(path.join(dir, 'credentials.toml')));
     const orgId = this.readOrgId();
 
     return {

@@ -17,6 +17,12 @@ import path from 'node:path';
  * бы в другой базе sessions.db, и сайт их не увидел бы. Отдельным остаётся
  * только credentials.toml.
  *
+ * Конфиг (`config.json`) у слота 2 тоже свой: в общем лежит `devin.org_id`
+ * организации основного аккаунта, и вход в другой аккаунт мог бы его
+ * перезаписать (проверяющий 07.10.26, замечание 2). Копия собирается из общего
+ * при каждом запуске: все настройки и хуки те же, `org_id` — только свой
+ * (его пишет сам вход). Правила `AGENTS.md` и каталог `hooks` — ссылки на общие.
+ *
  * Какой слот сейчас активен — один маленький файл `active-slot` ("1" или "2"):
  * Devin на машине один, гостям общего экземпляра он закрыт (isDevinAllowedForWebUser),
  * поэтому выбор общий для хозяина, а не по пользователям. Новые запуски Devin
@@ -27,6 +33,8 @@ export type DevinSlot = 1 | 2;
 const PROFILE_ROOT = path.join(os.homedir(), '.devin-account2');
 export const DEVIN_SLOT2_DATA_HOME = path.join(PROFILE_ROOT, 'data');
 const ACTIVE_SLOT_FILE = path.join(PROFILE_ROOT, 'active-slot');
+const SLOT2_CONFIG_HOME = path.join(PROFILE_ROOT, 'config');
+const SHARED_CONFIG_ENTRIES = ['AGENTS.md', 'hooks'] as const;
 const SHARED_ENTRIES = ['cli', 'mcp'] as const;
 
 // Каталог слота 1 — тот же расчёт, что getDevinDataDir() в utils.ts; свой, чтобы
@@ -34,6 +42,66 @@ const SHARED_ENTRIES = ['cli', 'mcp'] as const;
 function slot1DataDir(): string {
   const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
   return path.join(xdgDataHome || path.join(os.homedir(), '.local', 'share'), 'devin');
+}
+
+function mainConfigDir(): string {
+  const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
+  return path.join(xdgConfigHome || path.join(os.homedir(), '.config'), 'devin');
+}
+
+function readJsonObject(file: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Собирает конфиг слота 2 из общего: всё то же, кроме `devin.org_id` — он остаётся
+ * тем, что записал вход этого аккаунта. Пишет файл только если содержимое изменилось.
+ */
+export function syncDevinSlot2Config(): void {
+  const mainDir = mainConfigDir();
+  const slotDir = path.join(SLOT2_CONFIG_HOME, 'devin');
+  fs.mkdirSync(slotDir, { recursive: true, mode: 0o700 });
+
+  const main = readJsonObject(path.join(mainDir, 'config.json'));
+  if (main) {
+    const own = readJsonObject(path.join(slotDir, 'config.json'));
+    const ownDevin = own?.devin && typeof own.devin === 'object' ? (own.devin as Record<string, unknown>) : null;
+    const merged: Record<string, unknown> = { ...main };
+    const devinSection: Record<string, unknown> = { ...((main.devin as Record<string, unknown> | undefined) ?? {}) };
+    delete devinSection.org_id;
+    if (ownDevin?.org_id) {
+      devinSection.org_id = ownDevin.org_id;
+    }
+    merged.devin = devinSection;
+    const text = `${JSON.stringify(merged, null, 2)}\n`;
+    const file = path.join(slotDir, 'config.json');
+    let current = '';
+    try {
+      current = fs.readFileSync(file, 'utf8');
+    } catch {
+      // Файла ещё нет.
+    }
+    if (current !== text) {
+      fs.writeFileSync(file, text, { mode: 0o600 });
+    }
+  }
+
+  for (const entry of SHARED_CONFIG_ENTRIES) {
+    const link = path.join(slotDir, entry);
+    const target = path.join(mainDir, entry);
+    try {
+      fs.lstatSync(link);
+    } catch {
+      if (fs.existsSync(target)) {
+        fs.symlinkSync(target, link);
+      }
+    }
+  }
 }
 
 export function getActiveDevinSlot(): DevinSlot {
@@ -51,7 +119,15 @@ export function setActiveDevinSlot(slot: DevinSlot): void {
 
 /** Переменные окружения, которые направляют Devin на вход нужного слота. Слот 1 — как есть. */
 export function getDevinSlotEnv(slot: DevinSlot): Record<string, string> {
-  return slot === 2 ? { XDG_DATA_HOME: DEVIN_SLOT2_DATA_HOME } : {};
+  if (slot !== 2) {
+    return {};
+  }
+  try {
+    syncDevinSlot2Config();
+  } catch {
+    // Не вышло собрать копию конфига — Devin возьмёт настройки по умолчанию, вход от этого не страдает.
+  }
+  return { XDG_DATA_HOME: DEVIN_SLOT2_DATA_HOME, XDG_CONFIG_HOME: SLOT2_CONFIG_HOME };
 }
 
 /**

@@ -41,10 +41,12 @@ type LoginSession = {
   url: string | null;
   exited: boolean;
   exitCode: number | null;
+  submitting: boolean;
   timer: NodeJS.Timeout;
 };
 
 let current: LoginSession | null = null;
+let exitHookInstalled = false;
 
 function closeSession(session: LoginSession | null): void {
   if (!session) return;
@@ -69,6 +71,11 @@ function sleep(ms: number): Promise<void> {
 export async function startDevinLogin(): Promise<DevinLoginStart> {
   closeSession(current);
   ensureDevinSlot2Profile();
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    // Сервер останавливают — незаконченный вход не оставляем сиротой.
+    process.once('exit', () => closeSession(current));
+  }
 
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(buildDevinChildEnv(2))) {
@@ -89,6 +96,7 @@ export async function startDevinLogin(): Promise<DevinLoginStart> {
     url: null,
     exited: false,
     exitCode: null,
+    submitting: false,
     timer: setTimeout(() => closeSession(session), LOGIN_TTL_MS),
   };
   session.timer.unref?.();
@@ -132,14 +140,24 @@ export async function submitDevinLoginCode(rawCode: string): Promise<DevinLoginR
   if (!session || session.exited) {
     return { ok: false, name: null, message: 'Ссылка устарела. Нажмите «Новая ссылка» и войдите заново.' };
   }
+  if (session.submitting) {
+    return { ok: false, name: null, message: 'Код уже проверяется — подождите несколько секунд.' };
+  }
+  session.submitting = true;
 
   session.proc.write(code);
   await sleep(300);
   session.proc.write('\r');
 
+  // Ждём не выхода процесса, а появления входа: Devin может не завершаться сам
+  // сразу после успеха, и человек зря смотрел бы на «Проверяю код…» все 30 секунд.
   const deadline = Date.now() + EXCHANGE_WAIT_MS;
-  while (!session.exited && Date.now() < deadline) {
-    await sleep(250);
+  for (let tick = 0; !session.exited && Date.now() < deadline; tick += 1) {
+    await sleep(500);
+    if (tick % 3 === 2) {
+      forgetDevinAccountCache();
+      if ((await readFreshDevinSlot2()).available) break;
+    }
   }
 
   forgetDevinAccountCache();

@@ -5,6 +5,7 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
+import { getActiveDevinSlot, getDevinSlotEnv } from '@/shared/devin-slots.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 import { isPlatformOwnerWebUser, OPEN_REGISTRATION, parseIncomingJsonObject } from '@/shared/utils.js';
 import {
@@ -544,6 +545,8 @@ export function handleShellConnection(
             ...(runtimeContext.anthropicApiKey
               ? { ANTHROPIC_API_KEY: runtimeContext.anthropicApiKey }
               : {}),
+            // Devin в терминале входит под тем же аккаунтом, что и чаты (слот 1 или 2).
+            ...(provider === 'devin' ? getDevinSlotEnv(getActiveDevinSlot()) : {}),
           },
         });
 
