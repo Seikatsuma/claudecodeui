@@ -319,13 +319,21 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
 
     const existingSession = sessionsDb.getSessionByProviderSessionId(sessionId)
       ?? sessionsDb.getSessionById(sessionId);
+    // Беседа, о которой приложение не знает, запущена мимо интерфейса:
+    // разовые `devin -p`, сторонние ACP-прогоны, заём модели скриптами.
+    // Это машинные запуски — в обычном списке Егора их быть не должно:
+    // ниже им ставится origin 'auto', а createSession архивирует такие
+    // строки при вставке (переписка на диске и строка в архиве остаются).
+    // Имя моделью им тоже не генерируем — это расход подписки на чат,
+    // который никто не видит.
+    const appOwned = Boolean(existingSession);
     const existingName = existingSession?.custom_name;
     const existingSource = existingSession?.title_source;
     // A chat keeps one settled name: once a real title has landed ('ai' from
     // the generated name, 'custom' from a human rename) sync never proposes
     // another — the sidebar must not churn. While the name is 'naive', the
     // chat is a candidate for the async name job once it has a few messages.
-    const titleOpen = !existingSource || existingSource === 'naive';
+    const titleOpen = appOwned && (!existingSource || existingSource === 'naive');
     if (titleOpen) {
       const devinTitle = usableDevinTitle(row.title);
       const draft = devinTitle && !this.echoesFirstPrompt(db, sessionId, devinTitle)
@@ -358,7 +366,7 @@ export class DevinSessionSynchronizer implements IProviderSessionSynchronizer {
       normalizeProviderTimestamp(row.last_activity_at ?? row.created_at),
       null,
       undefined,
-      { accountDir: getMachineAccountDir(), origin: 'terminal' },
+      { accountDir: getMachineAccountDir(), origin: appOwned ? 'terminal' : 'auto' },
     );
   }
 

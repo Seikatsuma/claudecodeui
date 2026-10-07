@@ -137,6 +137,22 @@ function seedTwoTurns(devinDbPath: string, sessionId: string, firstPrompt = 'Р�
   addUserMessages(devinDbPath, sessionId, [firstPrompt, 'А подробнее про ретраи?']);
 }
 
+/**
+ * Строка чата, открытого с сайта, привязанная к сессии Devin — как делает
+ * время выполнения при старте хода. Сессия без такой строки считается
+ * машинным запуском и индексируется сразу в архив.
+ */
+function bindAppSession(sessionId: string, projectPath = '/tmp/project'): string {
+  const appSession = sessionsDb.createAppSession(
+    `app-${sessionId}`,
+    'devin',
+    projectPath,
+    'Первые слова сообщения',
+  );
+  sessionsDb.assignProviderSessionId(appSession, sessionId);
+  return appSession;
+}
+
 /** Synchronizer whose name-writing model is a stub; zero retry delay so tests can replay passes. */
 function testSynchronizer(ask: (prompt: string) => Promise<string>): {
   synchronizer: DevinSessionSynchronizer;
@@ -155,6 +171,7 @@ function testSynchronizer(ask: (prompt: string) => Promise<string>): {
 
 test('generated name lands as the session name with ai provenance, built from chat content', async () => {
   await withIsolatedStores(async (devinDbPath) => {
+    const appSession = bindAppSession('dev-sess-1');
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-1', title: 'Разбор очереди доставки сообщений в деталях реализации' },
     ]);
@@ -164,7 +181,7 @@ test('generated name lands as the session name with ai provenance, built from ch
     assert.equal(await synchronizer.synchronize(), 1);
     await synchronizer.drainTitleJobs();
 
-    const session = sessionsDb.getSessionById('dev-sess-1');
+    const session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.custom_name, 'Очередь доставки — ретраи');
     assert.equal(session?.title_source, 'ai');
     // The model saw both the CLI draft and the chat's own words.
@@ -354,6 +371,7 @@ test('a generated name echoing the first prompt is rejected, keeping the row ope
 
 test('once a generated name landed, the chat is never renamed again', async () => {
   await withIsolatedStores(async (devinDbPath) => {
+    const appSession = bindAppSession('dev-sess-5');
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-5', title: 'Первое название' },
     ]);
@@ -362,8 +380,8 @@ test('once a generated name landed, the chat is never renamed again', async () =
     const { synchronizer, calls } = testSynchronizer(async () => 'Первое название');
     await synchronizer.synchronize();
     await synchronizer.drainTitleJobs();
-    assert.equal(sessionsDb.getSessionById('dev-sess-5')?.custom_name, 'Первое название');
-    assert.equal(sessionsDb.getSessionById('dev-sess-5')?.title_source, 'ai');
+    assert.equal(sessionsDb.getSessionById(appSession)?.custom_name, 'Первое название');
+    assert.equal(sessionsDb.getSessionById(appSession)?.title_source, 'ai');
     assert.equal(calls.length, 1);
 
     // Devin keeps evolving its own title — the sidebar must stay put and the
@@ -374,7 +392,7 @@ test('once a generated name landed, the chat is never renamed again', async () =
     await synchronizer.synchronize();
     await synchronizer.drainTitleJobs();
 
-    const session = sessionsDb.getSessionById('dev-sess-5');
+    const session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.custom_name, 'Первое название');
     assert.equal(session?.title_source, 'ai');
     assert.equal(calls.length, 1);
@@ -383,6 +401,7 @@ test('once a generated name landed, the chat is never renamed again', async () =
 
 test('a failing model retries, then falls back to the raw CLI title', async () => {
   await withIsolatedStores(async (devinDbPath) => {
+    const appSession = bindAppSession('dev-sess-flaky');
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-flaky', title: 'Сырой заголовок от CLI' },
     ]);
@@ -400,11 +419,11 @@ test('a failing model retries, then falls back to the raw CLI title', async () =
     await synchronizer.drainTitleJobs();
     await synchronizer.synchronize();
     await synchronizer.drainTitleJobs();
-    assert.equal(sessionsDb.getSessionById('dev-sess-flaky')?.title_source, 'naive');
+    assert.equal(sessionsDb.getSessionById(appSession)?.title_source, 'naive');
 
     await synchronizer.synchronize();
     await synchronizer.drainTitleJobs();
-    const session = sessionsDb.getSessionById('dev-sess-flaky');
+    const session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.custom_name, 'Сырой заголовок от CLI');
     assert.equal(session?.title_source, 'ai');
     assert.equal(calls.length, 2);
@@ -414,6 +433,7 @@ test('a failing model retries, then falls back to the raw CLI title', async () =
 
 test('a recovered model beats the fallback on the next pass', async () => {
   await withIsolatedStores(async (devinDbPath) => {
+    const appSession = bindAppSession('dev-sess-recover');
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-recover', title: 'Сырой заголовок от CLI' },
     ]);
@@ -430,24 +450,25 @@ test('a recovered model beats the fallback on the next pass', async () => {
 
     await synchronizer.synchronize();
     await synchronizer.drainTitleJobs();
-    assert.equal(sessionsDb.getSessionById('dev-sess-recover')?.title_source, 'naive');
+    assert.equal(sessionsDb.getSessionById(appSession)?.title_source, 'naive');
 
     await synchronizer.synchronize();
     await synchronizer.drainTitleJobs();
-    assert.equal(sessionsDb.getSessionById('dev-sess-recover')?.custom_name, 'Короткое имя от модели');
-    assert.equal(sessionsDb.getSessionById('dev-sess-recover')?.title_source, 'ai');
+    assert.equal(sessionsDb.getSessionById(appSession)?.custom_name, 'Короткое имя от модели');
+    assert.equal(sessionsDb.getSessionById(appSession)?.title_source, 'ai');
   });
 });
 
 test('a session hidden upstream gets archived out of the sidebar', async () => {
   await withIsolatedStores(async (devinDbPath) => {
+    const appSession = bindAppSession('dev-sess-hidden');
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-hidden', title: 'Видимый чат' },
     ]);
 
     const synchronizer = new DevinSessionSynchronizer(async () => 'Имя');
     await synchronizer.synchronize();
-    let session = sessionsDb.getSessionById('dev-sess-hidden');
+    let session = sessionsDb.getSessionById(appSession);
     assert.ok(session);
     assert.equal(session?.isArchived, 0);
 
@@ -458,13 +479,14 @@ test('a session hidden upstream gets archived out of the sidebar', async () => {
     ]);
     await synchronizer.synchronize();
 
-    session = sessionsDb.getSessionById('dev-sess-hidden');
+    session = sessionsDb.getSessionById(appSession);
     assert.equal(session?.isArchived, 1);
   });
 });
 
 test('one-shot `devin -p` helper sessions in the model cwd are never indexed', async () => {
   await withIsolatedStores(async (devinDbPath) => {
+    const appSession = bindAppSession('dev-sess-real');
     writeDevinDb(devinDbPath, [
       { id: 'dev-sess-helper', working_directory: DEVIN_MODEL_CWD, title: 'Ответь только названием' },
       { id: 'dev-sess-real', title: 'Настоящий чат' },
@@ -475,6 +497,46 @@ test('one-shot `devin -p` helper sessions in the model cwd are never indexed', a
     await synchronizer.drainTitleJobs();
 
     assert.equal(sessionsDb.getSessionById('dev-sess-helper'), null);
-    assert.ok(sessionsDb.getSessionById('dev-sess-real'));
+    assert.ok(sessionsDb.getSessionById(appSession));
+  });
+});
+
+test('a session without an app row is a machine run — indexed straight into the archive, no name job', async () => {
+  await withIsolatedStores(async (devinDbPath) => {
+    // Проверочные прогоны и разовые вызовы не оставляют строки приложения:
+    // в обычный список они попадать не должны, но в архиве видны.
+    writeDevinDb(devinDbPath, [
+      { id: 'dev-sess-probe', title: 'Ответь ровно одним словом: ok' },
+    ]);
+    seedTwoTurns(devinDbPath, 'dev-sess-probe', 'Ответь ровно одним словом: ok');
+
+    const { synchronizer, calls } = testSynchronizer(async () => 'Имя');
+    assert.equal(await synchronizer.synchronize(), 1);
+    await synchronizer.drainTitleJobs();
+
+    const session = sessionsDb.getSessionById('dev-sess-probe');
+    assert.ok(session);
+    assert.equal(session?.isArchived, 1);
+    assert.equal(session?.custom_name, 'Ответь ровно одним словом: ok');
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('an app-bound session stays visible and gets its name job', async () => {
+  await withIsolatedStores(async (devinDbPath) => {
+    const appSession = bindAppSession('dev-sess-app');
+    writeDevinDb(devinDbPath, [
+      { id: 'dev-sess-app', title: 'Ответь ровно одним словом: ok' },
+    ]);
+    seedTwoTurns(devinDbPath, 'dev-sess-app', 'Ответь ровно одним словом: ok');
+
+    const { synchronizer, calls } = testSynchronizer(async () => 'Проверка связи');
+    await synchronizer.synchronize();
+    await synchronizer.drainTitleJobs();
+
+    const session = sessionsDb.getSessionById(appSession);
+    assert.equal(session?.isArchived, 0);
+    assert.equal(session?.custom_name, 'Проверка связи');
+    assert.equal(calls.length, 1);
   });
 });
