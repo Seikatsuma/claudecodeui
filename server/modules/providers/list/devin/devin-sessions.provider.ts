@@ -2,6 +2,7 @@ import fsSync from 'node:fs';
 
 import Database from 'better-sqlite3';
 
+import { parseFilesInputTag, parseImagesInputTag } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
@@ -83,6 +84,60 @@ function readToolName(update: DevinAcpUpdate): string {
   return readOptionalString(meta?.['cognition.ai/inferenceToolName'])
     ?? readOptionalString(update.title)
     ?? 'Tool';
+}
+
+/** Вложения одной реплики человека после снятия служебной разметки. */
+type DevinUserContent = {
+  text: string;
+  images: Array<{ path?: string; name?: string; data?: string }>;
+  files: Array<{ path?: string; name?: string }>;
+};
+
+/**
+ * Реплика человека в Devin-хранилище — строка или массив ACP-блоков.
+ *
+ * Строка: веб-композитор подвешивает вложения блоками `<images_input>` /
+ * `<files_input>` в конце текста — снимаем их обратно в поля сообщения, как у
+ * остальных провайдеров, чтобы тег не висел голым текстом в ленте.
+ *
+ * Массив: типизированный ввод может нести блоки-картинки `{type:'image',
+ * data, mimeType}` — они приходят base64 и уходят в ленту data-URL'ами, как у
+ * Claude. Блок `{type:'content', content:{…}}` разворачиваем на один уровень —
+ * та же форма, что у блоков результата действия.
+ */
+function readUserMessageContent(content: unknown): DevinUserContent {
+  if (typeof content === 'string') {
+    const filesParsed = parseFilesInputTag(content);
+    const imagesParsed = parseImagesInputTag(filesParsed.text);
+    return {
+      text: imagesParsed.text.trim(),
+      images: imagesParsed.attachments.map((attachment) => ({ ...attachment })),
+      files: filesParsed.attachments.map((attachment) => ({ ...attachment })),
+    };
+  }
+  if (!Array.isArray(content)) {
+    return { text: '', images: [], files: [] };
+  }
+  const text: string[] = [];
+  const images: DevinUserContent['images'] = [];
+  for (const block of content) {
+    const record = readObjectRecord(block);
+    if (!record) {
+      continue;
+    }
+    const inner = readObjectRecord(record.content) ?? record;
+    const blockType = readOptionalString(record.type) ?? readOptionalString(inner.type);
+    if (blockType === 'text' && typeof inner.text === 'string') {
+      text.push(inner.text);
+    } else if (blockType === 'image') {
+      const data = readOptionalString(inner.data);
+      if (data) {
+        const mimeType = readOptionalString(inner.mimeType) ?? 'image/png';
+        images.push({ data: `data:${mimeType};base64,${data}` });
+      }
+    }
+  }
+  return { text: text.join('\n').trim(), images, files: [] };
 }
 
 function readToolCallContent(update: DevinAcpUpdate): string {
@@ -313,8 +368,8 @@ export class DevinSessionsProvider implements IProviderSessions {
       const timestamp = normalizeProviderTimestamp(metadata?.created_at ?? row.created_at ?? null);
 
       if (role === 'user' && metadata?.is_user_input) {
-        const content = readOptionalString(message.content);
-        if (content?.trim()) {
+        const { text, images, files } = readUserMessageContent(message.content);
+        if (text || images.length > 0 || files.length > 0) {
           normalized.push(createNormalizedMessage({
             id: `devin_${row.node_id}`,
             sessionId,
@@ -322,7 +377,9 @@ export class DevinSessionsProvider implements IProviderSessions {
             provider: PROVIDER,
             kind: 'text',
             role: 'user',
-            content,
+            content: text,
+            images: images.length > 0 ? images : undefined,
+            files: files.length > 0 ? files : undefined,
           }));
         }
         continue;

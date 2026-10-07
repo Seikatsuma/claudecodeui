@@ -33,6 +33,8 @@ import { copyTextToClipboard } from '../../../../utils/clipboard';
 import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
 import { useTheme } from '../../../../contexts/ThemeContext';
 
+import { MarkdownImage } from './MarkdownImage';
+
 /**
  * Подсветка кода — только те языки, которые встречаются в этих чатах.
  *
@@ -270,6 +272,9 @@ function rehypeMarkTopLevel() {
 
 const markdownComponents = {
   code: CodeBlock,
+  // Картинки в ответах: защищённое хранилище чата — blob'ом с токеном
+  // (голый <img> его не несёт), внешние — обычным тегом.
+  img: MarkdownImage,
   // Fenced/indented code arrives as <pre><code>. Re-render the child CodeBlock
   // with `forceBlock` so it always gets the block treatment (react-markdown v9+
   // no longer passes an `inline` flag), and skip the outer <pre> so Tailwind
