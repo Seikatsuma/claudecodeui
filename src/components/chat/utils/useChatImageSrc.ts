@@ -40,6 +40,7 @@ export function useChatImageSrc(image: ChatImage, projectId?: string | null): { 
     const controller = new AbortController();
 
     const load = async () => {
+      setSrc(null);
       setFailed(false);
       for (const url of candidateUrls) {
         try {
@@ -48,6 +49,11 @@ export function useChatImageSrc(image: ChatImage, projectId?: string | null): { 
             continue;
           }
           const blob = await response.blob();
+          // Cleanup уже мог отработать, пока шёл await: тогда object URL
+          // создастся сиротой и не будет отозван.
+          if (controller.signal.aborted) {
+            return;
+          }
           objectUrl = URL.createObjectURL(blob);
           setSrc(objectUrl);
           return;

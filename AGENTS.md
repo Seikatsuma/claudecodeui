@@ -51,7 +51,12 @@ For every task that creates, modifies, refactors, or reviews backend code under 
 - Devin-история: `<images_input>`/`<files_input>` в реплике человека и
   блоки-картинки ACP снимаются в `message.images`/`files`
   (`readUserMessageContent`, devin-sessions.provider.ts) — раньше тег висел
-  голым текстом в ленте, а сами вложения пропадали.
+  голым текстом в ленте, а сами вложения пропадали. Покрыты обе формы ввода:
+  строка и массив ACP-блоков (`{type:'content',…}` разворачивается, теги в
+  text-блоках снимаются так же).
+- «Вернуться сюда» (devin-rewind.ts) подставляет в поле ввода текст без этих
+  блоков — вложения возврат не восстанавливает, только текст; сравнение цели
+  тоже идёт по тексту без тегов (лента шлёт уже чистый).
 
 ## Копирование ответа выделением (`chat/utils/copyParagraphBreaks.ts`, 25.09.26)
 

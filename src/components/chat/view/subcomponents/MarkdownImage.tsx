@@ -86,6 +86,7 @@ export function MarkdownImage({ node: _node, src, alt }: { node?: unknown; src?:
         src={trimmed}
         alt={label}
         loading="lazy"
+        referrerPolicy="no-referrer"
         className="my-2 block max-h-80 max-w-full rounded-xl border border-border/50 object-contain shadow-sm"
       />
     );

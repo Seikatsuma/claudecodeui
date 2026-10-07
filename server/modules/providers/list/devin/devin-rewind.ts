@@ -25,6 +25,7 @@ import Database from 'better-sqlite3';
 import { isSurvivorRunning, stopSurvivor } from '@/modules/providers/list/claude/survivor-runs.js';
 import { providerRuntimeService } from '@/modules/providers/services/provider-runtime.service.js';
 import { chatRunRegistry, clearChatQueue, listChatQueue } from '@/modules/websocket/index.js';
+import { parseFilesInputTag, parseImagesInputTag } from '@/shared/image-attachments.js';
 import {
   AppError,
   getDevinDatabasePath,
@@ -62,14 +63,44 @@ export type DevinRewindResult = {
   backupPath: string;
 };
 
-/** Текст реплики человека в узле Devin; `null` — служебный узел или ответ агента. */
+/**
+ * Текст реплики человека без служебных блоков `<images_input>`/`<files_input>`:
+ * этот текст уезжает в поле ввода, а вложенные файлы возврат не восстанавливает
+ * (как и у Claude — переписывается только текст). `null` — служебный узел или
+ * ответ агента.
+ */
+function cleanUserText(content: unknown): string | null {
+  if (typeof content === 'string') {
+    const text = parseImagesInputTag(parseFilesInputTag(content).text).text.trim();
+    return text || null;
+  }
+  // Типизированный ввод ACP — массив блоков; текст внутри может нести те же теги.
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const block of content) {
+      const record = readObjectRecord(block);
+      if (!record) continue;
+      const inner = readObjectRecord(record.content) ?? record;
+      const blockType = readOptionalString(record.type);
+      const text = blockType === 'content' || !blockType
+        ? readOptionalString(inner.text)
+        : blockType === 'text'
+          ? readOptionalString(inner.text)
+          : null;
+      if (text) parts.push(parseImagesInputTag(parseFilesInputTag(text).text).text);
+    }
+    const joined = parts.join('\n').trim();
+    return joined || null;
+  }
+  return null;
+}
+
 function devinUserText(chatMessageJson: string): string | null {
   const message = readJsonRecord(chatMessageJson);
   if (!message || readOptionalString(message.role) !== 'user') return null;
   const metadata = readObjectRecord(message.metadata);
   if (metadata?.is_user_input !== true) return null;
-  const content = readOptionalString(message.content);
-  return content && content.trim() ? content : null;
+  return cleanUserText(message.content);
 }
 
 /** Лента кладёт в номер сообщения номер узла (`devin_<nodeId>`). */
@@ -79,9 +110,16 @@ function nodeIdFromMessageId(messageId: string | null): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** Как у Claude-возврата: сравнение без служебной обёртки и лишних пробелов. */
+/**
+ * Как у Claude-возврата: сравнение без служебной обёртки и лишних пробелов.
+ * `<images_input>`/`<files_input>` снимаются — лента шлёт текст уже без них,
+ * а в базе они лежат внутри реплики.
+ */
 function comparable(text: string): string {
-  return text.replace(/<files>[\s\S]*?<\/files>/g, '').replace(/\s+/g, ' ').trim();
+  return (cleanUserText(text) ?? '')
+    .replace(/<files>[\s\S]*?<\/files>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function openDevinDbWritable(dbPath: string): InstanceType<typeof Database> {

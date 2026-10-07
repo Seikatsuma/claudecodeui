@@ -160,3 +160,35 @@ test('devin history: plain text user turn carries no images/files', async () => 
     assert.equal(user.files, undefined);
   });
 });
+
+test('devin history: {type:content} wrapper unwraps inner block', async () => {
+  await withDevinStore(async (devinDbPath) => {
+    const content = [
+      { type: 'content', content: { type: 'text', text: 'привет из обёртки' } },
+      { type: 'content', content: { type: 'image', data: 'QUJD', mimeType: 'image/png' } },
+    ];
+    writeConversation(devinDbPath, content);
+
+    const user = await fetchUserMessage(content);
+    assert.equal(user.content, 'привет из обёртки');
+    assert.deepEqual(user.images, [{ data: 'data:image/png;base64,QUJD' }]);
+  });
+});
+
+test('devin history: typed array text strips input tags into images/files', async () => {
+  await withDevinStore(async (devinDbPath) => {
+    const textWithTags = appendImagesInputTag(
+      appendFilesInputTag('что в файле и на снимке?', [
+        { path: '/home/claude/.cloudcli/assets/brief.pdf', name: 'brief.pdf' },
+      ]),
+      [{ path: '/home/claude/.cloudcli/assets/shot.png', name: 'shot.png' }],
+    );
+    const content = [{ type: 'text', text: textWithTags }];
+    writeConversation(devinDbPath, content);
+
+    const user = await fetchUserMessage(content);
+    assert.equal(user.content, 'что в файле и на снимке?');
+    assert.deepEqual(user.images, [{ path: '/home/claude/.cloudcli/assets/shot.png', name: 'shot.png' }]);
+    assert.deepEqual(user.files, [{ path: '/home/claude/.cloudcli/assets/brief.pdf', name: 'brief.pdf' }]);
+  });
+});

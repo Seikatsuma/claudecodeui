@@ -120,15 +120,26 @@ function readUserMessageContent(content: unknown): DevinUserContent {
   }
   const text: string[] = [];
   const images: DevinUserContent['images'] = [];
+  const files: DevinUserContent['files'] = [];
   for (const block of content) {
     const record = readObjectRecord(block);
     if (!record) {
       continue;
     }
     const inner = readObjectRecord(record.content) ?? record;
-    const blockType = readOptionalString(record.type) ?? readOptionalString(inner.type);
+    const outerType = readOptionalString(record.type);
+    // `{type:'content', content:{…}}` разворачиваем на уровень — та же форма,
+    // что у блоков результата действия; тип берём изнутри.
+    const blockType = outerType === 'content' || !outerType
+      ? readOptionalString(inner.type)
+      : outerType;
     if (blockType === 'text' && typeof inner.text === 'string') {
-      text.push(inner.text);
+      // Текст внутри типизированного ввода может нести те же блоки вложений.
+      const filesParsed = parseFilesInputTag(inner.text);
+      const imagesParsed = parseImagesInputTag(filesParsed.text);
+      text.push(imagesParsed.text);
+      images.push(...imagesParsed.attachments.map((attachment) => ({ ...attachment })));
+      files.push(...filesParsed.attachments.map((attachment) => ({ ...attachment })));
     } else if (blockType === 'image') {
       const data = readOptionalString(inner.data);
       if (data) {
@@ -137,7 +148,7 @@ function readUserMessageContent(content: unknown): DevinUserContent {
       }
     }
   }
-  return { text: text.join('\n').trim(), images, files: [] };
+  return { text: text.join('\n').trim(), images, files };
 }
 
 function readToolCallContent(update: DevinAcpUpdate): string {
