@@ -494,6 +494,20 @@ export const api = {
     usageLimits: () => authenticatedFetch('/api/user/usage-limits'),
     codexAccount: () => authenticatedFetch('/api/user/codex-account'),
     devinAccount: () => authenticatedFetch('/api/user/devin-account'),
+    devinSelectSlot: (slot) =>
+      authenticatedFetch('/api/user/devin-account/slot', {
+        method: 'POST',
+        body: JSON.stringify({ slot }),
+      }),
+    devinLoginStart: () =>
+      authenticatedFetch('/api/user/devin-account/login/start', { method: 'POST', body: JSON.stringify({}) }),
+    devinLoginCode: (code) =>
+      authenticatedFetch('/api/user/devin-account/login/code', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      }),
+    devinLoginCancel: () =>
+      authenticatedFetch('/api/user/devin-account/login/cancel', { method: 'POST', body: JSON.stringify({}) }),
     thoughtDigest: (texts) =>
       authenticatedFetch('/api/user/thought-digest', {
         method: 'POST',

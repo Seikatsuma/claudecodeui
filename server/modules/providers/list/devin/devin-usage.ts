@@ -21,8 +21,6 @@
  * Файл дочитывается инкрементально (новые row_id): у самого длинного чата
  * ~25 МБ JSON, перечитывать его на каждый опрос кнопки и живой прогон нельзя.
  */
-import os from 'node:os';
-import path from 'node:path';
 
 import spawn from 'cross-spawn';
 
@@ -31,6 +29,7 @@ import { readConfiguredDefaultModel } from '@/modules/providers/list/devin/devin
 import {
   readJsonRecord,
   readObjectRecord,
+  buildDevinChildEnv,
   readOptionalString,
   resolveDevinCliCommand,
 } from '@/shared/utils.js';
@@ -112,7 +111,7 @@ function readDevinContextWindowMap(): Map<string, number> {
     encoding: 'utf8',
     timeout: CATALOG_TIMEOUT_MS,
     maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}` },
+    env: buildDevinChildEnv(),
   });
   if (!result.error && result.status === 0 && result.stdout) {
     try {

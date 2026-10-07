@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
+import { getActiveDevinSlot, getDevinSlotEnv, type DevinSlot } from '@/shared/devin-slots.js';
 import { parseFrontMatter } from '@/shared/frontmatter.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import type { ServerScope } from '@/shared/types.js';
@@ -1164,12 +1165,14 @@ export function isDevinCliInstalled(): boolean {
  * minimal PATH: the child's PATH gains the well-known user bin dirs so tools
  * Devin itself shells out to (and Devin's own subprocess lookups) still work.
  */
-export function buildDevinChildEnv(): Record<string, string | undefined> {
+export function buildDevinChildEnv(slot: DevinSlot = getActiveDevinSlot()): Record<string, string | undefined> {
   const home = os.homedir();
   const extraPath = [path.join(home, '.local', 'bin'), path.join(home, 'bin')];
   const currentPath = process.env.PATH || '';
   const augmentedPath = [...extraPath, currentPath].join(path.delimiter);
-  return { ...process.env, PATH: augmentedPath };
+  // Слот Devin: второй аккаунт = другой XDG_DATA_HOME (см. devin-slots.ts).
+  // Без слота берётся активный; явный слот нужен проверке входа конкретного аккаунта.
+  return { ...process.env, PATH: augmentedPath, ...getDevinSlotEnv(slot) };
 }
 
 // ---------------------------

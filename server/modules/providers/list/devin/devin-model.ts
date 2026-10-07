@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { resolveDevinCliCommand } from '@/shared/utils.js';
+import { buildDevinChildEnv, resolveDevinCliCommand } from '@/shared/utils.js';
 
 import { hideDevinSessionsInDirectory } from './devin-chain.js';
 
@@ -36,6 +36,7 @@ export async function askDevinOnce(prompt: string, timeoutMs = MODEL_TIMEOUT_MS)
       '-p', prompt,
     ], {
       cwd: DEVIN_MODEL_CWD,
+      env: buildDevinChildEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

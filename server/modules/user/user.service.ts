@@ -3,7 +3,15 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { AppError, getClaudeConfigDir, getClaudeJsonPath, isCodexAllowedForWebUser, isDevinAllowedForWebUser, isPlatformOwnerWebUser } from '@/shared/utils.js';
-import { getLiveLimits, readCodexAccountLimits, readDevinAccount } from '@/modules/providers/index.js';
+import {
+  cancelDevinLogin,
+  getLiveLimits,
+  readCodexAccountLimits,
+  readDevinAccount,
+  selectDevinSlot,
+  startDevinLogin,
+  submitDevinLoginCode,
+} from '@/modules/providers/index.js';
 import { getWebUserClaudeConfigDir } from '@/shared/web-user-paths.js';
 import { resolveWebUserRuntimeContext } from '@/shared/web-user-runtime.js';
 import { getOfficialUsage } from '@/modules/user/official-usage.js';
@@ -49,6 +57,13 @@ type UserDependencies = {
 };
 
 /** Creates user-profile workflows with explicit repository and Git adapters. */
+/** Devin на машине один и тратит квоту хозяина: гостю общего экземпляра — 403. */
+function assertDevinOwner(userId: number): void {
+  if (!isDevinAllowedForWebUser(userId)) {
+    throw new AppError('Devin доступен только хозяину площадки.', { code: 'FORBIDDEN', statusCode: 403 });
+  }
+}
+
 export function createUserService(dependencies: UserDependencies) {
   return {
     async getGitConfig(userId: number) {
@@ -260,9 +275,48 @@ export function createUserService(dependencies: UserDependencies) {
      */
     async getDevinAccount(userId: number) {
       if (!isDevinAllowedForWebUser(userId)) {
-        return { success: true, available: false, name: null, models: 'SWE-2', fetchedAtMs: null };
+        return { success: true, available: false, name: null, models: 'SWE-2', fetchedAtMs: null, slot: 1, accounts: [], canAddSecond: false };
       }
       return { success: true, ...(await readDevinAccount()) };
+    },
+
+    /**
+     * Аккаунты Devin хозяина: выбор активного и вход во второй (07.10.26).
+     * Гостю общего экземпляра — 403: Devin на машине один, его квота — хозяина.
+     */
+    async selectDevinAccountSlot(userId: number, slot: unknown) {
+      assertDevinOwner(userId);
+      if (slot !== 1 && slot !== 2) {
+        throw new AppError('Слот должен быть 1 или 2.', { code: 'BAD_REQUEST', statusCode: 400 });
+      }
+      try {
+        return { success: true, ...(await selectDevinSlot(slot)) };
+      } catch (error) {
+        throw new AppError(error instanceof Error ? error.message : 'Не удалось переключить аккаунт Devin.', { code: 'BAD_REQUEST', statusCode: 400 });
+      }
+    },
+
+    async startDevinAccountLogin(userId: number) {
+      assertDevinOwner(userId);
+      try {
+        return { success: true, ...(await startDevinLogin()) };
+      } catch (error) {
+        throw new AppError(error instanceof Error ? error.message : 'Не удалось начать вход в Devin.', { code: 'DEVIN_LOGIN_FAILED', statusCode: 502 });
+      }
+    },
+
+    async submitDevinAccountLoginCode(userId: number, code: unknown) {
+      assertDevinOwner(userId);
+      if (typeof code !== 'string') {
+        throw new AppError('Нужен код со страницы входа.', { code: 'BAD_REQUEST', statusCode: 400 });
+      }
+      return { success: true, ...(await submitDevinLoginCode(code)) };
+    },
+
+    cancelDevinAccountLogin(userId: number) {
+      assertDevinOwner(userId);
+      cancelDevinLogin();
+      return { success: true };
     },
 
     async getOwnerAccountEmail(userId: number) {

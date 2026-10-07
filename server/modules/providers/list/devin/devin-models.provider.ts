@@ -14,6 +14,7 @@ import type {
 } from '@/shared/types.js';
 import {
   readObjectRecord,
+  buildDevinChildEnv,
   readOptionalString,
   resolveDevinCliCommand,
   isAllowedDevinModel,
@@ -81,7 +82,7 @@ function readDevinModelsFromCli(): ProviderModelOption[] {
     encoding: 'utf8',
     timeout: CATALOG_TIMEOUT_MS,
     maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}` },
+    env: buildDevinChildEnv(),
   });
   if (result.error || result.status !== 0 || !result.stdout) {
     return [];

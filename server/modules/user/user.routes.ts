@@ -130,6 +130,39 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
     }
   });
 
+  // Devin: выбрать активный аккаунт и войти во второй (кнопка «Добавить аккаунт»).
+  router.post('/devin-account/slot', async (req, res, next) => {
+    try {
+      res.json(await service.selectDevinAccountSlot(readUserId(req), (req.body as { slot?: unknown } | undefined)?.slot));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/devin-account/login/start', async (req, res, next) => {
+    try {
+      res.json(await service.startDevinAccountLogin(readUserId(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/devin-account/login/code', async (req, res, next) => {
+    try {
+      res.json(await service.submitDevinAccountLoginCode(readUserId(req), (req.body as { code?: unknown } | undefined)?.code));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/devin-account/login/cancel', async (req, res, next) => {
+    try {
+      res.json(service.cancelDevinAccountLogin(readUserId(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/owner-account-info', async (req, res, next) => {
     try {
       res.json(await service.getOwnerAccountEmail(readUserId(req)));

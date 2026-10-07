@@ -165,6 +165,7 @@ export default tseslint.config(
             "server/shared/request-context.ts",
             "server/shared/web-user-paths.ts",
             "server/shared/claude-login.ts",
+            "server/shared/devin-slots.ts",
             "server/shared/web-user-runtime.ts",
             "server/shared/session-scope.ts",
           ], // classify shared utility files so modules can depend on them explicitly

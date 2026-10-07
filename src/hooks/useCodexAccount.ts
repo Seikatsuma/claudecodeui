@@ -93,13 +93,28 @@ export function useCodexAccount(): CodexAccount | null {
   return account;
 }
 
+export type DevinAccountEntry = {
+  slot: 1 | 2;
+  available: boolean;
+  name: string | null;
+};
+
 export type DevinAccount = {
+  /** Верхний уровень — АКТИВНЫЙ аккаунт Devin (слот `slot`). */
   available: boolean;
   name: string | null;
   /** Единственное семейство моделей, разрешённое на этом аккаунте. */
   models: string;
   fetchedAtMs: number | null;
+  slot: 1 | 2;
+  /** Оба слота Devin: у кого есть вход — те попадают в меню. */
+  accounts: DevinAccountEntry[];
+  /** Второго аккаунта ещё нет — в меню показать «Добавить аккаунт Devin». */
+  canAddSecond: boolean;
 };
+
+/** Событие «аккаунты Devin изменились» (вошли во второй, переключили): хук перечитает ответ сразу. */
+export const DEVIN_ACCOUNT_CHANGED_EVENT = 'ccui:devin-account-changed';
 
 /**
  * Подписка Devin хозяина (GET /api/user/devin-account): имя входа и признак
@@ -123,7 +138,12 @@ export function useDevinAccount(): DevinAccount | null {
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    const onChanged = () => void load();
+    window.addEventListener(DEVIN_ACCOUNT_CHANGED_EVENT, onChanged);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener(DEVIN_ACCOUNT_CHANGED_EVENT, onChanged);
+    };
   }, [load]);
 
   return account;
