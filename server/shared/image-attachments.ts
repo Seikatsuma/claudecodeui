@@ -1,6 +1,10 @@
+import { execFile } from 'node:child_process';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Shared chat-attachment plumbing for every provider runtime.
@@ -451,4 +455,66 @@ export function buildCodexInputItems(prompt: string, images: unknown, cwd?: stri
     });
   }
   return items;
+}
+
+// ---------------- HEIC → JPEG ----------------------------------------------
+
+const HEIC_LIKE_EXTENSIONS = new Set(['.heic', '.heif']);
+
+/**
+ * True for Apple-формат снимков, которые телефон Егора шлёт в чат. Браузер
+ * снаружи Safari их не рисует, а провайдеры как картинку их вообще не принимают
+ * (CLAUDE_IMAGE_MEDIA_TYPES), поэтому они едут в <files_input> и в ленте висят
+ * карточкой «File attachment» вместо снимка.
+ */
+export function isHeicLikePath(filePath: string | undefined | null): boolean {
+  if (!filePath) {
+    return false;
+  }
+  return HEIC_LIKE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+const HEIC_CONVERT_SCRIPT = [
+  'import pillow_heif, sys',
+  'pillow_heif.register_heif_opener()',
+  'from PIL import Image',
+  'im = Image.open(sys.argv[1])',
+  'im.convert("RGB").save(sys.argv[2], "JPEG", quality=90)',
+].join('\n');
+
+/**
+ * Рядом с .heic кладёт .jpg того же имени и возвращает его путь; повторный
+ * вызов отдаёт уже готовый файл без работы. Неудача (битый файл, нет
+ * pillow_heif, таймаут) — null, вызывающий оставляет вложение как было.
+ *
+ * Конвертер — python3 + pillow_heif: sharp на площадке собран без libhevc и
+ * читать HEIC не умеет (проверено 08.10.26 на реальном снимке). Пишем в
+ * временное имя и переименовываем: параллельный запрос не должен увидеть
+ * недописанный jpeg.
+ */
+export async function ensureJpegForHeic(absPath: string): Promise<string | null> {
+  if (!isHeicLikePath(absPath)) {
+    return null;
+  }
+  const jpegPath = absPath.replace(/\.(heic|heif)$/i, '.jpg');
+  try {
+    await fs.access(jpegPath);
+    return jpegPath;
+  } catch {
+    // нет готового — конвертируем
+  }
+
+  const tmpPath = `${jpegPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await execFileAsync('python3', ['-c', HEIC_CONVERT_SCRIPT, absPath, tmpPath], { timeout: 30_000 });
+    await fs.rename(tmpPath, jpegPath);
+    return jpegPath;
+  } catch {
+    try {
+      await fs.unlink(tmpPath);
+    } catch {
+      // временного файла может и не быть
+    }
+    return null;
+  }
 }

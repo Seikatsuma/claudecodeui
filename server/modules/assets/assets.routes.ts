@@ -4,6 +4,7 @@ import multer from 'multer';
 import {
   buildStoredAttachmentRecords,
   buildStoredImageRecords,
+  convertHeicAttachmentRecords,
   ensureImageAssetsDir,
   isAllowedImageMimeType,
   openStoredAttachmentAsset,
@@ -91,7 +92,7 @@ const attachmentUpload = multer({
  * returns their absolute paths for use in provider prompts and chat history.
  */
 router.post('/images', (req, res) => {
-  upload.array('images', 5)(req, res, (err: unknown) => {
+  upload.array('images', 5)(req, res, async (err: unknown) => {
     if (err) {
       return res.status(400).json({ error: humanizeUploadError(err) });
     }
@@ -101,7 +102,8 @@ router.post('/images', (req, res) => {
       return res.status(400).json({ error: 'No image files provided' });
     }
 
-    res.json({ images: buildStoredImageRecords(files) });
+    const records = await convertHeicAttachmentRecords(buildStoredImageRecords(files));
+    res.json({ images: records });
   });
 });
 
@@ -112,7 +114,7 @@ router.post('/images', (req, res) => {
  * ASSETS_MAX_ATTACHMENT_BYTES (see the limits block above).
  */
 router.post('/files', (req, res) => {
-  attachmentUpload.array('files', 10)(req, res, (err: unknown) => {
+  attachmentUpload.array('files', 10)(req, res, async (err: unknown) => {
     if (err) {
       return res.status(400).json({ error: humanizeUploadError(err) });
     }
@@ -122,7 +124,8 @@ router.post('/files', (req, res) => {
       return res.status(400).json({ error: 'No files provided' });
     }
 
-    res.json({ attachments: buildStoredAttachmentRecords(files) });
+    const records = await convertHeicAttachmentRecords(buildStoredAttachmentRecords(files));
+    res.json({ attachments: records });
   });
 });
 

@@ -13,6 +13,7 @@ import type {
   ServerScope,
 } from '@/shared/types.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
+import { ensureJpegForHeic } from '@/shared/image-attachments.js';
 import {
   AppError,
   isCodexAllowedForWebUser,
@@ -40,6 +41,43 @@ const assertSessionProviderAllowed = (provider: string): void => {
     });
   }
 };
+
+/**
+ * Снимки с телефона лежат в истории вложениями .heic: в ленте они карточкой
+ * «File attachment», а картинкой быть не могут — формата нет в списках
+ * провайдеров, поэтому на отправке он уезжает в <files_input>. Здесь, в одной
+ * точке на всех провайдеров, heic-файлы конвертируются в jpeg и перекладываются
+ * в images: лента рисует снимок, как когда он был jpg. Конвертер кладёт jpeg
+ * рядом с исходником и помнит его — повторная отдача истории работу не
+ * повторяет; неудача оставляет файл карточкой, как раньше.
+ */
+async function upgradeHeicAttachmentsToImages(messages: NormalizedMessage[]): Promise<void> {
+  for (const message of messages) {
+    const files = Array.isArray(message.files) ? message.files as Array<Record<string, unknown>> : null;
+    if (!files || files.length === 0) {
+      continue;
+    }
+
+    const remaining: Array<Record<string, unknown>> = [];
+    const converted: Array<Record<string, unknown>> = [];
+    for (const file of files) {
+      const filePath = typeof file?.path === 'string' ? file.path : '';
+      const jpegPath = filePath ? await ensureJpegForHeic(filePath) : null;
+      if (jpegPath) {
+        converted.push({ ...file, path: jpegPath, mimeType: 'image/jpeg' });
+      } else {
+        remaining.push(file);
+      }
+    }
+    if (converted.length === 0) {
+      continue;
+    }
+
+    const images = Array.isArray(message.images) ? message.images as Array<Record<string, unknown>> : [];
+    message.images = [...images, ...converted];
+    message.files = remaining;
+  }
+}
 
 type CreateAppSessionResult = {
   sessionId: string;
@@ -407,6 +445,8 @@ export const sessionsService = {
       projectPath: session.project_path ?? '',
       providerSessionId: session.provider_session_id,
     });
+
+    await upgradeHeicAttachmentsToImages(result.messages);
 
     return {
       ...result,

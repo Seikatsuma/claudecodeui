@@ -3,13 +3,16 @@ import path from 'node:path';
 
 import mime from 'mime-types';
 
-import { toPosixPath } from '@/shared/image-attachments.js';
+import { ensureJpegForHeic, isHeicLikePath, toPosixPath } from '@/shared/image-attachments.js';
 import { getRequestRuntimeContext } from '@/shared/request-context.js';
 import { getImageAssetsDirForUser, getReadableImageAssetsDirs } from '@/shared/web-user-runtime.js';
 
 /**
  * Image mime types accepted for chat attachment uploads. SVG is allowed for
  * storage/preview even though some providers (Claude API) skip it at send time.
+ * HEIC/HEIF принимаем тоже: телефон снимает экран в этом формате — на записи
+ * он сразу конвертируется в jpeg (convertHeicAttachmentRecords), иначе снимок
+ * уезжает в «файл» и в ленте висит именем файла вместо картинки.
  */
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -17,6 +20,8 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/gif',
   'image/webp',
   'image/svg+xml',
+  'image/heic',
+  'image/heif',
 ]);
 
 // Used only by this service and the assets routes via the barrel file.
@@ -85,6 +90,36 @@ export function buildStoredImageRecords(files: UploadedImageFile[]): StoredImage
  */
 export function buildStoredAttachmentRecords(files: UploadedAttachmentFile[]): StoredImageAsset[] {
   return buildStoredImageRecords(files);
+}
+
+/**
+ * HEIC-записи заменяет на свежесконвертированный jpeg-вариант: телефон шлёт
+ * снимки экрана в heic, без конвертации они едут файлами — в ленте карточка
+ * «File attachment» вместо снимка, а провайдер не может посмотреть картинку
+ * (HEIC не входит в принимаемые форматы изображений ни у кого). Конвертация
+ * не удалась — запись остаётся исходной, вложение просто показывается как
+ * файл, как раньше.
+ *
+ * Вызывают оба приёмных маршрута (/images и /files) — телефон шлёт heic
+ * через общий приёмник.
+ */
+export async function convertHeicAttachmentRecords(records: StoredImageAsset[]): Promise<StoredImageAsset[]> {
+  return Promise.all(records.map(async (record) => {
+    if (!isHeicLikePath(record.path)) {
+      return record;
+    }
+    const jpegPath = await ensureJpegForHeic(record.path);
+    if (!jpegPath) {
+      return record;
+    }
+    const stat = await fs.stat(jpegPath).catch(() => null);
+    return {
+      ...record,
+      path: toPosixPath(jpegPath),
+      mimeType: 'image/jpeg',
+      size: stat?.size ?? record.size,
+    };
+  }));
 }
 
 /**
