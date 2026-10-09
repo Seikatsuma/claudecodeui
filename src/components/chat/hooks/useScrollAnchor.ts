@@ -171,15 +171,20 @@ export function useScrollAnchor({
     const wrapper = wrapperOf(container);
     const height = wrapper ? wrapper.offsetHeight : container.scrollHeight;
 
-    // Изменилось само окно ленты (над ним догрузилась полоса шапки, открылась
-    // клавиатура), а человек стоял в самом низу — остаёмся в самом низу. Опора
-    // держит верх окна, поэтому без этого текст на кадр-другой уезжал вниз,
-    // пока догон в низ не вернёт (замер 27.09.26: +28 px на 30 мс при открытии).
+    // Человек стоял в самом низу — остаёмся в самом низу при ЛЮБОЙ смене
+    // высоты ленты или окна. Изменилось окно (над ним догрузилась полоса
+    // шапки, открылась клавиатура) — опора держит верх и текст на кадр уезжал
+    // вниз, пока догон не вернёт (замер 27.09.26: +28 px на 30 мс). Изменилась
+    // высота НИЖЕ опоры — строки у низа дорисовались выше оценки, и лента
+    // оставалась «на десяток предложений выше конца», пока человек не долистает
+    // (Егор, 10.10.26: «открываю чат — отбрасывает чуть выше»). Рост выше
+    // опоры опорой и возвращался — результат тот же, что у прыжка в низ.
     const clientHeight = container.clientHeight;
     const paneResized = lastClientHeightRef.current >= 0 && clientHeight !== lastClientHeightRef.current;
     lastClientHeightRef.current = clientHeight;
+    const heightChanged = lastHeightRef.current >= 0 && height !== lastHeightRef.current;
     if (
-      paneResized
+      (paneResized || heightChanged)
       && wasAtBottomRef.current
       && enabledRef.current
       && !suspendedRef.current

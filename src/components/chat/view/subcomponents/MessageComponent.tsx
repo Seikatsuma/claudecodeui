@@ -14,6 +14,8 @@ import type { Project } from '../../../../types/app';
 import { ToolRenderer, ToolErrorDisplay, shouldHideToolResult } from '../../tools';
 import { Reasoning, ReasoningTrigger, ReasoningContent, Shimmer } from '../../../../shared/view/ui';
 import { isEmptyThinking } from '../../utils/toolGrouping';
+import { getIntrinsicMessageKey } from '../../utils/messageKeys';
+import { peekRowHeight } from '../../utils/rowHeightCache';
 
 import ChatMessageImages from './ChatMessageImages';
 import ChatMessageFiles from './ChatMessageFiles';
@@ -145,10 +147,18 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
     return null;
   }
 
+  // Высота строки с прошлого открытия — оценкой до первой разметки, чтобы
+  // лента не пересчитывалась на глазах (rowHeightCache.ts). `data-mid` — тот
+  // же ключ, по нему записыватель высот находит строку.
+  const mid = getIntrinsicMessageKey(message);
+  const rememberedHeight = peekRowHeight(mid);
+
   return (
     <div
       ref={messageRef}
+      data-mid={mid ?? undefined}
       data-message-timestamp={message.timestamp || undefined}
+      style={rememberedHeight ? { containIntrinsicSize: `auto ${rememberedHeight}px` } : undefined}
       // Read by ChatRequestBar to label the answer you are currently looking at
       // with the request that produced it. Carried on the node itself (rather
       // than plumbed through props) so the bar can find the right one purely by

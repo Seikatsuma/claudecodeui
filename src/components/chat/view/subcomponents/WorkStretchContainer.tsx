@@ -14,6 +14,7 @@ import {
   type WorkStretchItem,
 } from '../../utils/workStretch';
 import { Markdown } from './Markdown';
+import { peekRowHeight } from '../../utils/rowHeightCache';
 
 import MessageComponent from './MessageComponent';
 import ToolGroupContainer from './ToolGroupContainer';
@@ -194,8 +195,19 @@ export default function WorkStretchContainer({
   const hasThoughts = stretch.thoughts.length > 0;
   const currentStep = lastStepDescription(stretch.messages);
 
+  // Высота свёрнутой строки с прошлого открытия — оценкой до первой разметки
+  // (rowHeightCache.ts). Ключ снимается при раскрытии и на живом хвосте: их
+  // высота плавает, и записывать её как «свёрнутую» нельзя.
+  const stretchKey = !isExpanded && !isLive ? `stretch-${getMessageKey(stretch.messages[0])}` : null;
+  const rememberedHeight = isExpanded ? undefined : peekRowHeight(stretchKey);
+
   return (
-    <div className="chat-message tool px-3 sm:px-0" data-message-timestamp={stretch.timestamp || undefined}>
+    <div
+      className="chat-message tool px-3 sm:px-0"
+      data-message-timestamp={stretch.timestamp || undefined}
+      data-mid={stretchKey ?? undefined}
+      style={rememberedHeight ? { containIntrinsicSize: `auto ${rememberedHeight}px` } : undefined}
+    >
       <button
         type="button"
         className="group flex w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"

@@ -15,6 +15,7 @@ import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messag
 import { normalizedToChatMessages } from './useChatMessages';
 import { useScrollAnchor } from './useScrollAnchor';
 import { useRowPrewarm } from './useRowPrewarm';
+import { useRowHeightRecorder } from './useRowHeightRecorder';
 import { knownRunStartedAt } from '../utils/liveRunCursor';
 
 /**
@@ -532,6 +533,10 @@ export function useChatSessionState({
 
   // Строки над экраном размечаются в паузах, а не во время листания.
   useRowPrewarm({ scrollContainerRef, enabled: isActive, contentKey: chatMessages.length });
+
+  // Реальная высота каждой размеченной строки — в кэш: при следующем открытии
+  // чата строки встают сразу точной высотой, лента не пересчитывается на глазах.
+  useRowHeightRecorder({ scrollContainerRef, enabled: isActive });
 
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
