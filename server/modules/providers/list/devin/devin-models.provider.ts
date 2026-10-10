@@ -157,7 +157,14 @@ export class DevinModelsProvider implements IProviderModels {
     const intersected = slotOptions
       ? allowed.filter((option) => slotOptions.has(option.value))
       : allowed;
-    const options = intersected.length > 0 ? intersected : (slotOptions ? FALLBACK_MODELS.filter((o) => slotOptions.has(o.value)) : FALLBACK_MODELS);
+    // Пересечение пусто: каталог вообще не знает реальных моделей слота —
+    // показываем сам список аккаунта (он истина), а не FALLBACK с моделями,
+    // которых у слота нет и каждый ход кончался бы уведомлением о замене.
+    const options = intersected.length > 0
+      ? intersected
+      : slotOptions
+        ? [...slotOptions].filter(isAllowedDevinModel).map((value) => ({ value, label: value }))
+        : FALLBACK_MODELS;
     const finalOptions = options.length > 0 ? options : FALLBACK_MODELS;
     const configuredDefault = readConfiguredDefaultModel();
     const defaultModel = configuredDefault && finalOptions.some((option) => option.value === configuredDefault)

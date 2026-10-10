@@ -867,11 +867,26 @@ async function queryDevin(command, options = {}, ws, context) {
       if (providerSessionId) {
         run.muted = true;
         try {
-          const loadResult = await connection.call('session/load', {
-            sessionId: providerSessionId,
-            cwd: workingDirectory,
-            mcpServers: [],
-          }, HANDSHAKE_TIMEOUT_MS);
+          // session_locked + retryable (10.10.26): соседний ACP-процесс держал
+          // беседу и умер — Devin сам помечает повтор возможным. Одна пауза и
+          // вторая попытка закрывают зомби-лок без падения хода у человека.
+          let loadResult;
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              loadResult = await connection.call('session/load', {
+                sessionId: providerSessionId,
+                cwd: workingDirectory,
+                mcpServers: [],
+              }, HANDSHAKE_TIMEOUT_MS);
+              break;
+            } catch (loadError) {
+              const retryable = loadError?.data?.['cognition.ai/retryable'] === true
+                && loadError?.data?.['cognition.ai/errorKind'] === 'session_locked';
+              if (!retryable || attempt >= 1) throw loadError;
+              console.warn(`[Devin] беседа ${providerSessionId} под замком — повтор session/load через 3 с`);
+              await new Promise((r) => setTimeout(r, 3000));
+            }
+          }
           loaded = true;
           noteConfigOptions(run, loadResult?.configOptions);
         } catch (error) {
@@ -934,18 +949,20 @@ async function queryDevin(command, options = {}, ws, context) {
         // with Invalid params on every turn and silently run the old model —
         // so it's skipped and named honestly, once per run.
         const knownUnavailable = run.modelOptions instanceof Set && !run.modelOptions.has(resolvedModel);
+        const notifyDowngrade = () => {
+          if (run.modelDowngradeNotified) return;
+          run.modelDowngradeNotified = true;
+          const effective = run.modelCurrent || DEVIN_DEFAULT_MODEL;
+          console.warn(`[Devin] model "${resolvedModel}" is not in this account's options — running ${effective}`);
+          sendMessage(ws, createNormalizedMessage({
+            provider: 'devin',
+            sessionId: sessionId || run.devinSessionId || null,
+            kind: 'error',
+            content: `Модель «${resolvedModel}» недоступна на активном аккаунте Devin — ход идёт на ${effective}.`,
+          }));
+        };
         if (knownUnavailable || run.modelSetFailed.has(resolvedModel)) {
-          if (!run.modelDowngradeNotified) {
-            run.modelDowngradeNotified = true;
-            const effective = run.modelCurrent || DEVIN_DEFAULT_MODEL;
-            console.warn(`[Devin] model "${resolvedModel}" is not in this account's options — running ${effective}`);
-            sendMessage(ws, createNormalizedMessage({
-              provider: 'devin',
-              sessionId: sessionId || run.devinSessionId || null,
-              kind: 'error',
-              content: `Модель «${resolvedModel}» недоступна на активном аккаунте Devin — ход идёт на ${effective}.`,
-            }));
-          }
+          notifyDowngrade();
         } else {
           try {
             await connection.call('session/set_config_option', {
@@ -954,8 +971,11 @@ async function queryDevin(command, options = {}, ws, context) {
               value: resolvedModel,
             }, HANDSHAKE_TIMEOUT_MS);
           } catch (error) {
+            // «Слепой» путь (configOptions не пришли): отказ — та же тихая
+            // подмена, что чинит вся эта правка; говорим честно один раз.
             run.modelSetFailed.add(resolvedModel);
             console.warn('[Devin] session/set_config_option model failed:', error.message);
+            notifyDowngrade();
           }
         }
       }

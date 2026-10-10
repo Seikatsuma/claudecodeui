@@ -81,6 +81,12 @@ rl.on('line', (line) => {
       break;
     }
     case 'session/load':
+      if (process.env.DEVIN_LOAD_LOCKED_ONCE === '1') {
+        // Замок умершего ACP-процесса: retryable — Devin сам разрешает повтор.
+        delete process.env.DEVIN_LOAD_LOCKED_ONCE;
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32015, message: "Session 'x' is already open in another process", data: { 'cognition.ai/errorKind': 'session_locked', 'cognition.ai/retryable': true, 'cognition.ai/lockHolderPid': 999999 } } }) + '\\n');
+        break;
+      }
       if (process.env.DEVIN_LOAD_MISSING === '1') {
         // Живой ответ Devin 04.10.26 на чужой номер беседы.
         process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32016, message: 'Session not found', data: { 'cognition.ai/errorKind': 'session_not_found', 'cognition.ai/retryable': false } } }) + '\\n');
@@ -88,7 +94,18 @@ rl.on('line', (line) => {
       }
       // Replayed history MUST be muted by the runtime.
       notify('session/update', { sessionId: msg.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'REPLAYED-OLD-TEXT' } } });
-      respond(msg.id, { sessionId: msg.params.sessionId });
+      {
+        const result = { sessionId: msg.params.sessionId };
+        const fakeOpts = process.env.DEVIN_FAKE_MODEL_OPTIONS;
+        if (fakeOpts) {
+          result.configOptions = [{
+            id: 'model',
+            currentValue: fakeOpts.split(',')[0],
+            options: fakeOpts.split(',').map((v) => ({ value: v })),
+          }];
+        }
+        respond(msg.id, result);
+      }
       break;
     case 'session/set_mode':
     case 'session/set_config_option':
@@ -172,7 +189,9 @@ async function withFakeDevin(fn) {
     if (previousLiveRuns === undefined) delete process.env.CLOUDCLI_LIVE_RUNS_DIR; else process.env.CLOUDCLI_LIVE_RUNS_DIR = previousLiveRuns;
     if (previousFakeOpts === undefined) delete process.env.DEVIN_FAKE_MODEL_OPTIONS; else process.env.DEVIN_FAKE_MODEL_OPTIONS = previousFakeOpts;
     if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
-    await rm(tempRoot, { recursive: true, force: true });
+    // Супервизор дописывает sock-файлы devin-runs чуть позже завершения хода —
+    // без ретраев уборка падает ENOTEMPTY по гонке (флаки 10.10.26).
+    await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 
@@ -607,5 +626,19 @@ test('devin runtime: model from session configOptions is sent as before; list ca
     assert.ok(opts instanceof Set);
     assert.ok(opts.has('swe-2-low') && opts.has('swe-2-high'));
     assert.ok(!opts.has('swe-2-max'));
+  });
+});
+
+test('devin runtime: session_locked retryable — повтор load, ход не падает', async () => {
+  await withFakeDevin(async (tempRoot) => {
+    process.env.DEVIN_LOAD_LOCKED_ONCE = '1';
+    const writer = makeWriter();
+    await devinRuntime.run('Hi', { cwd: tempRoot, sessionId: 'app-resume' }, writer, runtimeContext);
+
+    const capture = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'));
+    const loads = capture.calls.filter((c) => c.method === 'session/load');
+    assert.equal(loads.length, 2, 'замок retryable — один повтор session/load');
+    assert.ok(writer.messages.some((m) => m.content === 'LIVE-REPLY'), 'ход завершился, не упал на замке');
+    assert.equal(writer.messages.filter((m) => m.kind === 'complete').length, 1);
   });
 });
