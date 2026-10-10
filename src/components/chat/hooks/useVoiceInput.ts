@@ -220,7 +220,38 @@ export function useVoiceInput(
         try { rec.stop(); } catch { /* уже остановлен */ }
       };
 
-      rec.onstop = async () => {
+      // iOS глушит микрофон событием 'ended' на треке: рекордер может уйти в
+      // 'inactive' без onstop, и куски так и лежат мёртвыми. Дожимаем стоп сами.
+      const micTrack = stream.getAudioTracks()[0];
+      let stoppedHandled = false;
+      const finalize = () => {
+        if (stoppedHandled) return;
+        if (rec.state !== 'inactive') {
+          try { rec.stop(); } catch { /* уже остановлен */ }
+          return; // onstop доберёт запись; не придёт - сторож вызовет onStopped при 'inactive'
+        }
+        void onStopped();
+      };
+      if (micTrack) {
+        micTrack.onended = () => finalize();
+        micTrack.onmute = () => {
+          // Трек приглушён системой: сторож тишины и так это покажет,
+          // а здесь только фиксируем начало паузы без ожидания тика.
+          if (pauseSinceRef.current === null) pauseSinceRef.current = lastChunkAtRef.current + CHUNK_MS;
+          setMicPaused(true);
+        };
+        micTrack.onunmute = () => {
+          if (pauseSinceRef.current !== null) {
+            pausedMsRef.current += Date.now() - pauseSinceRef.current;
+            pauseSinceRef.current = null;
+          }
+          setMicPaused(false);
+        };
+      }
+
+      async function onStopped() {
+        if (stoppedHandled) return;
+        stoppedHandled = true;
         stopTracks();
         releaseScreen();
         markRecordingActive(null);
@@ -310,7 +341,9 @@ export function useVoiceInput(
           clearTimeout(timeout);
           if (!cancelledRef.current) setState('idle');
         }
-      };
+      }
+
+      rec.onstop = () => void onStopped();
 
       rec.start(CHUNK_MS);
       setState('recording');
@@ -318,7 +351,11 @@ export function useVoiceInput(
       // Страницу при этом могут заморозить целиком - тогда проверка сработает
       // при возврате и покажет паузу задним числом.
       silenceWatchRef.current = setInterval(() => {
-        if (recorderRef.current?.state !== 'recording') return;
+        const recState = recorderRef.current?.state;
+        // Рекордер мёртв, а onstop так и не пришёл (iOS теряет событие) —
+        // собираем и досылаем то, что есть, вместо вечного «идёт запись».
+        if (recState === 'inactive') finalize();
+        if (recState !== 'recording') return;
         const silentMs = Date.now() - lastChunkAtRef.current;
         if (silentMs > MIC_SILENCE_MS) {
           // Пауза реально началась, когда перестал приходить очередной кусок —
