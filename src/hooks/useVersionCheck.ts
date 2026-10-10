@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
 import { version } from '../../package.json';
 import { ReleaseInfo } from '../shared/types';
+import { UPDATE_PENDING_EVENT, hasPendingUpdate } from '../lib/appUpdate';
 
 export type InstallMode = 'git' | 'npm';
 
 export const useVersionCheck = () => {
-  // Always empty: the upstream release check that used to populate these was
-  // removed (see the note further down), so the update banner never shows.
-  const updateAvailable = false;
+  // Плашка «Доступно обновление» в сайдбаре теперь означает не новый релиз
+  // upstream (той проверки больше нет — см. заметку ниже), а новую СБОРКУ на
+  // этом сервере: страница загружена раньше выкатки. Событие ставит
+  // lib/appUpdate — оно срабатывает, только пока страница на виду (скрытую
+  // обновляет перезагрузкой). Нажатие плашки просто перезагружает страницу.
+  const [updateAvailable, setUpdateAvailable] = useState(hasPendingUpdate);
   const latestVersion: string | null = null;
   const releaseInfo: ReleaseInfo | null = null;
   const [installMode, setInstallMode] = useState<InstallMode>('git');
@@ -61,6 +65,12 @@ export const useVersionCheck = () => {
       }
     };
     fetchHealth();
+  }, []);
+
+  useEffect(() => {
+    const onPending = () => setUpdateAvailable(true);
+    window.addEventListener(UPDATE_PENDING_EVENT, onPending);
+    return () => window.removeEventListener(UPDATE_PENDING_EVENT, onPending);
   }, []);
 
   // Upstream release-check deliberately removed. It fetched
