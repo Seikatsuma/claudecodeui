@@ -6,7 +6,7 @@ import type { Project, ProjectSession } from '../types/app';
 import { api } from '../utils/api';
 import { getSessionTitle } from '../utils/pageTitle';
 
-import { MAX_OPEN_TABS, capTabs } from './openTabsLimit';
+import { MAX_OPEN_TABS, capTabs, reconcileRemoteTabs } from './openTabsLimit';
 
 /**
  * A session the user has explicitly opened, rendered as a tab above the chat
@@ -130,15 +130,27 @@ const serializeTabs = (tabs: StoredTab[]): string =>
     ...(tab.openedAt ? { openedAt: tab.openedAt } : {}),
   })));
 
-type ServerTabsState = { version: number; tabs: StoredTab[] };
+type ServerTabsState = {
+  version: number;
+  tabs: StoredTab[];
+  /** Явно закрытые вкладки (метка времени) — по ним отличаем закрытие от устаревшей записи. */
+  closed: Record<string, number>;
+};
 
 const readServerState = async (response: Response): Promise<ServerTabsState | null> => {
   if (response.status === 204 || !response.ok) return null;
-  const body = (await response.json()) as { version?: unknown; tabs?: unknown };
+  const body = (await response.json()) as { version?: unknown; tabs?: unknown; closed?: unknown };
   if (!Number.isInteger(body.version) || !Array.isArray(body.tabs)) return null;
+  const closed: Record<string, number> = {};
+  if (body.closed && typeof body.closed === 'object') {
+    for (const [id, at] of Object.entries(body.closed as Record<string, unknown>)) {
+      if (typeof at === 'number' && Number.isFinite(at)) closed[id] = at;
+    }
+  }
   return {
     version: body.version as number,
     tabs: (body.tabs as StoredTab[]).filter((tab) => tab && typeof tab.sessionId === 'string'),
+    closed,
   };
 };
 
@@ -221,36 +233,26 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
     dirty: false,
   });
 
-  // Накатить список с сервера. Если отсюда пропал чат, открытый на ЭТОМ
-  // устройстве, — его закрыли на другом: уходим к соседней вкладке, как при
-  // закрытии крестиком. Иначе правило «открытый чат всегда во вкладках»
-  // вернуло бы вкладку и отменило закрытие на всех устройствах.
-  //
-  // Исключение — список полный (15): тогда чат, скорее всего, не закрыли, а
-  // вытеснил предел, когда на другом устройстве открыли новый. Здесь его
-  // читают прямо сейчас — вкладка остаётся на своём месте, а уходит следующая
-  // по давности (иначе телефон уводил бы Егора из чата, пока он за компьютером).
-  const applyRemote = useCallback((incoming: StoredTab[], followClose = true) => {
-    let remote = incoming;
+  // Накатить список с сервера. Уводит из открытого чата только ЯВНОЕ
+  // закрытие — чат помечен в `closed` на сервере (его закрыли крестиком на
+  // другом устройстве). Отсутствие без метки читаем как устаревшую запись:
+  // местные вкладки, пропавшие из пришедшего списка, возвращаем на место
+  // (reconcileRemoteTabs) и отправляем объединённый список — сервер сходится
+  // без потерь, а человека никто не кидает в чужой чат (10.10.26: телефон со
+  // старым снимком затирал список и уводил Егора из чата на компьютере).
+  const applyRemote = useCallback((incoming: StoredTab[], followClose = true, closed: Record<string, number> = {}) => {
     const previous = tabsRef.current;
     const activeId = activeSessionIdRef.current;
-    const remoteIds = new Set(remote.map((tab) => tab.sessionId));
-    if (followClose && activeId && !remoteIds.has(activeId) && previous.some((tab) => tab.sessionId === activeId)) {
+    const { tabs: merged, activeDropped } = reconcileRemoteTabs(previous, incoming, new Set(Object.keys(closed)), activeId);
+    if (followClose && activeDropped && activeId) {
       const index = previous.findIndex((tab) => tab.sessionId === activeId);
-      if (remote.length >= MAX_OPEN_TABS) {
-        const kept = [...remote];
-        kept.splice(Math.min(index, kept.length), 0, { ...previous[index], openedAt: Date.now() });
-        remote = capTabs(kept, activeId);
-        tabsRef.current = remote;
-        setTabs(remote);
-        return;
-      }
+      const mergedIds = new Set(merged.map((tab) => tab.sessionId));
       const neighbour = [...previous.slice(index + 1), ...previous.slice(0, index).reverse()]
-        .find((tab) => remoteIds.has(tab.sessionId));
+        .find((tab) => mergedIds.has(tab.sessionId));
       navigateRef.current(neighbour ? `/session/${neighbour.sessionId}` : '/');
     }
-    tabsRef.current = remote;
-    setTabs(remote);
+    tabsRef.current = merged;
+    setTabs(merged);
   }, []);
 
   const pushTabs = useCallback(async (keepalive = false) => {
@@ -265,9 +267,20 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
     const json = serializeTabs(tabsRef.current);
     if (json === sync.syncedJson && !sync.mergeNext) return;
     const merge = sync.mergeNext;
+    // Явно закрытые здесь вкладки = были в последнем сверенном списке, а
+    // теперь нет. Их передаём отдельно: сервер с таким списком объединяет
+    // (устаревшая запись не роняет чужие вкладки) и помечает закрытые.
+    let remove: string[] = [];
+    try {
+      const synced = JSON.parse(sync.syncedJson || '[]') as StoredTab[];
+      const localIds = new Set(tabsRef.current.map((tab) => tab.sessionId));
+      remove = synced.filter((tab) => !localIds.has(tab.sessionId)).map((tab) => tab.sessionId);
+    } catch {
+      remove = [];
+    }
     sync.pushing = true;
     try {
-      const state = await readServerState(await api.openTabs.put(JSON.parse(json), keepalive, merge));
+      const state = await readServerState(await api.openTabs.put(JSON.parse(json), keepalive, merge, remove));
       if (state) {
         sync.dirty = serializeTabs(tabsRef.current) !== json;
         sync.mergeNext = false;
@@ -275,7 +288,7 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
         sync.syncedJson = serializeTabs(state.tabs);
         writeSyncVersion(userKey, state.version);
         // Слияние на сервере могло добавить вкладки другого устройства.
-        if (merge && sync.syncedJson !== serializeTabs(tabsRef.current)) applyRemote(state.tabs, false);
+        if (merge && sync.syncedJson !== serializeTabs(tabsRef.current)) applyRemote(state.tabs, false, state.closed);
       }
     } catch {
       // сеть пропала — повторим при следующем изменении или опросе
@@ -330,7 +343,7 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
         // (обновление сборки); отметка до отправки заставляла вторую загрузку
         // довериться серверу и терять местные вкладки (16.09.26).
         if (serializeTabs(next) === sync.syncedJson) writeSyncVersion(userKey, state.version);
-        if (serializeTabs(next) !== serializeTabs(local)) applyRemote(next, false);
+        if (serializeTabs(next) !== serializeTabs(local)) applyRemote(next, false, state.closed);
         if (serializeTabs(next) !== sync.syncedJson) {
           sync.dirty = true;
           sync.pushTimer = window.setTimeout(() => void pushTabs(), SYNC_PUSH_DELAY_MS);
@@ -341,7 +354,7 @@ export function useOpenSessionTabs({ projects, activeSessionId, activeSession, n
       sync.version = state.version;
       sync.syncedJson = serializeTabs(state.tabs);
       writeSyncVersion(userKey, state.version);
-      if (sync.syncedJson !== serializeTabs(tabsRef.current)) applyRemote(state.tabs);
+      if (sync.syncedJson !== serializeTabs(tabsRef.current)) applyRemote(state.tabs, true, state.closed);
     } catch {
       // нет сети — спросим на следующем круге
     } finally {

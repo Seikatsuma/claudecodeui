@@ -22,3 +22,40 @@ export const capTabs = <T extends { sessionId: string; openedAt?: number }>(tabs
   );
   return tabs.filter((tab) => !evicted.has(tab.sessionId));
 };
+
+/**
+ * Слияние пришедшего с сервера списка вкладок с местным.
+ *
+ * Раньше пришедший список накатывался целиком, и отсутствие в нём открытого
+ * здесь чата читалось как «закрыли на другом устройстве» — страница уводила
+ * человека к соседней вкладке. Но список мог устареть на самом сервере
+ * (запись с телефона со старым снимком), и тогда увод был ложным.
+ *
+ * Теперь «закрытие» — только явная метка сервера (`closedIds`, ставится по
+ * списку remove в PUT). Отсутствие без метки читается как потеря при записи:
+ * местные вкладки, которых нет в пришедшем списке, возвращаются на свои
+ * позиции — страница затем отправит объединённый список, и сервер сойдётся.
+ *
+ * Возвращает объединённый список (уже сверх 15) и `activeDropped` — true,
+ * только если открытый сейчас чат был в местном списке и явно закрыт
+ * (на такой случай страница уходит к соседней вкладке, как при крестике).
+ */
+export const reconcileRemoteTabs = <T extends { sessionId: string; openedAt?: number }>(
+  previous: T[],
+  remote: T[],
+  closedIds: ReadonlySet<string>,
+  activeId: string | null,
+): { tabs: T[]; activeDropped: boolean } => {
+  const remoteIds = new Set(remote.map((tab) => tab.sessionId));
+  const activeDropped =
+    activeId !== null &&
+    !remoteIds.has(activeId) &&
+    previous.some((tab) => tab.sessionId === activeId) &&
+    closedIds.has(activeId);
+  const merged = [...remote];
+  previous.forEach((tab, index) => {
+    if (remoteIds.has(tab.sessionId) || closedIds.has(tab.sessionId)) return;
+    merged.splice(Math.min(index, merged.length), 0, tab);
+  });
+  return { tabs: capTabs(merged, activeDropped ? null : activeId), activeDropped };
+};

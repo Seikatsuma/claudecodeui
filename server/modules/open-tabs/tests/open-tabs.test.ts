@@ -32,7 +32,7 @@ test('вкладки у каждого пользователя свои, вер
   await withIsolatedDatabase(() => {
     const egor = userId('egor');
     const other = userId('other');
-    assert.deepEqual(openTabsDb.get(egor), { version: 0, tabs: [], updatedAt: null });
+    assert.deepEqual(openTabsDb.get(egor), { version: 0, tabs: [], updatedAt: null, closed: {} });
 
     const first = openTabsDb.put(egor, [{ sessionId: 'a', title: 'А' }, { sessionId: 'b' }]);
     assert.equal(first.version, 1);
@@ -68,4 +68,45 @@ test('время открытия вкладки хранится — по не�
     normalizeOpenTabs([{ sessionId: 'a', openedAt: 1758800000000.4 }, { sessionId: 'b', openedAt: 'вчера' }, { sessionId: 'c', openedAt: -1 }]),
     [{ sessionId: 'a', openedAt: 1758800000000 }, { sessionId: 'b' }, { sessionId: 'c' }],
   );
+});
+
+test('отправка со списком remove объединяет, а не затирает — устаревший снимок не роняет чужие вкладки', async () => {
+  await withIsolatedDatabase(() => {
+    const egor = userId('egor');
+    // Компьютер открыл новый чат: сервер знает [phone-1, pc-new].
+    openTabsDb.put(egor, [{ sessionId: 'phone-1' }, { sessionId: 'pc-new' }]);
+    // Телефон шлёт УСТАРЕВШИЙ список без pc-new, но с remove — это объединение:
+    // pc-new остаётся, а не пропадает (раньше полная замена его роняла).
+    const merged = openTabsDb.put(egor, [{ sessionId: 'phone-1' }], false, []);
+    assert.deepEqual(merged.tabs.map((t) => t.sessionId), ['phone-1', 'pc-new']);
+    assert.deepEqual(merged.closed, {});
+  });
+});
+
+test('явно закрытая вкладка помечается в closed, возвращённая — снимает метку', async () => {
+  await withIsolatedDatabase(() => {
+    const egor = userId('egor');
+    openTabsDb.put(egor, [{ sessionId: 'a' }, { sessionId: 'b' }]);
+    // Устройство закрыло 'b' крестиком: id уходит в remove — сервер ставит метку.
+    const closed = openTabsDb.put(egor, [{ sessionId: 'a' }], false, ['b']);
+    assert.deepEqual(closed.tabs.map((t) => t.sessionId), ['a']);
+    assert.ok(closed.closed.b > 0);
+    assert.equal(closed.closed.a, undefined);
+    // Чат открыли снова на любом устройстве — метка закрытия снимается.
+    const reopened = openTabsDb.put(egor, [{ sessionId: 'a' }, { sessionId: 'b' }], false, []);
+    assert.deepEqual(reopened.closed, {});
+  });
+});
+
+test('старая отправка без remove по-прежнему заменяет список и меток не ставит', async () => {
+  await withIsolatedDatabase(() => {
+    const egor = userId('egor');
+    openTabsDb.put(egor, [{ sessionId: 'a' }, { sessionId: 'b' }], false, ['x']);
+    const replaced = openTabsDb.put(egor, [{ sessionId: 'c' }]);
+    // Совместимость со старыми клиентами: без remove — полная замена,
+    // и пропавшие id метками закрытия не считаются.
+    assert.deepEqual(replaced.tabs.map((t) => t.sessionId), ['c']);
+    assert.equal(replaced.closed.b, undefined);
+    assert.ok(replaced.closed.x > 0);
+  });
 });
