@@ -88,7 +88,18 @@ rl.on('line', (line) => {
       }
       // Replayed history MUST be muted by the runtime.
       notify('session/update', { sessionId: msg.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'REPLAYED-OLD-TEXT' } } });
-      respond(msg.id, { sessionId: msg.params.sessionId });
+      {
+        const result = { sessionId: msg.params.sessionId };
+        const fakeOpts = process.env.DEVIN_FAKE_MODEL_OPTIONS;
+        if (fakeOpts) {
+          result.configOptions = [{
+            id: 'model',
+            currentValue: fakeOpts.split(',')[0],
+            options: fakeOpts.split(',').map((v) => ({ value: v })),
+          }];
+        }
+        respond(msg.id, result);
+      }
       break;
     case 'session/set_mode':
     case 'session/set_config_option':
@@ -172,7 +183,9 @@ async function withFakeDevin(fn) {
     if (previousLiveRuns === undefined) delete process.env.CLOUDCLI_LIVE_RUNS_DIR; else process.env.CLOUDCLI_LIVE_RUNS_DIR = previousLiveRuns;
     if (previousFakeOpts === undefined) delete process.env.DEVIN_FAKE_MODEL_OPTIONS; else process.env.DEVIN_FAKE_MODEL_OPTIONS = previousFakeOpts;
     if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
-    await rm(tempRoot, { recursive: true, force: true });
+    // Супервизор дописывает sock-файлы devin-runs чуть позже завершения хода —
+    // без ретраев уборка падает ENOTEMPTY по гонке (флаки 10.10.26).
+    await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 

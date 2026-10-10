@@ -934,18 +934,20 @@ async function queryDevin(command, options = {}, ws, context) {
         // with Invalid params on every turn and silently run the old model —
         // so it's skipped and named honestly, once per run.
         const knownUnavailable = run.modelOptions instanceof Set && !run.modelOptions.has(resolvedModel);
+        const notifyDowngrade = () => {
+          if (run.modelDowngradeNotified) return;
+          run.modelDowngradeNotified = true;
+          const effective = run.modelCurrent || DEVIN_DEFAULT_MODEL;
+          console.warn(`[Devin] model "${resolvedModel}" is not in this account's options — running ${effective}`);
+          sendMessage(ws, createNormalizedMessage({
+            provider: 'devin',
+            sessionId: sessionId || run.devinSessionId || null,
+            kind: 'error',
+            content: `Модель «${resolvedModel}» недоступна на активном аккаунте Devin — ход идёт на ${effective}.`,
+          }));
+        };
         if (knownUnavailable || run.modelSetFailed.has(resolvedModel)) {
-          if (!run.modelDowngradeNotified) {
-            run.modelDowngradeNotified = true;
-            const effective = run.modelCurrent || DEVIN_DEFAULT_MODEL;
-            console.warn(`[Devin] model "${resolvedModel}" is not in this account's options — running ${effective}`);
-            sendMessage(ws, createNormalizedMessage({
-              provider: 'devin',
-              sessionId: sessionId || run.devinSessionId || null,
-              kind: 'error',
-              content: `Модель «${resolvedModel}» недоступна на активном аккаунте Devin — ход идёт на ${effective}.`,
-            }));
-          }
+          notifyDowngrade();
         } else {
           try {
             await connection.call('session/set_config_option', {
@@ -954,8 +956,11 @@ async function queryDevin(command, options = {}, ws, context) {
               value: resolvedModel,
             }, HANDSHAKE_TIMEOUT_MS);
           } catch (error) {
+            // «Слепой» путь (configOptions не пришли): отказ — та же тихая
+            // подмена, что чинит вся эта правка; говорим честно один раз.
             run.modelSetFailed.add(resolvedModel);
             console.warn('[Devin] session/set_config_option model failed:', error.message);
+            notifyDowngrade();
           }
         }
       }

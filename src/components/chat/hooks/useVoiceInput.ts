@@ -116,6 +116,9 @@ export function useVoiceInput(
   const streamRef = useRef<MediaStream | null>(null);
   const cancelledRef = useRef(false);
   const startingRef = useRef(false);
+  // Тап «стоп», пока getUserMedia ещё в полёте: рекордера нет — запоминаем и
+  // гасим запись сразу после его создания.
+  const stopRequestedRef = useRef(false);
   // Whether the in-progress stop should auto-send the transcript (vs just fill the box).
   const sendRef = useRef(false);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
@@ -170,11 +173,12 @@ export function useVoiceInput(
   const start = useCallback(async () => {
     if (startingRef.current || (recorderRef.current && recorderRef.current.state !== 'inactive')) return;
     startingRef.current = true;
+    stopRequestedRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
-      if (cancelledRef.current) {
+      if (cancelledRef.current || stopRequestedRef.current) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
@@ -208,6 +212,12 @@ export function useVoiceInput(
           lastChunkAtRef.current = Date.now();
           setMicPaused(false);
         }
+      };
+
+      // MediaRecorder умер сам (драйвер/система): не ждём сторож — сворачиваемся
+      // через обычный onstop, который посчитает исход и снимет состояния.
+      rec.onerror = () => {
+        try { rec.stop(); } catch { /* уже остановлен */ }
       };
 
       rec.onstop = async () => {
@@ -311,7 +321,10 @@ export function useVoiceInput(
         if (recorderRef.current?.state !== 'recording') return;
         const silentMs = Date.now() - lastChunkAtRef.current;
         if (silentMs > MIC_SILENCE_MS) {
-          if (pauseSinceRef.current === null) pauseSinceRef.current = lastChunkAtRef.current;
+          // Пауза реально началась, когда перестал приходить очередной кусок —
+          // отсчитываем от ожидаемого момента, а не от детекта сторожем:
+          // иначе в потерю влезали бы грейс-порог и честный межкусковый интервал.
+          if (pauseSinceRef.current === null) pauseSinceRef.current = lastChunkAtRef.current + CHUNK_MS;
           setMicPaused(true);
         }
       }, 1000);
@@ -322,6 +335,9 @@ export function useVoiceInput(
       });
     } catch (e) {
       recorderRef.current = null;
+      // rec.start() мог бросить уже после markRecordingActive — не оставлять
+      // мёртвый recId «активным», adoptOrphans иначе пропустит его куски.
+      markRecordingActive(null);
       stopTracks();
       if (cancelledRef.current) return;
       const err = e as { name?: string; message?: string };
@@ -343,6 +359,10 @@ export function useVoiceInput(
     if (rec && rec.state !== 'inactive') {
       sendRef.current = opts?.send ?? false;
       rec.stop();
+    } else if (startingRef.current) {
+      // Рекордера ещё нет (getUserMedia в полёте) — тап не должен теряться.
+      sendRef.current = opts?.send ?? false;
+      stopRequestedRef.current = true;
     }
   }, []);
 
@@ -353,8 +373,14 @@ export function useVoiceInput(
   }, []);
 
   const toggle = useCallback(() => {
-    if (state === 'recording') stop();
-    else if (state === 'idle') start();
+    if (state === 'recording') {
+      stop();
+    } else if (state === 'idle') {
+      // Пока микрофон открывается state ещё 'idle' — тап должен отменять запуск,
+      // а не молча упираться в startingRef внутри start().
+      if (startingRef.current) stop();
+      else void start();
+    }
   }, [state, start, stop]);
 
   return { state, toggle, stop, requestSend, micPaused };
