@@ -867,11 +867,26 @@ async function queryDevin(command, options = {}, ws, context) {
       if (providerSessionId) {
         run.muted = true;
         try {
-          const loadResult = await connection.call('session/load', {
-            sessionId: providerSessionId,
-            cwd: workingDirectory,
-            mcpServers: [],
-          }, HANDSHAKE_TIMEOUT_MS);
+          // session_locked + retryable (10.10.26): соседний ACP-процесс держал
+          // беседу и умер — Devin сам помечает повтор возможным. Одна пауза и
+          // вторая попытка закрывают зомби-лок без падения хода у человека.
+          let loadResult;
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              loadResult = await connection.call('session/load', {
+                sessionId: providerSessionId,
+                cwd: workingDirectory,
+                mcpServers: [],
+              }, HANDSHAKE_TIMEOUT_MS);
+              break;
+            } catch (loadError) {
+              const retryable = loadError?.data?.['cognition.ai/retryable'] === true
+                && loadError?.data?.['cognition.ai/errorKind'] === 'session_locked';
+              if (!retryable || attempt >= 1) throw loadError;
+              console.warn(`[Devin] беседа ${providerSessionId} под замком — повтор session/load через 3 с`);
+              await new Promise((r) => setTimeout(r, 3000));
+            }
+          }
           loaded = true;
           noteConfigOptions(run, loadResult?.configOptions);
         } catch (error) {
