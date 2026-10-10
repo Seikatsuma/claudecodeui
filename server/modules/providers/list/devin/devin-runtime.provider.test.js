@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -81,6 +82,12 @@ rl.on('line', (line) => {
       break;
     }
     case 'session/load':
+      if (process.env.DEVIN_LOAD_LOCK_FILE && fs.existsSync(process.env.DEVIN_LOAD_LOCK_FILE)) {
+        // Замок ЖИВОГО процесса: пока файл-маркер стоит, load отбивается
+        // session_locked с реальным pid держателя (11.10.26).
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32015, message: "Session 'x' is already open in another process", data: { 'cognition.ai/errorKind': 'session_locked', 'cognition.ai/retryable': true, 'cognition.ai/lockHolderPid': Number(process.env.DEVIN_LOCK_PID) } } }) + '\\n');
+        break;
+      }
       if (process.env.DEVIN_LOAD_LOCKED_ONCE === '1') {
         // Замок умершего ACP-процесса: retryable — Devin сам разрешает повтор.
         delete process.env.DEVIN_LOAD_LOCKED_ONCE;
@@ -640,5 +647,44 @@ test('devin runtime: session_locked retryable — повтор load, ход не
     assert.equal(loads.length, 2, 'замок retryable — один повтор session/load');
     assert.ok(writer.messages.some((m) => m.content === 'LIVE-REPLY'), 'ход завершился, не упал на замке');
     assert.equal(writer.messages.filter((m) => m.kind === 'complete').length, 1);
+  });
+});
+
+test('devin runtime: session_locked с живым держателем — ждёт его конца, не ошибка', async () => {
+  await withFakeDevin(async (tempRoot) => {
+    // «Чужой» живой держатель: имя файла несёт 'devin' и 'acp' — ту же
+    // сигнатуру проверяет isDevinPidAlive по /proc/<pid>/cmdline.
+    const holderScript = path.join(tempRoot, 'devin-acp-holder.js');
+    await writeFile(holderScript, 'setInterval(() => {}, 1000);\n', 'utf8');
+    const holder = spawn(process.execPath, [holderScript], { stdio: 'ignore' });
+    const lockFile = path.join(tempRoot, 'locked');
+    process.env.DEVIN_LOAD_LOCK_FILE = lockFile;
+    process.env.DEVIN_LOCK_PID = String(holder.pid);
+    await writeFile(lockFile, '1', 'utf8');
+    try {
+      const writer = makeWriter();
+      const turn = devinRuntime.run('Hi', { cwd: tempRoot, sessionId: 'app-resume' }, writer, runtimeContext);
+      // Держатель «доработал» свой ход и отпустил замок.
+      setTimeout(() => {
+        try { holder.kill('SIGKILL'); } catch { /* уже нет */ }
+        rm(lockFile, { force: true }).catch(() => {});
+      }, 2500).unref();
+      await turn;
+
+      const capture = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'));
+      const loads = capture.calls.filter((c) => c.method === 'session/load');
+      assert.ok(loads.length >= 2, 'load повторялся, пока держатель был жив');
+      assert.ok(
+        writer.messages.some((m) => m.kind === 'status' && /ещё дописывается/.test(String(m.text || ''))),
+        'человеку видно ожидание, а не красную ошибку',
+      );
+      assert.ok(writer.messages.some((m) => m.content === 'LIVE-REPLY'), 'сообщение дошло после освобождения');
+      assert.equal(writer.messages.filter((m) => m.kind === 'complete').length, 1);
+      assert.ok(!writer.messages.some((m) => m.kind === 'error'), 'ошибки session_locked в ленте нет');
+    } finally {
+      try { holder.kill('SIGKILL'); } catch { /* уже нет */ }
+      delete process.env.DEVIN_LOAD_LOCK_FILE;
+      delete process.env.DEVIN_LOCK_PID;
+    }
   });
 });

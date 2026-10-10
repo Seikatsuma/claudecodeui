@@ -201,6 +201,7 @@ function handleClientFrame(frame: Record<string, unknown>): void {
     return;
   }
   if (frame.c === 'stop') {
+    log(`stop requested signal=${typeof frame.signal === 'string' ? frame.signal : 'SIGTERM'}`);
     killChild(typeof frame.signal === 'string' ? (frame.signal as NodeJS.Signals) : 'SIGTERM');
   }
 }
@@ -255,6 +256,9 @@ try { fs.unlinkSync(spec.socketPath); } catch { /* не было */ }
 
 const server = net.createServer((socket) => {
   // Клиент всегда один — самый свежий вытесняет прежний (старый сервер мёртв).
+  // Вытеснение без записи в журнале стоило разбора 11.10.26: у рантайма
+  // оборвался сокет, ход отпал от реестра, а агент остался жить с замком.
+  log(client ? 'client connected (replaces previous)' : 'client connected');
   if (client) {
     try { client.destroy(); } catch { /* уже умер */ }
   }
@@ -301,6 +305,7 @@ const server = net.createServer((socket) => {
     // Сокет умер — разбираемся в 'close'.
   });
   socket.on('close', () => {
+    log(`client disconnected${pendingPromptIds.size > 0 ? ' (prompt in flight)' : ''}`);
     if (client === socket) {
       client = null;
     }

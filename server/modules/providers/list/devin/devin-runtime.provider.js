@@ -70,6 +70,35 @@ const HANDSHAKE_TIMEOUT_MS = 60_000;
 const STDERR_TAIL_BYTES = 4_000;
 /** Пауза перед повтором хода на другом слоте: процесс должен умереть и отпустить замок сессии. */
 const FAILOVER_KILL_WAIT_MS = 1_500;
+/**
+ * session_locked с ЖИВЫМ держателем (11.10.26): беседу обрабатывает
+ * другой ACP-процесс, чей ход ещё идёт — «чат занят», а не ошибка.
+ * Сколько секунд между проверками «не отпустил ли он замок».
+ */
+const LOCK_HOLDER_POLL_MS = 2_000;
+/** Потолок ожидания живого держателя: ходы Devin длятся десятки минут. */
+const LOCK_HOLDER_WAIT_MS = 30 * 60_000;
+/** Повторы при зомби-замке (держатель мёртв, замок ещё не снят). */
+const LOCK_ZOMBIE_RETRIES = 3;
+
+/**
+ * Жив ли процесс-держатель замка беседы и это ли `devin acp`
+ * (PID мог достаться другой программе — та же проверка, что
+ * survivor-runs делает для переживших агентов).
+ */
+function isDevinPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    return cmdline.includes('devin') && cmdline.includes('acp');
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Ошибка «у аккаунта кончилась квота/лимит» — живой вид (журнал 07.10.26):
@@ -688,6 +717,33 @@ async function queryDevin(command, options = {}, ws, context) {
       // Already gone.
     }
 
+    // Процесс пережил и «остановить»: канал к супервизору был мёртв, и агент
+    // работает дальше сам по себе (ход реестр счёл завершённым, а его ещё
+    // идёт). Запись live-runs заново — она описывает именно такого сироту:
+    // следующий сервер его усыновит (adoptSurvivors → reattachSurvivor), а
+    // пока он держит замок беседы — новые ходы на неё ждут (см. session/load).
+    const orphanCheck = setTimeout(() => {
+      if (!child?.pid || !isDevinPidAlive(child.pid)) {
+        return;
+      }
+      try {
+        registerProviderRun(child, {
+          provider: 'devin',
+          appSessionId: sessionKey || null,
+          providerSessionId: run.devinSessionId || providerSessionId || null,
+          extra: {
+            socketPath: child.socketPath || null,
+            runId: child.runId || null,
+            supervisorPid: child.supervisorPid || null,
+          },
+        });
+        console.warn(`[Devin] процесс ${child.pid} пережил конец хода — оставил живую запись для усыновления (чат ${sessionKey || '?'})`);
+      } catch (error) {
+        console.warn('[Devin] не удалось вернуть запись о сироте:', error?.message || error);
+      }
+    }, ABORT_GRACE_MS + LOCK_HOLDER_POLL_MS);
+    orphanCheck.unref?.();
+
     sendMessage(ws, createCompleteMessage({
       provider: 'devin',
       sessionId: run.devinSessionId || sessionId || null,
@@ -867,11 +923,18 @@ async function queryDevin(command, options = {}, ws, context) {
       if (providerSessionId) {
         run.muted = true;
         try {
-          // session_locked + retryable (10.10.26): соседний ACP-процесс держал
-          // беседу и умер — Devin сам помечает повтор возможным. Одна пауза и
-          // вторая попытка закрывают зомби-лок без падения хода у человека.
+          // session_locked (10.10.26 зомби, 11.10.26 живой держатель):
+          // - замок мёртвого процесса — пауза и повтор, как раньше;
+          // - замок ЖИВОГО `devin acp` — не ошибка, а «чат занят»: реестр
+          //   потерял чужой ход (канал к его супервизору оборвался), и красная
+          //   ошибка + потеря сообщения сыпались на каждую отправку. Ждём
+          //   конца держателя (он пишет в ту же sessions.db) и грузим сессию —
+          //   для человека это обычная очередь «ответ → следующее сообщение».
           let loadResult;
-          for (let attempt = 0; ; attempt += 1) {
+          let lockWaitNotified = false;
+          let zombieRetries = 0;
+          const lockWaitDeadline = Date.now() + LOCK_HOLDER_WAIT_MS;
+          for (;;) {
             try {
               loadResult = await connection.call('session/load', {
                 sessionId: providerSessionId,
@@ -882,7 +945,28 @@ async function queryDevin(command, options = {}, ws, context) {
             } catch (loadError) {
               const retryable = loadError?.data?.['cognition.ai/retryable'] === true
                 && loadError?.data?.['cognition.ai/errorKind'] === 'session_locked';
-              if (!retryable || attempt >= 1) throw loadError;
+              if (!retryable) {
+                throw loadError;
+              }
+              const holderPid = Number(loadError?.data?.['cognition.ai/lockHolderPid']) || null;
+              if (holderPid && isDevinPidAlive(holderPid) && !run.aborted && Date.now() < lockWaitDeadline) {
+                if (!lockWaitNotified) {
+                  lockWaitNotified = true;
+                  console.warn(`[Devin] беседу ${providerSessionId} держит живой процесс ${holderPid} — жду конца его хода`);
+                  sendMessage(ws, createNormalizedMessage({
+                    provider: 'devin',
+                    sessionId: sessionId || run.devinSessionId || null,
+                    kind: 'status',
+                    text: 'Прошлый ответ в этом чате ещё дописывается — сообщение отправлю, как только он завершится.',
+                  }));
+                }
+                await new Promise((r) => setTimeout(r, LOCK_HOLDER_POLL_MS));
+                continue;
+              }
+              if (run.aborted || Date.now() > lockWaitDeadline || zombieRetries >= LOCK_ZOMBIE_RETRIES) {
+                throw loadError;
+              }
+              zombieRetries += 1;
               console.warn(`[Devin] беседа ${providerSessionId} под замком — повтор session/load через 3 с`);
               await new Promise((r) => setTimeout(r, 3000));
             }
