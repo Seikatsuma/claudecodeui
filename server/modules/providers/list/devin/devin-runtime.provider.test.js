@@ -66,9 +66,20 @@ rl.on('line', (line) => {
     case 'initialize':
       respond(msg.id, { protocolVersion: 1, agentCapabilities: { loadSession: true } });
       break;
-    case 'session/new':
-      respond(msg.id, { sessionId: 'devin-sess-1' });
+    case 'session/new': {
+      const result = { sessionId: 'devin-sess-1' };
+      // DEVIN_FAKE_MODEL_OPTIONS='a,b' → сессия отвечает живым списком моделей аккаунта.
+      const fakeOpts = process.env.DEVIN_FAKE_MODEL_OPTIONS;
+      if (fakeOpts) {
+        result.configOptions = [{
+          id: 'model',
+          currentValue: fakeOpts.split(',')[0],
+          options: fakeOpts.split(',').map((v) => ({ value: v })),
+        }];
+      }
+      respond(msg.id, result);
       break;
+    }
     case 'session/load':
       if (process.env.DEVIN_LOAD_MISSING === '1') {
         // Живой ответ Devin 04.10.26 на чужой номер беседы.
@@ -139,12 +150,17 @@ async function withFakeDevin(fn) {
   const previousPermTest = process.env.DEVIN_PERMISSION_TEST;
   const previousRunsDir = process.env.CLOUDCLI_DEVIN_RUNS_DIR;
   const previousLiveRuns = process.env.CLOUDCLI_LIVE_RUNS_DIR;
+  const previousFakeOpts = process.env.DEVIN_FAKE_MODEL_OPTIONS;
+  const previousHome = process.env.HOME;
   const shim = await createFakeDevinExecutable(tempRoot);
   process.env.DEVIN_CLI_PATH = shim;
   process.env.DEVIN_RPC_CAPTURE = path.join(tempRoot, 'rpc.json');
   // Супервизор и live-runs пишут в свои каталоги — в тестах они во временных.
   process.env.CLOUDCLI_DEVIN_RUNS_DIR = path.join(tempRoot, 'devin-runs');
   process.env.CLOUDCLI_LIVE_RUNS_DIR = path.join(tempRoot, 'live-runs');
+  // Кэш опций слота живёт в ~/.cloudcli-shared — не дать фейковой сессии
+  // перезаписать файл живого слота.
+  process.env.HOME = tempRoot;
   try {
     await fn(tempRoot);
   } finally {
@@ -154,6 +170,8 @@ async function withFakeDevin(fn) {
     if (previousPermTest === undefined) delete process.env.DEVIN_PERMISSION_TEST; else process.env.DEVIN_PERMISSION_TEST = previousPermTest;
     if (previousRunsDir === undefined) delete process.env.CLOUDCLI_DEVIN_RUNS_DIR; else process.env.CLOUDCLI_DEVIN_RUNS_DIR = previousRunsDir;
     if (previousLiveRuns === undefined) delete process.env.CLOUDCLI_LIVE_RUNS_DIR; else process.env.CLOUDCLI_LIVE_RUNS_DIR = previousLiveRuns;
+    if (previousFakeOpts === undefined) delete process.env.DEVIN_FAKE_MODEL_OPTIONS; else process.env.DEVIN_FAKE_MODEL_OPTIONS = previousFakeOpts;
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
     await rm(tempRoot, { recursive: true, force: true });
   }
 }
@@ -352,8 +370,11 @@ test('devin sessions normalizeMessage: ACP updates → NormalizedMessage', () =>
     { sessionUpdate: 'tool_call', toolCallId: 'tc1', title: 'Run command', kind: 'execute', rawInput: { command: 'ls' } },
     's1',
   );
-  assert.equal(tool[0].kind, 'tool_use');
-  assert.equal(tool[0].toolId, 'tc1');
+  // tool_call приходит парой: сначала stream_end закрывает открытый живой блок,
+  // потом сам tool_use — иначе стриминг сливается с вызовом инструмента.
+  assert.equal(tool[0].kind, 'stream_end');
+  assert.equal(tool[1].kind, 'tool_use');
+  assert.equal(tool[1].toolId, 'tc1');
 
   const toolDone = sessionsProvider.normalizeMessage(
     { sessionUpdate: 'tool_call_update', toolCallId: 'tc1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'done' } }] },
@@ -534,5 +555,57 @@ test('devin supervisor: ход переживает разрыв клиента,
     await waitFor(() => {
       try { process.kill(child.pid, 0); return false; } catch { return true; }
     }, 5000, 'agent reaped after disconnect without prompt');
+  });
+});
+
+test('devin runtime: model absent from session configOptions is not sent — fallback named once', async () => {
+  await withFakeDevin(async (tempRoot) => {
+    // Живой расклад слота 2 (10.10.26): аккаунту доступны только эти модели.
+    process.env.DEVIN_FAKE_MODEL_OPTIONS = 'swe-2-high,swe-2-low';
+    const writer = makeWriter();
+    await devinRuntime.run('Hi', {
+      cwd: tempRoot,
+      sessionId: 'app-unavail-1',
+      model: 'swe-2-max',
+    }, writer, runtimeContext);
+
+    const capture = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'));
+    assert.ok(
+      !capture.calls.some((c) => c.method === 'session/set_config_option'),
+      'модель, которой нет в списке аккаунта, в set_config_option не уходит',
+    );
+    const notices = writer.messages.filter((m) => m.kind === 'error' && String(m.content).includes('swe-2-max'));
+    assert.equal(notices.length, 1, 'одно честное уведомление о замене модели');
+    assert.match(String(notices[0].content), /swe-2-high/, 'названа фактическая модель');
+    assert.equal(writer.messages.filter((m) => m.kind === 'complete').length, 1);
+    assert.ok(writer.messages.some((m) => m.content === 'LIVE-REPLY'), 'ход завершён нормально');
+  });
+});
+
+test('devin runtime: model from session configOptions is sent as before; list cached per slot', async () => {
+  await withFakeDevin(async (tempRoot) => {
+    process.env.DEVIN_FAKE_MODEL_OPTIONS = 'swe-2-high,swe-2-low';
+    const writer = makeWriter();
+    await devinRuntime.run('Hi', {
+      cwd: tempRoot,
+      sessionId: 'app-avail-1',
+      model: 'swe-2-low',
+    }, writer, runtimeContext);
+
+    const capture = JSON.parse(await readFile(process.env.DEVIN_RPC_CAPTURE, 'utf8'));
+    const setModel = capture.calls.find((c) => c.method === 'session/set_config_option');
+    assert.equal(setModel?.params?.value, 'swe-2-low', 'доступная модель идёт агенту как раньше');
+    assert.ok(!writer.messages.some((m) => m.kind === 'error'), 'без уведомлений о замене');
+
+    // Список сессии сложился в кэш слота — пикер читает его из файла.
+    const { readSlotModelOptions } = await import('./devin-runtime.provider.js');
+    const { getActiveDevinSlot } = await import('@/shared/devin-slots.js');
+    const slot = getActiveDevinSlot();
+    const file = path.join(tempRoot, '.cloudcli-shared', `devin-model-options-${slot}.json`);
+    assert.ok(existsSync(file), 'список сохранён в файл слота');
+    const opts = readSlotModelOptions(slot);
+    assert.ok(opts instanceof Set);
+    assert.ok(opts.has('swe-2-low') && opts.has('swe-2-high'));
+    assert.ok(!opts.has('swe-2-max'));
   });
 });

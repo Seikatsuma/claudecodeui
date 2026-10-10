@@ -453,25 +453,26 @@ function noteConfigOptions(run, configOptions) {
  * процесса и в файле, чтобы пережить перезапуск сервера.
  */
 const slotModelOptions = new Map(); // slot -> Set<string>
-const SLOT_MODELS_DIR = path.join(os.homedir(), '.cloudcli-shared');
+// Путь считается на каждый вызов: тесты подменяют HOME после загрузки модуля.
+const slotModelsFile = (slot) => path.join(os.homedir(), '.cloudcli-shared', `devin-model-options-${slot}.json`);
 
 function rememberSlotModelOptions(slot, options) {
   if (!(options instanceof Set) || options.size === 0 || slot == null) return;
   slotModelOptions.set(String(slot), options);
   try {
-    fs.writeFileSync(
-      path.join(SLOT_MODELS_DIR, `devin-model-options-${slot}.json`),
-      JSON.stringify([...options]),
-    );
+    fs.mkdirSync(path.dirname(slotModelsFile(slot)), { recursive: true });
+    fs.writeFileSync(slotModelsFile(slot), JSON.stringify([...options]));
   } catch { /* список останется в памяти процесса — некритично */ }
 }
 
+// Используется devin-models.provider.ts (тот же модуль): пикер моделей
+// пересекает каталог `devin models list` с реальным списком активного слота.
 export function readSlotModelOptions(slot) {
   const key = String(slot);
   const cached = slotModelOptions.get(key);
   if (cached) return cached;
   try {
-    const raw = fs.readFileSync(path.join(SLOT_MODELS_DIR, `devin-model-options-${slot}.json`), 'utf8');
+    const raw = fs.readFileSync(slotModelsFile(slot), 'utf8');
     const values = JSON.parse(raw);
     if (Array.isArray(values) && values.length) {
       const set = new Set(values.map(String));
