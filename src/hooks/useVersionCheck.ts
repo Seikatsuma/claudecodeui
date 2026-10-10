@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { version } from '../../package.json';
 import { ReleaseInfo } from '../shared/types';
-import { UPDATE_PENDING_EVENT, hasPendingUpdate } from '../lib/appUpdate';
+import { UPDATE_PENDING_EVENT, UPDATE_CLEAR_EVENT, hasPendingUpdate } from '../lib/appUpdate';
 
 export type InstallMode = 'git' | 'npm';
 
@@ -69,8 +69,13 @@ export const useVersionCheck = () => {
 
   useEffect(() => {
     const onPending = () => setUpdateAvailable(true);
+    const onClear = () => setUpdateAvailable(false);
     window.addEventListener(UPDATE_PENDING_EVENT, onPending);
-    return () => window.removeEventListener(UPDATE_PENDING_EVENT, onPending);
+    window.addEventListener(UPDATE_CLEAR_EVENT, onClear);
+    return () => {
+      window.removeEventListener(UPDATE_PENDING_EVENT, onPending);
+      window.removeEventListener(UPDATE_CLEAR_EVENT, onClear);
+    };
   }, []);
 
   // Upstream release-check deliberately removed. It fetched

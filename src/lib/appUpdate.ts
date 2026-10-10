@@ -51,6 +51,9 @@ const PENDING_BUNDLE_KEY = 'app-update-pending-bundle';
 /** Событие «на сервере есть сборка новее загруженной» — слушает сайдбар. */
 export const UPDATE_PENDING_EVENT = 'app:update-pending';
 
+/** Событие «ожидание отработало, плашку убрать» — слушает сайдбар. */
+export const UPDATE_CLEAR_EVENT = 'app:update-clear';
+
 function currentBundleName(): string | null {
   const script = document.querySelector<HTMLScriptElement>('script[src*="/assets/index-"]');
   return script ? (script.getAttribute('src') ?? '').split('/').pop() ?? null : null;
@@ -99,7 +102,18 @@ function markUpdatePending(bundle: string): void {
 /** Есть ли уже помеченная сборка — начальное состояние плашки в сайдбаре. */
 export function hasPendingUpdate(): boolean {
   try {
-    return sessionStorage.getItem(PENDING_BUNDLE_KEY) !== null;
+    const pending = sessionStorage.getItem(PENDING_BUNDLE_KEY);
+    if (!pending) {
+      return false;
+    }
+    if (pending === currentBundleName() || pending === 'service-worker') {
+      // Ожидание отработало: помеченная сборка — это уже загруженная (страница
+      // перезагрузилась на неё из фона или по нажатию плашки), а метка воркера
+      // сгорает при первой же новой загрузке.
+      sessionStorage.removeItem(PENDING_BUNDLE_KEY);
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -120,12 +134,19 @@ export async function ensureLatestBuild(deferWhenVisible = false): Promise<void>
     const match = html.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/);
     if (!match || match[1] === running) {
       // Загруженная сборка совпала с серверной — ожидание отработало (страница
-      // перезагрузилась из фона или по нажатию плашки): флаг снимаем, иначе
-      // плашка висела бы и на свежей версии.
+      // перезагрузилась из фона или по нажатию плашки): флаг снимаем и просим
+      // плашку спрятаться, иначе она висела бы на свежей версии до следующей
+      // загрузки. Флаг мог быть и о сборке, которую уже сменила более новая.
+      let hadPending = false;
       try {
+        hadPending = sessionStorage.getItem(PENDING_BUNDLE_KEY) !== null;
         sessionStorage.removeItem(PENDING_BUNDLE_KEY);
       } catch {
         // Без хранилища снимать нечего.
+      }
+      if (hadPending) {
+        pendingNotified = false;
+        window.dispatchEvent(new CustomEvent(UPDATE_CLEAR_EVENT));
       }
       return;
     }
