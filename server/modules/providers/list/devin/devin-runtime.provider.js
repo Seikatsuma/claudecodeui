@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   appendFilesInputTag,
@@ -430,6 +433,56 @@ function answerPermissionRequest(request, devinMode, ws, sessionId, run, connect
 }
 
 /**
+ * Сохраняет в ход значения опции `model` из configOptions сессии (ответ
+ * session/new / session/load или событие config_option_update). Это список
+ * реально доступных аккаунту моделей — он уже каталога CLI.
+ */
+function noteConfigOptions(run, configOptions) {
+  if (!Array.isArray(configOptions)) return;
+  const model = configOptions.find((o) => o && o.id === 'model');
+  if (!model) return;
+  const values = (model.options || []).map((o) => String(o?.value || '')).filter(Boolean);
+  if (values.length) run.modelOptions = new Set(values);
+  if (typeof model.currentValue === 'string' && model.currentValue) run.modelCurrent = model.currentValue;
+  rememberSlotModelOptions(run.slot, run.modelOptions);
+}
+
+/**
+ * Реальный список моделей активного слота — для пикера выбора модели
+ * (devin-models.provider.ts пересекает с ним каталог CLI). Живёт в памяти
+ * процесса и в файле, чтобы пережить перезапуск сервера.
+ */
+const slotModelOptions = new Map(); // slot -> Set<string>
+const SLOT_MODELS_DIR = path.join(os.homedir(), '.cloudcli-shared');
+
+function rememberSlotModelOptions(slot, options) {
+  if (!(options instanceof Set) || options.size === 0 || slot == null) return;
+  slotModelOptions.set(String(slot), options);
+  try {
+    fs.writeFileSync(
+      path.join(SLOT_MODELS_DIR, `devin-model-options-${slot}.json`),
+      JSON.stringify([...options]),
+    );
+  } catch { /* список останется в памяти процесса — некритично */ }
+}
+
+export function readSlotModelOptions(slot) {
+  const key = String(slot);
+  const cached = slotModelOptions.get(key);
+  if (cached) return cached;
+  try {
+    const raw = fs.readFileSync(path.join(SLOT_MODELS_DIR, `devin-model-options-${slot}.json`), 'utf8');
+    const values = JSON.parse(raw);
+    if (Array.isArray(values) && values.length) {
+      const set = new Set(values.map(String));
+      slotModelOptions.set(key, set);
+      return set;
+    }
+  } catch { /* файла ещё нет — до первой сессии список неизвестен */ }
+  return null;
+}
+
+/**
  * Runs one Devin turn over ACP.
  *
  * Devin's `acp` mode speaks JSON-RPC over stdio and handles one session at a
@@ -485,6 +538,16 @@ async function queryDevin(command, options = {}, ws, context) {
     usageTimer: null,
     lastEmittedUsage: null,
     resolvedModel: null,
+    // Значения опции 'model' из configOptions сессии (Set<string>) и её
+    // currentValue. Каталог `devin models list` шире: он знает модели, которых
+    // у аккаунта слота нет (слот 2: нет swe-2-medium/max, 10.10.26) — выбор их
+    // в пикере кончался «Invalid params» на каждом ходу и тихой работой на
+    // другой модели. null = список ещё не прислали (старый CLI) — тогда
+    // set_config_option шлём вслепую, как раньше.
+    modelOptions: null,
+    modelCurrent: null,
+    modelSetFailed: new Set(),
+    modelDowngradeNotified: false,
   };
   const sessionKey = sessionId || providerSessionId;
   run.sessionKey = sessionKey;
@@ -732,6 +795,12 @@ async function queryDevin(command, options = {}, ws, context) {
           return; // _cognition.ai/* and other control traffic: ignore
         }
         const params = msg.params || {};
+        const update = params.update || {};
+        // Список доступных аккаунту моделей приходит и событием (после
+        // session/set_config_option, смены слота) — держим его свежим.
+        if (update.sessionUpdate === 'config_option_update') {
+          noteConfigOptions(run, update.configOptions);
+        }
         if (run.muted) {
           return; // session/load replays history — never leak it as live deltas
         }
@@ -797,12 +866,13 @@ async function queryDevin(command, options = {}, ws, context) {
       if (providerSessionId) {
         run.muted = true;
         try {
-          await connection.call('session/load', {
+          const loadResult = await connection.call('session/load', {
             sessionId: providerSessionId,
             cwd: workingDirectory,
             mcpServers: [],
           }, HANDSHAKE_TIMEOUT_MS);
           loaded = true;
+          noteConfigOptions(run, loadResult?.configOptions);
         } catch (error) {
           // Беседы с таким номером у Devin нет — продолжать нечего, истории
           // тоже. Начинаем новую вместо ошибки (04.10.26: чат с ложным номером
@@ -823,6 +893,7 @@ async function queryDevin(command, options = {}, ws, context) {
           mcpServers: [],
         }, HANDSHAKE_TIMEOUT_MS);
 
+        noteConfigOptions(run, created?.configOptions);
         const newId = created?.sessionId;
         if (newId) {
           run.devinSessionId = newId;
@@ -857,14 +928,34 @@ async function queryDevin(command, options = {}, ws, context) {
       if (resolvedModel) {
         // `--model` only covers fresh sessions; a loaded session keeps its
         // stored model unless we set the config option explicitly.
-        try {
-          await connection.call('session/set_config_option', {
-            sessionId: run.devinSessionId,
-            configId: 'model',
-            value: resolvedModel,
-          }, HANDSHAKE_TIMEOUT_MS);
-        } catch (error) {
-          console.warn('[Devin] session/set_config_option model failed:', error.message);
+        // The option list is the account's truth: a model the picker offered
+        // but the slot doesn't have (swe-2-medium/max on slot 2) would fail
+        // with Invalid params on every turn and silently run the old model —
+        // so it's skipped and named honestly, once per run.
+        const knownUnavailable = run.modelOptions instanceof Set && !run.modelOptions.has(resolvedModel);
+        if (knownUnavailable || run.modelSetFailed.has(resolvedModel)) {
+          if (!run.modelDowngradeNotified) {
+            run.modelDowngradeNotified = true;
+            const effective = run.modelCurrent || DEVIN_DEFAULT_MODEL;
+            console.warn(`[Devin] model "${resolvedModel}" is not in this account's options — running ${effective}`);
+            sendMessage(ws, createNormalizedMessage({
+              provider: 'devin',
+              sessionId: sessionId || run.devinSessionId || null,
+              kind: 'error',
+              content: `Модель «${resolvedModel}» недоступна на активном аккаунте Devin — ход идёт на ${effective}.`,
+            }));
+          }
+        } else {
+          try {
+            await connection.call('session/set_config_option', {
+              sessionId: run.devinSessionId,
+              configId: 'model',
+              value: resolvedModel,
+            }, HANDSHAKE_TIMEOUT_MS);
+          } catch (error) {
+            run.modelSetFailed.add(resolvedModel);
+            console.warn('[Devin] session/set_config_option model failed:', error.message);
+          }
         }
       }
 

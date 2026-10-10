@@ -20,6 +20,8 @@ import {
   isAllowedDevinModel,
 } from '@/shared/utils.js';
 import { openDevinDatabase } from '@/modules/providers/list/devin/devin-sessions.provider.js';
+import { readSlotModelOptions } from '@/modules/providers/list/devin/devin-runtime.provider.js';
+import { getActiveDevinSlot } from '@/shared/devin-slots.js';
 
 const PROVIDER = 'devin' as const;
 
@@ -147,13 +149,22 @@ export class DevinModelsProvider implements IProviderModels {
 
     // Only SWE-2 is allowed by the owner; the rest of the Devin catalog stays hidden.
     const allowed = (models ?? []).filter((option) => isAllowedDevinModel(option.value));
-    const options = allowed.length > 0 ? allowed : FALLBACK_MODELS;
+    // The CLI catalog is wider than the account's real list (slot 2 has no
+    // swe-2-medium/max — set_config_option answered Invalid params on every
+    // turn, 10.10.26). Once any session reported its configOptions, the picker
+    // shows only the intersection; before that the full SWE-2 list stands.
+    const slotOptions = readSlotModelOptions(getActiveDevinSlot());
+    const intersected = slotOptions
+      ? allowed.filter((option) => slotOptions.has(option.value))
+      : allowed;
+    const options = intersected.length > 0 ? intersected : (slotOptions ? FALLBACK_MODELS.filter((o) => slotOptions.has(o.value)) : FALLBACK_MODELS);
+    const finalOptions = options.length > 0 ? options : FALLBACK_MODELS;
     const configuredDefault = readConfiguredDefaultModel();
-    const defaultModel = configuredDefault && options.some((option) => option.value === configuredDefault)
+    const defaultModel = configuredDefault && finalOptions.some((option) => option.value === configuredDefault)
       ? configuredDefault
       : DEFAULT_MODEL;
 
-    return { OPTIONS: options, DEFAULT: defaultModel };
+    return { OPTIONS: finalOptions, DEFAULT: defaultModel };
   }
 
   /**

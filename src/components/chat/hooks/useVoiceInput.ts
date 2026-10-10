@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { authenticatedFetch } from '../../../utils/api';
 import { transcribeVoice } from '../../../lib/voiceApi';
 import {
   flushOutbox,
@@ -63,7 +64,27 @@ function lostTranscriptMessage(): string {
 /** Кусок звука уходит на диск телефона каждые 3 с: погас экран или убило вкладку - записано всё до этого момента. */
 const CHUNK_MS = 3000;
 
+/**
+ * iOS глушит микрофон, когда приложение уходит в фон (вкладка, свайп домой,
+ * звонок), а MediaRecorder при этом молчит - куски просто не приходят. Снаружи
+ * это выглядело как «надиктовал минуту - записалась последняя секунда»
+ * (Егор 10.10.26). Если кусков нет дольше этого срока, считаем захват
+ * приостановленным: показываем паузу на кнопке и считаем потерянное время.
+ * Порог выше CHUNK_MS с запасом на очередь обработчиков.
+ */
+const MIC_SILENCE_MS = 5000;
+
 const SAVED_OFFLINE_MESSAGE = 'Нет связи. Запись сохранена на телефоне и отправится сама, когда сеть появится.';
+
+/** Одна строка в журнал службы об исходе каждой диктовки ([voice-probe]). */
+function reportVoiceProbe(entry: Record<string, string | number | boolean>) {
+  void authenticatedFetch('/api/user/voice-probe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry),
+    keepalive: true,
+  }).catch(() => undefined);
+}
 
 type WakeLockSentinelLike = { release: () => Promise<void> };
 
@@ -87,6 +108,9 @@ export function useVoiceInput(
   onError?: (msg: string) => void,
 ) {
   const [state, setState] = useState<VoiceInputState>('idle');
+  // Захват приостановлен системой (iOS глушит микрофон в фоне): запись «идёт»,
+  // а звук не пишется. Кнопка показывает это отдельно от самой записи.
+  const [micPaused, setMicPaused] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -96,6 +120,14 @@ export function useVoiceInput(
   const sendRef = useRef(false);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const recordingIdRef = useRef<string | null>(null);
+  // Диагностика записи: когда началась, когда последний раз приходил кусок
+  // звука и сколько всего времени захват простаивал (паузы iOS суммируются).
+  const startedAtRef = useRef(0);
+  const lastChunkAtRef = useRef(0);
+  const chunkCountRef = useRef(0);
+  const pausedMsRef = useRef(0);
+  const pauseSinceRef = useRef<number | null>(null);
+  const silenceWatchRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const releaseScreen = () => {
     const lock = wakeLockRef.current;
@@ -123,6 +155,10 @@ export function useVoiceInput(
     return () => {
       document.removeEventListener('visibilitychange', reacquire);
       releaseScreen();
+      if (silenceWatchRef.current) {
+        clearInterval(silenceWatchRef.current);
+        silenceWatchRef.current = null;
+      }
       cancelledRef.current = true;
       startingRef.current = false;
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -152,11 +188,25 @@ export function useVoiceInput(
       recordingIdRef.current = recId;
       markRecordingActive(recId);
       let seq = 0;
+      startedAtRef.current = Date.now();
+      lastChunkAtRef.current = Date.now();
+      chunkCountRef.current = 0;
+      pausedMsRef.current = 0;
+      pauseSinceRef.current = null;
+      setMicPaused(false);
 
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
           void saveChunk(recId, seq++, e.data);
+          chunkCountRef.current += 1;
+          // Пауза кончилась: досчитываем её в потерянное время и снимаем флаг.
+          if (pauseSinceRef.current !== null) {
+            pausedMsRef.current += Date.now() - pauseSinceRef.current;
+            pauseSinceRef.current = null;
+          }
+          lastChunkAtRef.current = Date.now();
+          setMicPaused(false);
         }
       };
 
@@ -164,19 +214,41 @@ export function useVoiceInput(
         stopTracks();
         releaseScreen();
         markRecordingActive(null);
+        if (silenceWatchRef.current) {
+          clearInterval(silenceWatchRef.current);
+          silenceWatchRef.current = null;
+        }
+        // Запись кончилась в паузе - досчитываем её в потерянное время.
+        if (pauseSinceRef.current !== null) {
+          pausedMsRef.current += Date.now() - pauseSinceRef.current;
+          pauseSinceRef.current = null;
+        }
+        setMicPaused(false);
         const type = rec.mimeType || 'audio/webm';
         const blob = new Blob(chunksRef.current, { type });
+        const durMs = Date.now() - startedAtRef.current;
+        const lostMs = pausedMsRef.current;
         // Запись попадает в очередь на телефоне ДО отправки: пока сервер не принял, она не пропадёт.
         const pendingId = await sealRecording(recId, type, chunksRef.current);
         if (cancelledRef.current) {
           // Экран ушёл с записи (смена чата, закрытие): ждать ответа некому, очередь дошлёт сама.
           if (pendingId) void flushOutbox();
+          reportVoiceProbe({ outcome: 'cancelled', durMs, chunks: chunkCountRef.current, bytes: blob.size, lostMs, mime: type });
           return;
         }
         if (blob.size < 800) {
           sendRef.current = false;
           setState('idle');
-          onError?.('Recording too short');
+          // «Короткая» запись после минуты диктовки - это не человек помолчал,
+          // а iOS приглушил микрофон (экран погас, приложение свёрнуто): куски
+          // просто не приходили. Говорим честно, иначе ошибка сбивает с толку.
+          const outcome = durMs > 4000 ? 'empty-mic-paused' : 'too-short';
+          reportVoiceProbe({ outcome, durMs, chunks: chunkCountRef.current, bytes: blob.size, lostMs, mime: type });
+          onError?.(
+            durMs > 4000
+              ? 'Записи нет: iPhone остановил микрофон — держите приложение открытым, пока диктуете.'
+              : 'Recording too short',
+          );
           return;
         }
         if (pendingId) uploadingNow.add(pendingId);
@@ -204,14 +276,22 @@ export function useVoiceInput(
           // transcript is still on its way (requestSend) must count too.
           const shouldSend = sendRef.current;
           sendRef.current = false;
+          reportVoiceProbe({ outcome: text ? 'sent' : 'no-speech', durMs, chunks: chunkCountRef.current, bytes: blob.size, lostMs, mime: type });
           if (text) onTranscript(text, shouldSend);
           else onError?.('No speech detected');
+          // Часть диктовки iOS проглотил - текст пришёл урезанным. Говорим об
+          // этом после вставки текста: он уже в поле, предупреждение объясняет
+          // обрыв посередине мысли.
+          if (lostMs > MIC_SILENCE_MS) {
+            onError?.(`Часть записи пропала (~${Math.round(lostMs / 1000)} с): iPhone глушил микрофон в фоне.`);
+          }
         } catch (e) {
           if (!cancelledRef.current) {
             // Причина — в консоль: на экране она ничего не объясняет, а при
             // разборе показывает, оборвалось соединение или ответил сервер.
             console.warn('[voice] transcription did not come back', e);
             if (!keptInQueue && pendingId) await removePending(pendingId);
+            reportVoiceProbe({ outcome: keptInQueue ? 'queued' : 'failed', durMs, chunks: chunkCountRef.current, bytes: blob.size, lostMs, mime: type });
             onError?.(keptInQueue && pendingId ? SAVED_OFFLINE_MESSAGE : lostTranscriptMessage());
           }
         } finally {
@@ -224,6 +304,17 @@ export function useVoiceInput(
 
       rec.start(CHUNK_MS);
       setState('recording');
+      // Сторож тишины: iOS в фоне глушит захват и куски перестают приходить.
+      // Страницу при этом могут заморозить целиком - тогда проверка сработает
+      // при возврате и покажет паузу задним числом.
+      silenceWatchRef.current = setInterval(() => {
+        if (recorderRef.current?.state !== 'recording') return;
+        const silentMs = Date.now() - lastChunkAtRef.current;
+        if (silentMs > MIC_SILENCE_MS) {
+          if (pauseSinceRef.current === null) pauseSinceRef.current = lastChunkAtRef.current;
+          setMicPaused(true);
+        }
+      }, 1000);
       void holdScreenAwake().then((lock) => {
         if (!lock) return;
         if (recorderRef.current?.state === 'recording') wakeLockRef.current = lock;
@@ -266,5 +357,5 @@ export function useVoiceInput(
     else if (state === 'idle') start();
   }, [state, start, stop]);
 
-  return { state, toggle, stop, requestSend };
+  return { state, toggle, stop, requestSend, micPaused };
 }

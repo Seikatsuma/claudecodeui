@@ -11,6 +11,8 @@ type Props = {
   // Enter while the button itself has keyboard focus. Must never start a recording.
   onEnter: () => void;
   errorMsg?: string | null;
+  // iOS приостановила захват (приложение в фоне): запись «идёт», звук не пишется.
+  micPaused?: boolean;
 };
 
 // Push-to-talk mic button (presentational). Recording state and the stop-and-send action
@@ -21,7 +23,7 @@ type Props = {
 // this button, so the Enter pressed afterwards to send the message "clicked" it again and
 // started a new recording. Now a mouse press keeps focus where it was (the text box), and
 // Enter on the button is routed to the composer instead of the browser's click.
-export default function VoiceInputButton({ state, onToggle, onEnter, errorMsg }: Props) {
+export default function VoiceInputButton({ state, onToggle, onEnter, errorMsg, micPaused }: Props) {
   const { t } = useTranslation('chat');
 
   const icon =
@@ -38,6 +40,11 @@ export default function VoiceInputButton({ state, onToggle, onEnter, errorMsg }:
       {errorMsg && (
         <span className="absolute bottom-full left-1/2 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-red-600 px-2 py-1 text-xs text-white shadow-lg">
           {errorMsg}
+        </span>
+      )}
+      {!errorMsg && micPaused && state === 'recording' && (
+        <span className="absolute bottom-full left-1/2 mb-1 -translate-x-1/2 whitespace-nowrap rounded bg-amber-600 px-2 py-1 text-xs text-white shadow-lg">
+          {t('voice.micPaused')}
         </span>
       )}
       <PromptInputButton

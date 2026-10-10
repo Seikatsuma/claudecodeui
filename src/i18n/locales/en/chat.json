@@ -114,6 +114,7 @@
   "voice": {
     "input": "Voice input",
     "stopRecording": "Stop recording",
+    "micPaused": "Mic paused — keep the app open",
     "transcribing": "Transcribing…",
     "speak": "Read aloud",
     "stopSpeaking": "Stop",

@@ -104,6 +104,24 @@ export function createUserRouter(service: ReturnType<typeof createUserService>):
     res.json({ ok: true });
   });
 
+  // Итог каждой диктовки с телефона — только в журнал службы (`[voice-probe]`).
+  // 10.10.26: Егор надиктовал сообщение, а в Telegram и в поле пришла «последняя
+  // секунда» — запись молча выбросилась как «короткая». Было видно только её
+  // рассказ: сколько кусков отдал MediaRecorder, сколько записи iPhone
+  // приглушил в фоне — никто не мерил. Теперь клиент шлёт длительность, число
+  // кусков, байты и суммарную паузу захвата по каждой записи, удачной и нет.
+  router.post('/voice-probe', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const fields: Record<string, number | boolean | string> = {};
+    for (const [key, value] of Object.entries(body).slice(0, 20)) {
+      if (typeof value === 'number' && Number.isFinite(value)) fields[key] = Math.round(value);
+      else if (typeof value === 'boolean') fields[key] = value;
+      else if (typeof value === 'string') fields[key] = value.slice(0, 80);
+    }
+    console.log(`[voice-probe] user=${readUserId(req)} ${JSON.stringify(fields)}`);
+    res.json({ ok: true });
+  });
+
   router.get('/usage-limits', async (req, res, next) => {
     try {
       res.json(await service.getUsageLimits(readUserId(req)));

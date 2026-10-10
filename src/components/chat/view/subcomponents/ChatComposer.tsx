@@ -261,7 +261,7 @@ export default function ChatComposer({
     if (voiceErrorTimer.current) clearTimeout(voiceErrorTimer.current);
   }, []);
   const noopTranscript = useCallback(() => {}, []);
-  const { state: voiceState, toggle: voiceToggle, stop: voiceStop, requestSend: voiceRequestSend } = useVoiceInput(
+  const { state: voiceState, toggle: voiceToggle, stop: voiceStop, requestSend: voiceRequestSend, micPaused: voiceMicPaused } = useVoiceInput(
     onVoiceTranscript ?? noopTranscript,
     handleVoiceError,
   );
@@ -549,6 +549,7 @@ export default function ChatComposer({
             {onVoiceTranscript && voiceAvailable && (
               <VoiceInputButton
                 state={voiceState}
+                micPaused={voiceMicPaused}
                 onToggle={handleVoiceToggle}
                 onEnter={handleVoiceSendKey}
                 errorMsg={voiceError}

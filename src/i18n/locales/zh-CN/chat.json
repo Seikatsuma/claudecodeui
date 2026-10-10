@@ -107,6 +107,7 @@
   "voice": {
     "input": "语音输入",
     "stopRecording": "停止录音",
+    "micPaused": "麦克风已暂停——请保持应用在前台",
     "transcribing": "转写中…",
     "speak": "朗读",
     "stopSpeaking": "停止",
