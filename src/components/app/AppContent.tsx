@@ -311,16 +311,16 @@ function AppContentInner() {
   });
 
   // Открытая страница не должна оставаться на старой сборке (см. appUpdate).
+  // Проверка бежит и на уход в фон, и на возврат: скрытую страницу новая
+  // сборка перезагружает сама, видимую — только помечает плашкой.
   useEffect(() => {
     watchServiceWorkerUpdates();
     void ensureLatestBuild();
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void ensureLatestBuild();
-      }
+    const onVisibilityChange = () => {
+      void ensureLatestBuild(true);
     };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, []);
 
   // Пока вкладка/приложение в фоне (свёрнут телефон, PWA в спящем режиме),

@@ -323,7 +323,7 @@ function Sidebar({
           onShowSettings={onShowSettings}
           updateAvailable={updateAvailable}
           restartRequired={restartRequired}
-          onShowVersionModal={() => setShowVersionModal(true)}
+          onApplyUpdate={() => window.location.reload()}
           t={t}
         />
       ) : (
@@ -414,7 +414,7 @@ function Sidebar({
             accountLabel={accountLabel}
             switchAccountUrl={switchAccountUrl}
             accountEmail={accountEmail}
-            onShowVersionModal={() => setShowVersionModal(true)}
+            onApplyUpdate={() => window.location.reload()}
             onShowSettings={onShowSettings}
             projectListProps={projectListProps}
             t={t}

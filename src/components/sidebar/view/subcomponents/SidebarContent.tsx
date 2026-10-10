@@ -139,7 +139,7 @@ type SidebarContentProps = {
   accountLabel: string | null;
   switchAccountUrl: string | null;
   accountEmail: string | null;
-  onShowVersionModal: () => void;
+  onApplyUpdate: () => void;
   onShowSettings: () => void;
   projectListProps: SidebarProjectListProps;
   t: TFunction;
@@ -192,7 +192,7 @@ export default function SidebarContent({
   accountLabel,
   switchAccountUrl,
   accountEmail,
-  onShowVersionModal,
+  onApplyUpdate,
   onShowSettings,
   projectListProps,
   t,
@@ -690,7 +690,7 @@ export default function SidebarContent({
           accountLabel={accountLabel}
           switchAccountUrl={switchAccountUrl}
           accountEmail={accountEmail}
-          onShowVersionModal={onShowVersionModal}
+          onApplyUpdate={onApplyUpdate}
           onShowSettings={onShowSettings}
           t={t}
         />

@@ -6,7 +6,7 @@ type SidebarCollapsedProps = {
   onShowSettings: () => void;
   updateAvailable: boolean;
   restartRequired: boolean;
-  onShowVersionModal: () => void;
+  onApplyUpdate: () => void;
   t: TFunction;
 };
 
@@ -15,7 +15,7 @@ export default function SidebarCollapsed({
   onShowSettings,
   updateAvailable,
   restartRequired,
-  onShowVersionModal,
+  onApplyUpdate,
   t,
 }: SidebarCollapsedProps) {
   return (
@@ -57,7 +57,7 @@ export default function SidebarCollapsed({
       {/* Update indicator */}
       {updateAvailable && (
         <button
-          onClick={onShowVersionModal}
+          onClick={onApplyUpdate}
           className="relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-accent/80"
           aria-label={t('common:versionUpdate.ariaLabels.updateAvailable')}
           title={t('common:versionUpdate.ariaLabels.updateAvailable')}
